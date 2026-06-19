@@ -1,24 +1,60 @@
 <?php
-// ============================================================
-// pages/dashboard_head.php
-// Placeholder — Phase 6 will replace this with the real dashboard
-// ============================================================
 require_once __DIR__ . '/../includes/session.php';
-requireRole([ROLE_HEAD_MANAGEMENT]);  // Only Head Management can access
+require_once __DIR__ . '/../includes/layout.php';
+requireRole([ROLE_HEAD_MANAGEMENT]);
+
+$pageTitle = 'Dashboard';
+layoutHead($pageTitle);
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Dashboard — Head Management</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-</head>
-<body class="bg-light p-4">
-  <div class="container">
-    <h2>Welcome, <?= htmlspecialchars($_SESSION['full_name']) ?>!</h2>
-    <p class="text-muted">Role: <?= htmlspecialchars($_SESSION['role_name']) ?></p>
-    <p>✅ Auth is working. This page will be replaced in Phase 6.</p>
-    <a href="../auth/login_handler.php?action=logout" class="btn btn-danger">Log Out</a>
+
+<div class="page-header">
+  <h1 class="page-title">Dashboard</h1>
+  <p class="page-subtitle">Welcome back, <?= htmlspecialchars($_SESSION['full_name']) ?> — here's what's happening today.</p>
+</div>
+
+<!-- Stat cards placeholder — Phase 6 fills these with real data -->
+<div class="row g-3 mb-4">
+  <div class="col-sm-6 col-xl-3">
+    <div class="stat-card">
+      <div class="stat-icon amber"><i class="bi bi-truck"></i></div>
+      <div class="stat-info">
+        <div class="stat-value">—</div>
+        <div class="stat-label">Total Trucks</div>
+      </div>
+    </div>
   </div>
-</body>
-</html>
+  <div class="col-sm-6 col-xl-3">
+    <div class="stat-card">
+      <div class="stat-icon green"><i class="bi bi-check-circle"></i></div>
+      <div class="stat-info">
+        <div class="stat-value">—</div>
+        <div class="stat-label">Available</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="stat-card">
+      <div class="stat-icon blue"><i class="bi bi-map"></i></div>
+      <div class="stat-info">
+        <div class="stat-value">—</div>
+        <div class="stat-label">Active Trips</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="stat-card">
+      <div class="stat-icon red"><i class="bi bi-tools"></i></div>
+      <div class="stat-info">
+        <div class="stat-value">—</div>
+        <div class="stat-label">Under Maintenance</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card p-4 text-center text-muted">
+  <i class="bi bi-bar-chart-line" style="font-size:2.5rem; opacity:.3;"></i>
+  <p class="mt-2 mb-0">Full analytics coming in Phase 6 (Executive Dashboard).</p>
+</div>
+
+<?php layoutFoot(); ?>

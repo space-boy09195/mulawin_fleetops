@@ -82,7 +82,9 @@ function buildSidebarNav(): string {
 // Outputs everything from <!DOCTYPE> through the opening
 // <main class="page-content"> tag
 // ============================================================
-function layoutHead(string $pageTitle = 'Mulawin FleetOps'): void {
+// $extraCss : path to a page-specific CSS file e.g. APP_BASE.'/assets/css/fleet_status.css'
+// $extraJs  : path to a page-specific JS  file e.g. APP_BASE.'/assets/js/fleet_status.js'
+function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '', string $extraJs = ''): void {
     $fullTitle   = htmlspecialchars($pageTitle . ' — Mulawin FleetOps');
     $navHtml     = buildSidebarNav();
     $initials    = userInitials();
@@ -90,6 +92,8 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps'): void {
     $roleName    = htmlspecialchars($_SESSION['role_name'] ?? '');
     $logoutUrl   = htmlspecialchars(APP_BASE . '/auth/login_handler.php?action=logout');
     $base        = APP_BASE;
+    $cssTag      = $extraCss ? "<link rel=\"stylesheet\" href=\"{$extraCss}\">" : '';
+    $jsVar       = $extraJs  ? "<script>window.APP_BASE=\"{$base}\";window.PAGE_JS=\"{$extraJs}\";</script>" : '';
 
     echo <<<HTML
 <!DOCTYPE html>
@@ -101,6 +105,8 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps'): void {
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
   <link rel="stylesheet" href="{$base}/assets/css/layout.css">
+  {$cssTag}
+  {$jsVar}
   <script>
     (function(){
       var t = localStorage.getItem('mulawin_theme');
@@ -178,7 +184,11 @@ HTML;
 // Closes <main>, <div class="main-wrapper">, app-shell, body, html
 // ============================================================
 function layoutFoot(): void {
-    $base = APP_BASE;
+    $base        = APP_BASE;
+    $extraScript = '';
+    if (!empty($GLOBALS['page_js'])) {
+        $extraScript = '<script src="' . $GLOBALS['page_js'] . '"></script>';
+    }
     echo <<<HTML
 
     </main>
@@ -187,6 +197,7 @@ function layoutFoot(): void {
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="{$base}/assets/js/layout.js"></script>
+{$extraScript}
 </body>
 </html>
 HTML;

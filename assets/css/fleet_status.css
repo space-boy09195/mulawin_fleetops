@@ -1,0 +1,77 @@
+/* ============================================================
+   assets/css/fleet_status.css
+   Styles specific to pages/fleet_status.php
+   General layout styles live in layout.css
+   ============================================================ */
+
+/* ---- Filter buttons -------------------------------------- */
+.filter-btn {
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.filter-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.filter-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+/* ---- Table tweaks for fleet page ------------------------- */
+#fleetTable tbody tr {
+  transition: background-color 0.1s ease;
+}
+
+#fleetTable tbody tr.hidden-row {
+  display: none;
+}
+
+/* Plate number column */
+#fleetTable td:first-child {
+  font-size: 0.9rem;
+}
+
+/* ---- No results message ---------------------------------- */
+#noResults {
+  display: none;
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* ---- Row count label ------------------------------------- */
+#rowCount {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* ---- Modal dark mode fix --------------------------------- */
+[data-theme="dark"] .btn-close {
+  filter: invert(1);
+}
+
+[data-theme="dark"] .form-select {
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+  border-color: var(--card-border);
+}
+
+[data-theme="dark"] .form-control {
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+  border-color: var(--card-border);
+}

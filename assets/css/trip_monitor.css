@@ -1,0 +1,96 @@
+/* ============================================================
+   assets/css/trip_monitor.css
+   ============================================================ */
+
+/* ---- Late alert banner ----------------------------------- */
+.alert-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+  border-radius: var(--radius);
+  color: #991b1b;
+  font-size: 0.875rem;
+}
+
+[data-theme="dark"] .alert-banner {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+/* ---- Late row highlight ---------------------------------- */
+tr.row-late td {
+  background-color: rgba(239, 68, 68, 0.04);
+}
+
+[data-theme="dark"] tr.row-late td {
+  background-color: rgba(239, 68, 68, 0.08);
+}
+
+/* ---- Trip number ----------------------------------------- */
+.trip-number {
+  font-family: monospace;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+/* ---- Late pill badge ------------------------------------- */
+.late-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  background: #dc2626;
+  color: #fff;
+  border-radius: 10px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  vertical-align: middle;
+}
+
+/* ---- Late filter button ---------------------------------- */
+.filter-btn.late-filter {
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
+.filter-btn.late-filter:hover,
+.filter-btn.late-filter.active {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
+
+/* ---- Hidden rows (filter) -------------------------------- */
+tr.hidden-row { display: none; }
+
+/* ---- Dark mode form fixes -------------------------------- */
+[data-theme="dark"] .form-select,
+[data-theme="dark"] .form-control {
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+  border-color: var(--card-border);
+}
+
+[data-theme="dark"] .btn-close { filter: invert(1); }
+
+/* ---- Filter buttons (shared with fleet_status) ----------- */
+.filter-btn {
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.filter-btn:hover  { border-color: var(--accent); color: var(--accent); }
+.filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }

@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
+require_once __DIR__ . '/../config/database.php';
 
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE]);
 
@@ -8,41 +9,49 @@ $GLOBALS['page_js'] = APP_BASE . '/assets/js/incidents.js';
 
 layoutHead('Incidents', APP_BASE . '/assets/css/incidents.css');
 
-// Fetch all incidents joined with trip info
-require_once __DIR__ . '/../config/database.php';
 $pdo = getDBConnection();
 
+// ── All incidents with full context ──────────────────────────────────────────
 $sql = "
     SELECT
-        i.id,
+        i.incident_id,
         i.trip_id,
-        i.type,
+        i.incident_type,
         i.description,
-        i.status,
-        i.reported_at,
+        i.resolution_notes,
         i.resolved_at,
-        t.reference_no,
-        t.origin,
-        t.destination,
-        v.plate_number,
-        CONCAT(d.first_name, ' ', d.last_name) AS driver_name,
-        CONCAT(u.first_name, ' ', u.last_name) AS reported_by_name
+        i.reported_at,
+        t.trip_number,
+        r.origin,
+        r.destination,
+        tr.plate_number,
+        e.full_name      AS driver_name,
+        u.full_name      AS reported_by_name
     FROM incidents i
-    JOIN trips t ON i.trip_id = t.id
-    JOIN vehicles v ON t.vehicle_id = v.id
-    JOIN drivers d ON t.driver_id = d.id
-    JOIN users u ON i.reported_by = u.id
+    JOIN trips t              ON i.trip_id      = t.trip_id
+    JOIN dispatch_requests dr ON t.dispatch_id  = dr.dispatch_id
+    JOIN trucks tr            ON dr.truck_id    = tr.truck_id
+    JOIN employees e          ON dr.driver_id   = e.employee_id
+    JOIN routes r             ON dr.route_id    = r.route_id
+    JOIN users u              ON i.reported_by  = u.user_id
     ORDER BY i.reported_at DESC
 ";
 $incidents = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
-// Fetch active/in-progress trips for the log form dropdown
+// ── Active trips for the log form dropdown ───────────────────────────────────
 $tripsSql = "
-    SELECT t.id, t.reference_no, t.origin, t.destination, v.plate_number
+    SELECT
+        t.trip_id,
+        t.trip_number,
+        r.origin,
+        r.destination,
+        tr.plate_number
     FROM trips t
-    JOIN vehicles v ON t.vehicle_id = v.id
-    WHERE t.status IN ('approved', 'in_progress')
-    ORDER BY t.reference_no
+    JOIN dispatch_requests dr ON t.dispatch_id = dr.dispatch_id
+    JOIN trucks tr            ON dr.truck_id   = tr.truck_id
+    JOIN routes r             ON dr.route_id   = r.route_id
+    WHERE t.status NOT IN ('Completed', 'Cancelled')
+    ORDER BY t.trip_number
 ";
 $activeTrips = $pdo->query($tripsSql)->fetchAll(PDO::FETCH_ASSOC);
 
@@ -77,7 +86,8 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
       <option value="open">Open</option>
       <option value="resolved">Resolved</option>
     </select>
-    <input type="search" id="filterSearch" class="form-control inc-filter-search" placeholder="Search trip ref, vehicle, driver…">
+    <input type="search" id="filterSearch" class="form-control inc-filter-search"
+           placeholder="Search trip no., vehicle, driver…">
   </div>
 
   <!-- Incidents table -->
@@ -91,7 +101,7 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
     <table class="table inc-table" id="incidentsTable">
       <thead>
         <tr>
-          <th>Trip Ref</th>
+          <th>Trip No.</th>
           <th>Vehicle</th>
           <th>Route</th>
           <th>Type</th>
@@ -103,49 +113,57 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
         </tr>
       </thead>
       <tbody>
-        <?php foreach ($incidents as $inc): ?>
+        <?php foreach ($incidents as $inc):
+          $isResolved = !empty($inc['resolved_at']);
+          $status     = $isResolved ? 'resolved' : 'open';
+        ?>
         <tr
-          data-id="<?= $inc['id'] ?>"
-          data-type="<?= htmlspecialchars($inc['type']) ?>"
-          data-status="<?= htmlspecialchars($inc['status']) ?>"
+          data-id="<?= $inc['incident_id'] ?>"
+          data-type="<?= htmlspecialchars($inc['incident_type']) ?>"
+          data-status="<?= $status ?>"
           data-search="<?= htmlspecialchars(strtolower(
-            $inc['reference_no'] . ' ' . $inc['plate_number'] . ' ' . $inc['driver_name']
+            $inc['trip_number'] . ' ' . $inc['plate_number'] . ' ' . $inc['driver_name']
           )) ?>"
         >
-          <td><span class="inc-ref"><?= htmlspecialchars($inc['reference_no']) ?></span></td>
+          <td><span class="inc-ref"><?= htmlspecialchars($inc['trip_number']) ?></span></td>
           <td><?= htmlspecialchars($inc['plate_number']) ?></td>
           <td class="inc-route">
-            <span class="inc-route-from"><?= htmlspecialchars($inc['origin']) ?></span>
+            <span><?= htmlspecialchars($inc['origin']) ?></span>
             <i class="bi bi-arrow-right"></i>
-            <span class="inc-route-to"><?= htmlspecialchars($inc['destination']) ?></span>
+            <span><?= htmlspecialchars($inc['destination']) ?></span>
           </td>
           <td>
-            <span class="inc-type-badge inc-type-<?= strtolower(str_replace([' ', '_'], '-', $inc['type'])) ?>">
-              <?= htmlspecialchars($inc['type']) ?>
+            <span class="inc-type-badge inc-type-<?= strtolower(str_replace([' ', '_'], '-', $inc['incident_type'])) ?>">
+              <?= htmlspecialchars($inc['incident_type']) ?>
             </span>
           </td>
           <td class="inc-desc-cell">
             <span class="inc-desc-text" title="<?= htmlspecialchars($inc['description']) ?>">
               <?= htmlspecialchars($inc['description']) ?>
             </span>
+            <?php if ($isResolved && $inc['resolution_notes']): ?>
+            <span class="inc-resolution-note" title="Resolution: <?= htmlspecialchars($inc['resolution_notes']) ?>">
+              <i class="bi bi-check2-circle"></i> <?= htmlspecialchars($inc['resolution_notes']) ?>
+            </span>
+            <?php endif; ?>
           </td>
           <td>
-            <span class="inc-status-badge inc-status-<?= $inc['status'] ?>">
-              <?= ucfirst($inc['status']) ?>
+            <span class="inc-status-badge inc-status-<?= $status ?>">
+              <?= $isResolved ? 'Resolved' : 'Open' ?>
             </span>
           </td>
           <td class="inc-date"><?= date('M d, Y H:i', strtotime($inc['reported_at'])) ?></td>
           <td><?= htmlspecialchars($inc['reported_by_name']) ?></td>
           <td class="text-end">
-            <?php if ($inc['status'] === 'open' && in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE])): ?>
+            <?php if (!$isResolved && in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE])): ?>
             <button
               class="btn btn-sm btn-resolve"
-              data-id="<?= $inc['id'] ?>"
-              data-trip="<?= htmlspecialchars($inc['reference_no']) ?>">
+              data-id="<?= $inc['incident_id'] ?>"
+              data-trip="<?= htmlspecialchars($inc['trip_number']) ?>">
               Resolve
             </button>
-            <?php else: ?>
-            <span class="inc-resolved-at" title="Resolved <?= $inc['resolved_at'] ? date('M d, Y H:i', strtotime($inc['resolved_at'])) : '' ?>">
+            <?php elseif ($isResolved): ?>
+            <span class="inc-resolved-check" title="Resolved <?= date('M d, Y', strtotime($inc['resolved_at'])) ?>">
               <i class="bi bi-check-circle-fill text-success"></i>
             </span>
             <?php endif; ?>
@@ -176,8 +194,10 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
           <select class="form-select inc-input" id="tripSelect" required>
             <option value="">— Select active trip —</option>
             <?php foreach ($activeTrips as $trip): ?>
-            <option value="<?= $trip['id'] ?>">
-              <?= htmlspecialchars($trip['reference_no']) ?> | <?= htmlspecialchars($trip['plate_number']) ?> | <?= htmlspecialchars($trip['origin']) ?> → <?= htmlspecialchars($trip['destination']) ?>
+            <option value="<?= $trip['trip_id'] ?>">
+              <?= htmlspecialchars($trip['trip_number']) ?> |
+              <?= htmlspecialchars($trip['plate_number']) ?> |
+              <?= htmlspecialchars($trip['origin']) ?> → <?= htmlspecialchars($trip['destination']) ?>
             </option>
             <?php endforeach; ?>
           </select>
@@ -210,9 +230,9 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
   </div>
 </div>
 
-<!-- Resolve Confirmation Modal -->
+<!-- Resolve Modal -->
 <div class="modal fade" id="resolveModal" tabindex="-1" aria-labelledby="resolveModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-sm">
+  <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content inc-modal-content">
       <div class="modal-header inc-modal-header-resolve">
         <h5 class="modal-title" id="resolveModalLabel">
@@ -221,13 +241,21 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body inc-modal-body">
-        <p class="mb-0">Mark the incident for trip <strong id="resolveTripRef"></strong> as resolved?</p>
-        <div id="resolveAlert" class="alert d-none mt-3" role="alert"></div>
+        <div id="resolveAlert" class="alert d-none" role="alert"></div>
+        <p class="mb-3">
+          Resolving incident for trip <strong id="resolveTripRef"></strong>.
+          Add resolution notes below (optional).
+        </p>
+        <div class="mb-1">
+          <label class="form-label inc-label" for="resolutionNotes">Resolution Notes</label>
+          <textarea class="form-control inc-input" id="resolutionNotes" rows="3"
+            placeholder="What was done to resolve this incident?"></textarea>
+        </div>
       </div>
       <div class="modal-footer inc-modal-footer">
         <button type="button" class="btn btn-cancel" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-resolve-confirm" id="confirmResolveBtn">
-          <span id="resolveBtnText">Resolve</span>
+          <span id="resolveBtnText">Mark Resolved</span>
           <span id="resolveBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
         </button>
       </div>

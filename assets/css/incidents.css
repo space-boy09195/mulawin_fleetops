@@ -55,7 +55,7 @@
 /* ── Filters ─────────────────────────────────── */
 .inc-filter-select,
 .inc-filter-search {
-  max-width: 220px;
+  max-width: 200px;
   font-size: 0.85rem;
   border-radius: 8px;
   border-color: var(--bs-border-color);
@@ -64,7 +64,7 @@
 }
 
 .inc-filter-search {
-  max-width: 280px;
+  max-width: 270px;
 }
 
 /* ── Table wrapper ───────────────────────────── */
@@ -112,7 +112,7 @@
   display: none;
 }
 
-/* ── Trip reference ──────────────────────────── */
+/* ── Trip reference chip ─────────────────────── */
 .inc-ref {
   font-family: 'Courier New', monospace;
   font-size: 0.8rem;
@@ -126,33 +126,42 @@
 /* ── Route cell ──────────────────────────────── */
 .inc-route {
   white-space: nowrap;
-  color: var(--bs-secondary-color);
   font-size: 0.82rem;
 }
 
 .inc-route .bi-arrow-right {
   margin: 0 4px;
   font-size: 0.75rem;
+  color: var(--bs-secondary-color);
 }
 
-.inc-route-from,
-.inc-route-to {
-  color: var(--bs-body-color);
-}
-
-/* ── Description cell ────────────────────────── */
+/* ── Description + resolution note ──────────── */
 .inc-desc-cell {
   max-width: 240px;
 }
 
 .inc-desc-text {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
+  display: block;
   overflow: hidden;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;    
+  white-space: nowrap;
+  text-overflow: ellipsis;
   line-height: 1.4;
   cursor: default;
+}
+
+.inc-resolution-note {
+  display: block;
+  font-size: 0.75rem;
+  color: #198754;
+  margin-top: 3px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
+.inc-resolution-note .bi {
+  font-size: 0.75rem;
 }
 
 /* ── Date cell ───────────────────────────────── */
@@ -250,6 +259,10 @@
   color: #fff;
 }
 
+.inc-resolved-check {
+  font-size: 1rem;
+}
+
 /* ── Cancel button ───────────────────────────── */
 .btn-cancel {
   background: transparent;
@@ -290,7 +303,7 @@
   margin: 0;
 }
 
-/* ── Modal ───────────────────────────────────── */
+/* ── Modals ──────────────────────────────────── */
 .inc-modal-content {
   border: none;
   border-radius: 14px;
@@ -379,6 +392,6 @@ textarea.inc-input {
   }
 
   .inc-table {
-    min-width: 820px;
+    min-width: 780px;
   }
 }

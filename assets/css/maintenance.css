@@ -1,0 +1,570 @@
+/* ═══════════════════════════════════════════════
+   maintenance.css — Mulawin FleetOps
+   ═══════════════════════════════════════════════ */
+
+/* ── Page layout ─────────────────────────────── */
+.mnt-page {
+  padding: 1.75rem 2rem;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+/* ── Header ──────────────────────────────────── */
+.mnt-header {
+  border-bottom: 1px solid var(--bs-border-color);
+  padding-bottom: 1.1rem;
+}
+
+.mnt-title {
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--bs-emphasis-color);
+  letter-spacing: -0.01em;
+}
+
+.mnt-subtitle {
+  font-size: 0.85rem;
+  color: var(--bs-secondary-color);
+  margin-top: 2px;
+}
+
+/* ── Buttons ─────────────────────────────────── */
+.btn-mnt-primary {
+  background: #0d6efd;
+  border: none;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 0.5rem 1.1rem;
+  border-radius: 8px;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.btn-mnt-primary:hover,
+.btn-mnt-primary:focus {
+  background: #0b5ed7;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(13, 110, 253, 0.35);
+}
+
+.btn-mnt-secondary {
+  background: #6c757d;
+  border: none;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 0.5rem 1.1rem;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.btn-mnt-secondary:hover,
+.btn-mnt-secondary:focus {
+  background: #5c636a;
+  color: #fff;
+}
+
+.btn-mnt-cancel {
+  background: transparent;
+  border: 1.5px solid var(--bs-border-color);
+  color: var(--bs-secondary-color);
+  font-size: 0.875rem;
+  font-weight: 500;
+  padding: 0.45rem 1.1rem;
+  border-radius: 8px;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.btn-mnt-cancel:hover {
+  border-color: var(--bs-body-color);
+  color: var(--bs-body-color);
+}
+
+/* ── Tabs ────────────────────────────────────── */
+.mnt-tabs {
+  border-bottom: 2px solid var(--bs-border-color);
+  gap: 0.25rem;
+}
+
+.mnt-tab {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  padding: 0.55rem 1.1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--bs-secondary-color);
+  border-radius: 0;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mnt-tab:hover {
+  color: var(--bs-body-color);
+}
+
+.mnt-tab.active {
+  color: #0d6efd;
+  border-bottom-color: #0d6efd;
+}
+
+.mnt-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  font-size: 0.72rem;
+  font-weight: 700;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+}
+
+.mnt-tab.active .mnt-tab-count {
+  background: rgba(13, 110, 253, 0.12);
+  color: #0d6efd;
+}
+
+/* ── Filters ─────────────────────────────────── */
+.mnt-filter-select,
+.mnt-filter-search {
+  max-width: 200px;
+  font-size: 0.85rem;
+  border-radius: 8px;
+  border-color: var(--bs-border-color);
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+.mnt-filter-search {
+  max-width: 280px;
+}
+
+/* ── Table wrapper ───────────────────────────── */
+.mnt-table-wrap {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* ── Table ───────────────────────────────────── */
+.mnt-table {
+  margin-bottom: 0;
+  font-size: 0.85rem;
+}
+
+.mnt-table thead th {
+  background: var(--bs-tertiary-bg);
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--bs-secondary-color);
+  border-bottom: 1px solid var(--bs-border-color);
+  padding: 0.75rem 1rem;
+  white-space: nowrap;
+}
+
+.mnt-table tbody td {
+  padding: 0.8rem 1rem;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--bs-border-color);
+  color: var(--bs-body-color);
+}
+
+.mnt-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.mnt-table tbody tr:hover {
+  background: var(--bs-tertiary-bg);
+}
+
+.mnt-table tbody tr.mnt-row-hidden {
+  display: none;
+}
+
+/* ── Truck label ─────────────────────────────── */
+.mnt-truck-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mnt-plate {
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: var(--bs-secondary-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.mnt-truck-model {
+  font-size: 0.78rem;
+  color: var(--bs-secondary-color);
+}
+
+/* ── Trip ref chip ───────────────────────────── */
+.mnt-ref {
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: var(--bs-secondary-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* ── Description cell ────────────────────────── */
+.mnt-desc-cell {
+  max-width: 220px;
+}
+
+.mnt-desc-text {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+
+/* ── Date + due dates ────────────────────────── */
+.mnt-date {
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
+}
+
+.mnt-due-soon {
+  color: #e67e00;
+  font-weight: 600;
+}
+
+.mnt-due-urgent {
+  color: #dc3545;
+  font-weight: 700;
+}
+
+/* ── Cost cell ───────────────────────────────── */
+.mnt-cost {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+
+/* ── Maintenance type badges ─────────────────── */
+.mnt-type-badge {
+  display: inline-block;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.mnt-type-preventive {
+  background: rgba(25, 135, 84, 0.1);
+  color: #146c43;
+}
+
+.mnt-type-corrective {
+  background: rgba(220, 53, 69, 0.1);
+  color: #b02a37;
+}
+
+.mnt-type-inspection {
+  background: rgba(13, 110, 253, 0.1);
+  color: #0a58ca;
+}
+
+/* ── Truck status badges ─────────────────────── */
+.mnt-status-badge {
+  display: inline-block;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.mnt-ts-operational {
+  background: rgba(25, 135, 84, 0.1);
+  color: #146c43;
+}
+
+.mnt-ts-scheduled-maintenance {
+  background: rgba(255, 193, 7, 0.15);
+  color: #856404;
+}
+
+.mnt-ts-under-repair {
+  background: rgba(220, 53, 69, 0.1);
+  color: #b02a37;
+}
+
+/* ── Checklist result badges ─────────────────── */
+.mnt-result-badge {
+  display: inline-block;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.mnt-result-passed {
+  background: rgba(25, 135, 84, 0.1);
+  color: #146c43;
+}
+
+.mnt-result-failed {
+  background: rgba(220, 53, 69, 0.1);
+  color: #b02a37;
+}
+
+/* ── Inline checklist items in table ─────────── */
+.mnt-checklist-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mnt-check-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.73rem;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.mnt-check-ok {
+  background: rgba(25, 135, 84, 0.08);
+  color: #198754;
+}
+
+.mnt-check-fail {
+  background: rgba(220, 53, 69, 0.08);
+  color: #dc3545;
+}
+
+/* ── Incident link ───────────────────────────── */
+.mnt-incident-link {
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Empty state ─────────────────────────────── */
+.mnt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  color: var(--bs-secondary-color);
+  text-align: center;
+}
+
+.mnt-empty-icon {
+  font-size: 2.8rem;
+  margin-bottom: 0.75rem;
+  opacity: 0.35;
+}
+
+.mnt-empty p {
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+/* ── Modals ──────────────────────────────────── */
+.mnt-modal-content {
+  border: none;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+}
+
+.mnt-modal-header-primary {
+  background: #0d6efd;
+  color: #fff;
+  border-bottom: none;
+  padding: 1rem 1.25rem;
+}
+
+.mnt-modal-header-secondary {
+  background: #6c757d;
+  color: #fff;
+  border-bottom: none;
+  padding: 1rem 1.25rem;
+}
+
+.mnt-modal-header-primary .modal-title,
+.mnt-modal-header-secondary .modal-title {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.mnt-modal-body {
+  padding: 1.4rem 1.4rem 0.5rem;
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+.mnt-modal-footer {
+  background: var(--bs-body-bg);
+  border-top: 1px solid var(--bs-border-color);
+  padding: 0.85rem 1.4rem;
+  gap: 0.5rem;
+}
+
+.mnt-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--bs-secondary-color);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  display: block;
+}
+
+.mnt-input {
+  font-size: 0.875rem;
+  border-radius: 8px;
+  border-color: var(--bs-border-color);
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+}
+
+.mnt-input:focus {
+  border-color: #0d6efd;
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15);
+}
+
+textarea.mnt-input {
+  resize: vertical;
+  min-height: 80px;
+}
+
+/* ── Checklist toggle grid ───────────────────── */
+.mnt-checklist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 0.6rem;
+}
+
+.mnt-check-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0.6rem 0.85rem;
+  border: 1.5px solid var(--bs-border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  -webkit-user-select: none; /* Safari 3+, iOS 3+ */
+  -ms-user-select: none; /* IE 10+ */
+  user-select: none;
+}
+
+.mnt-check-toggle:hover {
+  border-color: #0d6efd;
+  background: rgba(13, 110, 253, 0.04);
+}
+
+.mnt-check-cb {
+  display: none;
+}
+
+.mnt-check-toggle-inner {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid var(--bs-border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: transparent;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.mnt-check-cb:checked + .mnt-check-toggle-inner {
+  background: #198754;
+  border-color: #198754;
+  color: #fff;
+}
+
+.mnt-check-toggle:has(.mnt-check-cb:checked) {
+  border-color: #198754;
+  background: rgba(25, 135, 84, 0.05);
+}
+
+.mnt-check-toggle-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--bs-body-color);
+}
+
+/* ── Result banner ───────────────────────────── */
+.mnt-result-banner {
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+.mnt-banner-pass {
+  background: rgba(25, 135, 84, 0.1);
+  color: #146c43;
+  border: 1px solid rgba(25, 135, 84, 0.25);
+}
+
+.mnt-banner-fail {
+  background: rgba(220, 53, 69, 0.08);
+  color: #b02a37;
+  border: 1px solid rgba(220, 53, 69, 0.2);
+}
+
+/* ── Responsive ──────────────────────────────── */
+@media (max-width: 768px) {
+  .mnt-page {
+    padding: 1.25rem 1rem;
+  }
+
+  .mnt-title {
+    font-size: 1.2rem;
+  }
+
+  .mnt-filter-select,
+  .mnt-filter-search {
+    max-width: 100%;
+    flex: 1 1 auto;
+  }
+
+  .mnt-table-wrap {
+    overflow-x: auto;
+  }
+
+  .mnt-table {
+    min-width: 860px;
+  }
+
+  .mnt-checklist-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

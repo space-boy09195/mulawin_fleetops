@@ -6,15 +6,15 @@
 
 /* ---- CSS Variables: Light Mode (default) ----------------- */
 :root {
-  /* Sidebar */
-  --sidebar-bg:        #0f2137;
-  --sidebar-text:      #c8d8e8;
-  --sidebar-text-muted:#6b8499;
-  --sidebar-hover-bg:  rgba(244, 166, 28, 0.08);
-  --sidebar-active-bg: rgba(244, 166, 28, 0.12);
+  /* Sidebar — stays dark regardless of mode, it's a fixed brand element */
+  --sidebar-bg:        #1a2e4a;
+  --sidebar-text:      #b8cfe0;
+  --sidebar-text-muted:#5a7a96;
+  --sidebar-hover-bg:  rgba(244, 166, 28, 0.10);
+  --sidebar-active-bg: rgba(244, 166, 28, 0.15);
   --sidebar-active-txt:#f4a61c;
-  --sidebar-stripe:    #f4a61c;   /* The amber road-stripe on active item */
-  --sidebar-border:    rgba(255,255,255,0.06);
+  --sidebar-stripe:    #f4a61c;
+  --sidebar-border:    rgba(255,255,255,0.07);
   --sidebar-width:     260px;
   --sidebar-collapsed: 68px;
 
@@ -24,59 +24,74 @@
   --topnav-text:       #1e293b;
   --topnav-height:     60px;
 
-  /* Content area */
-  --content-bg:        #f0f4f8;
+  /* Content area — warm off-white, not stark white */
+  --content-bg:        #f1f5f9;
   --card-bg:           #ffffff;
   --card-border:       #e2e8f0;
-  --card-shadow:       0 1px 4px rgba(15, 33, 55, 0.07);
+  --card-shadow:       0 1px 3px rgba(15,33,55,0.06), 0 2px 8px rgba(15,33,55,0.04);
 
-  /* Text */
-  --text-primary:      #1e293b;
-  --text-secondary:    #475569;
+  /* Text — strong hierarchy */
+  --text-primary:      #0f172a;
+  --text-secondary:    #334155;
   --text-muted:        #94a3b8;
 
   /* Brand accent */
   --accent:            #f4a61c;
   --accent-dark:       #d4880e;
-  --primary:           #0f2137;
+  --primary:           #1a2e4a;
 
-  /* Status badges */
+  /* Input / form surfaces */
+  --input-bg:          #ffffff;
+  --input-border:      #cbd5e1;
+  --input-focus:       rgba(244,166,28,0.25);
+
+  /* Status badges — light mode */
   --badge-available:   #dcfce7;
   --badge-available-t: #15803d;
   --badge-deployed:    #dbeafe;
   --badge-deployed-t:  #1d4ed8;
-  --badge-maintenance: #fef9c3;
-  --badge-maintenance-t:#854d0e;
+  --badge-maintenance: #fef3c7;
+  --badge-maintenance-t:#92400e;
   --badge-inactive:    #f1f5f9;
   --badge-inactive-t:  #64748b;
 
   /* Misc */
   --radius:            10px;
-  --transition:        0.2s ease;
+  --transition:        0.18s ease;
 }
 
 /* ---- CSS Variables: Dark Mode ---------------------------- */
 [data-theme="dark"] {
-  --sidebar-bg:        #0a1628;
-  --sidebar-text:      #94a3b8;
-  --sidebar-text-muted:#475569;
-  --sidebar-hover-bg:  rgba(244, 166, 28, 0.07);
-  --sidebar-active-bg: rgba(244, 166, 28, 0.10);
-  --sidebar-border:    rgba(255,255,255,0.04);
+  /* Sidebar — slightly lighter than content so it reads as a distinct panel */
+  --sidebar-bg:        #0d1f35;
+  --sidebar-text:      #8faec8;
+  --sidebar-text-muted:#3d5a74;
+  --sidebar-hover-bg:  rgba(244, 166, 28, 0.08);
+  --sidebar-active-bg: rgba(244, 166, 28, 0.12);
+  --sidebar-border:    rgba(255,255,255,0.05);
 
-  --topnav-bg:         #0f1e33;
-  --topnav-border:     #1e3a5f;
+  /* Topnav — one step lighter than content bg */
+  --topnav-bg:         #152236;
+  --topnav-border:     #1e3550;
   --topnav-text:       #cbd5e1;
 
-  --content-bg:        #080f1c;
-  --card-bg:           #0f1e33;
-  --card-border:       #1e3a5f;
-  --card-shadow:       0 1px 6px rgba(0,0,0,0.4);
+  /* Content area — soft navy-slate, easy on the eyes */
+  --content-bg:        #0e1e30;
+  --card-bg:           #152236;
+  --card-border:       #1e3550;
+  --card-shadow:       0 1px 4px rgba(0,0,0,0.3), 0 2px 12px rgba(0,0,0,0.2);
 
+  /* Text */
   --text-primary:      #e2e8f0;
   --text-secondary:    #94a3b8;
-  --text-muted:        #475569;
+  --text-muted:        #3d5a74;
 
+  /* Input / form surfaces */
+  --input-bg:          #1a2e46;
+  --input-border:      #1e3550;
+  --input-focus:       rgba(244,166,28,0.20);
+
+  /* Status badges — dark mode: keep readable contrast */
   --badge-available:   #052e16;
   --badge-available-t: #4ade80;
   --badge-deployed:    #0c1a40;
@@ -96,6 +111,65 @@ body {
   background-color: var(--content-bg);
   color: var(--text-primary);
   transition: background-color var(--transition), color var(--transition);
+}
+
+/* ---- Global dark mode form overrides --------------------- */
+/* Applied here once so individual page CSS files don't need to repeat it */
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-select,
+[data-theme="dark"] .input-group-text {
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  border-color: var(--input-border);
+}
+
+[data-theme="dark"] .form-control:focus,
+[data-theme="dark"] .form-select:focus {
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--input-focus);
+}
+
+[data-theme="dark"] .form-control::placeholder {
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .modal-content {
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+  border-color: var(--card-border);
+}
+
+[data-theme="dark"] .modal-header,
+[data-theme="dark"] .modal-footer {
+  border-color: var(--card-border);
+}
+
+[data-theme="dark"] .btn-close {
+  filter: invert(1) grayscale(1);
+}
+
+[data-theme="dark"] .offcanvas {
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .table {
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .dropdown-menu {
+  background-color: var(--card-bg);
+  border-color: var(--card-border);
+}
+
+[data-theme="dark"] .dropdown-item {
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .dropdown-item:hover {
+  background-color: var(--content-bg);
 }
 
 /* ============================================================
@@ -175,12 +249,9 @@ body {
   padding: 12px 0;
   overflow-y: auto;
   overflow-x: hidden;
-  /* Firefox scrollbar styling */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255,255,255,0.1) transparent;
 }
-
-/* Chrome/Safari/Edge scrollbar styling */
+ 
+/* Webkit scrollbar (Chrome, Edge, Safari, Samsung Internet) */
 .sidebar-nav::-webkit-scrollbar {
   width: 4px;
 }
@@ -191,6 +262,33 @@ body {
   background: rgba(255,255,255,0.1);
   border-radius: 4px;
 }
+/* Firefox only — intentionally not cross-browser */
+@supports (scrollbar-width: thin) {
+  .sidebar-nav {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
+  }
+}
+
+/* ---- Collapsible nav sections ---------------------------- */
+.nav-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px 4px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  transition: opacity var(--transition);
+}
+
+.nav-section-toggle:hover .nav-section-label {
+  color: var(--sidebar-text);
+}
 
 .nav-section-label {
   font-size: 0.68rem;
@@ -198,13 +296,40 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--sidebar-text-muted);
-  padding: 12px 18px 4px;
   white-space: nowrap;
   overflow: hidden;
-  transition: opacity var(--transition);
+  transition: color var(--transition);
 }
 
-.sidebar.collapsed .nav-section-label {
+.nav-section-chevron {
+  font-size: 0.65rem;
+  color: var(--sidebar-text-muted);
+  transition: transform 0.2s ease, opacity var(--transition);
+  flex-shrink: 0;
+}
+
+.nav-section-toggle.collapsed .nav-section-chevron {
+  transform: rotate(-90deg);
+}
+
+/* Hide label + chevron when sidebar is icon-only collapsed */
+.sidebar.collapsed .nav-section-label,
+.sidebar.collapsed .nav-section-chevron {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+}
+
+/* The items container — animated slide */
+.nav-section-items {
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+  max-height: 500px;
+  opacity: 1;
+}
+
+.nav-section-items.collapsed {
+  max-height: 0;
   opacity: 0;
 }
 

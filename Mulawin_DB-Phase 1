@@ -1,0 +1,598 @@
+-- ============================================================
+-- MULAWIN FLEETOPS — Phase 1 (Revised): Database Schema
+-- ERP-Based Fleet Management and Financial Monitoring System
+-- RP Mulawin Trucking Services
+-- ------------------------------------------------------------
+-- Charset : utf8mb4 | Collation: utf8mb4_unicode_ci
+-- Engine  : InnoDB   | Normalized to 3NF
+-- Revised : Drivers/helpers separated from system users,
+--           parts movement history added, billings decoupled
+--           from single document, trucks enriched for ops,
+--           checklist linked to dispatch, employees table added
+-- ============================================================
+
+CREATE DATABASE IF NOT EXISTS mulawin_fleetops
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+
+USE mulawin_fleetops;
+
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- ============================================================
+-- TABLE 1: roles
+-- Stores the four RBAC roles.
+-- NOTE: permissions are enforced in PHP (config/app.php),
+--       not stored as JSON here — cleaner and easier to change.
+-- ============================================================
+CREATE TABLE roles (
+  role_id    INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  role_name  VARCHAR(50)   NOT NULL UNIQUE,
+  created_at TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (role_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO roles (role_id, role_name) VALUES
+  (1, 'Head Management'),
+  (2, 'Dispatcher'),
+  (3, 'Maintenance'),
+  (4, 'Accounting');
+
+-- ============================================================
+-- TABLE 2: users
+-- System login accounts. Only staff who need to log in
+-- have a record here. Drivers/helpers are in `employees`.
+-- ============================================================
+CREATE TABLE users (
+  user_id       INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  role_id       INT UNSIGNED  NOT NULL,
+  username      VARCHAR(50)   NOT NULL UNIQUE,
+  full_name     VARCHAR(100)  NOT NULL,
+  email         VARCHAR(100)  NOT NULL UNIQUE,
+  password_hash VARCHAR(255)  NOT NULL COMMENT 'bcrypt hash via password_hash()',
+  is_active     TINYINT(1)    NOT NULL DEFAULT 1,
+  created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id),
+  INDEX idx_users_role   (role_id),
+  INDEX idx_users_active (is_active),
+  CONSTRAINT fk_users_role FOREIGN KEY (role_id) REFERENCES roles (role_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 3: employees
+-- All company personnel — drivers, helpers, mechanics, etc.
+-- Separated from `users` because most field staff do NOT
+-- have system logins. A user CAN be linked to an employee
+-- record (e.g. a dispatcher who is also tracked as staff),
+-- but it is optional.
+-- ============================================================
+CREATE TABLE employees (
+  employee_id     INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  user_id         INT UNSIGNED  NULL     COMMENT 'Set if this employee also has a system login',
+  employee_code   VARCHAR(30)   NOT NULL UNIQUE COMMENT 'e.g. EMP-0001',
+  full_name       VARCHAR(100)  NOT NULL,
+  position        VARCHAR(80)   NOT NULL COMMENT 'e.g. Driver, Helper, Mechanic',
+  contact_number  VARCHAR(20)   NULL,
+  address         TEXT          NULL,
+  license_number  VARCHAR(50)   NULL     COMMENT 'Drivers only — NULL for helpers/mechanics',
+  license_expiry  DATE          NULL     COMMENT 'Drivers only',
+  license_type    VARCHAR(20)   NULL     COMMENT 'e.g. Professional, Restriction 1-2-3',
+  is_active       TINYINT(1)    NOT NULL DEFAULT 1,
+  date_hired      DATE          NULL,
+  created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (employee_id),
+  INDEX idx_employees_user     (user_id),
+  INDEX idx_employees_position (position),
+  INDEX idx_employees_active   (is_active),
+  CONSTRAINT fk_employees_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 4: trucks
+-- Fleet registry. Enriched with body type, capacity, fuel,
+-- and chassis/engine numbers for proper fleet management.
+-- ============================================================
+CREATE TABLE trucks (
+  truck_id       INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  plate_number   VARCHAR(20)   NOT NULL UNIQUE,
+  chassis_number VARCHAR(50)   NULL UNIQUE,
+  engine_number  VARCHAR(50)   NULL,
+  brand          VARCHAR(80)   NOT NULL,
+  model          VARCHAR(100)  NOT NULL,
+  year_model     YEAR          NOT NULL,
+  body_type      VARCHAR(50)   NULL COMMENT 'e.g. Closed Van, Flatbed, Reefer',
+  fuel_type      ENUM(
+                   'Diesel',
+                   'Gasoline',
+                   'LPG',
+                   'Electric'
+                 )             NOT NULL DEFAULT 'Diesel',
+  capacity_tons  DECIMAL(6,2)  NULL COMMENT 'Maximum load in metric tons',
+  status         ENUM(
+                   'Available',
+                   'Deployed',
+                   'Under Maintenance',
+                   'Inactive'
+                 )             NOT NULL DEFAULT 'Available',
+  created_at     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (truck_id),
+  INDEX idx_trucks_status (status),
+  INDEX idx_trucks_plate  (plate_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 5: routes
+-- Named origin-destination pairs for dispatch.
+-- ============================================================
+CREATE TABLE routes (
+  route_id     INT UNSIGNED   NOT NULL AUTO_INCREMENT,
+  route_name   VARCHAR(100)   NOT NULL,
+  origin       VARCHAR(150)   NOT NULL,
+  destination  VARCHAR(150)   NOT NULL,
+  distance_km  DECIMAL(8,2)   NULL,
+  is_active    TINYINT(1)     NOT NULL DEFAULT 1,
+  created_at   TIMESTAMP      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (route_id),
+  INDEX idx_routes_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 6: dispatch_requests
+-- Workflow: Dispatcher submits → Head Management approves/rejects.
+-- Driver and helper now reference `employees`, not `drivers`,
+-- because helpers are not necessarily licensed drivers.
+-- ============================================================
+CREATE TABLE dispatch_requests (
+  dispatch_id   INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  truck_id      INT UNSIGNED  NOT NULL,
+  driver_id     INT UNSIGNED  NOT NULL COMMENT 'References employees.employee_id',
+  helper_id     INT UNSIGNED  NULL     COMMENT 'References employees.employee_id — optional',
+  route_id      INT UNSIGNED  NOT NULL,
+  requested_by  INT UNSIGNED  NOT NULL COMMENT 'References users.user_id (Dispatcher)',
+  approved_by   INT UNSIGNED  NULL     COMMENT 'References users.user_id (Head Management)',
+  scheduled_at  DATETIME      NULL     COMMENT 'Planned departure date and time',
+  status        ENUM(
+                  'Pending',
+                  'Approved',
+                  'Rejected'
+                )             NOT NULL DEFAULT 'Pending',
+  remarks       TEXT          NULL     COMMENT 'Approval/rejection notes from Head Management',
+  requested_at  TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  reviewed_at   TIMESTAMP     NULL,
+  PRIMARY KEY (dispatch_id),
+  INDEX idx_dispatch_truck        (truck_id),
+  INDEX idx_dispatch_driver       (driver_id),
+  INDEX idx_dispatch_status       (status),
+  INDEX idx_dispatch_requested_by (requested_by),
+  INDEX idx_dispatch_scheduled    (scheduled_at),
+  CONSTRAINT fk_dispatch_truck     FOREIGN KEY (truck_id)    REFERENCES trucks    (truck_id),
+  CONSTRAINT fk_dispatch_driver    FOREIGN KEY (driver_id)   REFERENCES employees (employee_id),
+  CONSTRAINT fk_dispatch_helper    FOREIGN KEY (helper_id)   REFERENCES employees (employee_id),
+  CONSTRAINT fk_dispatch_route     FOREIGN KEY (route_id)    REFERENCES routes    (route_id),
+  CONSTRAINT fk_dispatch_requested FOREIGN KEY (requested_by) REFERENCES users   (user_id),
+  CONSTRAINT fk_dispatch_approved  FOREIGN KEY (approved_by)  REFERENCES users   (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 7: trips
+-- Created automatically when a dispatch_request is Approved.
+-- One dispatch → one trip. Tracks the lifecycle from loading
+-- through delivery. is_late is set by a scheduled check or
+-- on every trip status update.
+-- ============================================================
+CREATE TABLE trips (
+  trip_id          INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  dispatch_id      INT UNSIGNED  NOT NULL UNIQUE COMMENT 'One trip per approved dispatch',
+  trip_number      VARCHAR(30)   NOT NULL UNIQUE COMMENT 'Format: TRP-YYYY-NNNN',
+  status           ENUM(
+                     'Loading',
+                     'In Transit',
+                     'Unloading',
+                     'Completed',
+                     'Cancelled'
+                   )             NOT NULL DEFAULT 'Loading',
+  cargo_description TEXT         NULL     COMMENT 'What is being hauled',
+  expected_arrival DATETIME      NULL,
+  actual_arrival   DATETIME      NULL,
+  is_late          TINYINT(1)    NOT NULL DEFAULT 0,
+  created_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (trip_id),
+  INDEX idx_trips_status   (status),
+  INDEX idx_trips_number   (trip_number),
+  INDEX idx_trips_dispatch (dispatch_id),
+  CONSTRAINT fk_trips_dispatch FOREIGN KEY (dispatch_id) REFERENCES dispatch_requests (dispatch_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 8: trip_updates
+-- Append-only log of every status change on a trip.
+-- `status` mirrors the trip's own status ENUM so each row
+-- is a timestamped snapshot. location_note captures where
+-- the truck is at the time of the update.
+-- ============================================================
+CREATE TABLE trip_updates (
+  update_id     INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  trip_id       INT UNSIGNED  NOT NULL,
+  updated_by    INT UNSIGNED  NOT NULL COMMENT 'References users.user_id',
+  status        ENUM(
+                  'Loading',
+                  'In Transit',
+                  'Unloading',
+                  'Completed',
+                  'Cancelled'
+                )             NOT NULL,
+  location_note VARCHAR(255)  NULL COMMENT 'Where the truck is at this update',
+  notes         TEXT          NULL,
+  updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (update_id),
+  INDEX idx_trip_updates_trip    (trip_id),
+  INDEX idx_trip_updates_time    (updated_at),
+  CONSTRAINT fk_trip_updates_trip    FOREIGN KEY (trip_id)    REFERENCES trips (trip_id),
+  CONSTRAINT fk_trip_updates_updater FOREIGN KEY (updated_by) REFERENCES users (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 9: incidents
+-- Breakdowns, cargo damage, and delays linked to a trip.
+-- resolution_notes and resolved_at allow the dispatcher to
+-- close out an incident once handled.
+-- ============================================================
+CREATE TABLE incidents (
+  incident_id      INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  trip_id          INT UNSIGNED  NOT NULL,
+  reported_by      INT UNSIGNED  NOT NULL COMMENT 'References users.user_id',
+  incident_type    ENUM(
+                     'Vehicle Breakdown',
+                     'Item Damage',
+                     'Delay',
+                     'Other'
+                   )             NOT NULL,
+  description      TEXT          NOT NULL,
+  resolution_notes TEXT          NULL,
+  resolved_at      DATETIME      NULL,
+  reported_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (incident_id),
+  INDEX idx_incidents_trip (trip_id),
+  CONSTRAINT fk_incidents_trip     FOREIGN KEY (trip_id)    REFERENCES trips (trip_id),
+  CONSTRAINT fk_incidents_reporter FOREIGN KEY (reported_by) REFERENCES users (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 10: maintenance_checklists
+-- Pre-trip checklist submitted by Maintenance personnel.
+-- Linked to dispatch_id (not just trip_id) so it can be
+-- submitted before the trip is created (before dispatch is
+-- approved). trip_id filled in once trip is created.
+-- ============================================================
+CREATE TABLE maintenance_checklists (
+  checklist_id   INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  dispatch_id    INT UNSIGNED  NOT NULL COMMENT 'The dispatch this checklist covers',
+  truck_id       INT UNSIGNED  NOT NULL,
+  submitted_by   INT UNSIGNED  NOT NULL COMMENT 'References users.user_id (Maintenance role)',
+  trip_id        INT UNSIGNED  NULL     COMMENT 'Filled once trip is created from the dispatch',
+  -- Checklist items
+  lights_ok      TINYINT(1)    NOT NULL DEFAULT 0,
+  tires_ok       TINYINT(1)    NOT NULL DEFAULT 0,
+  tools_ok       TINYINT(1)    NOT NULL DEFAULT 0,
+  medical_kit_ok TINYINT(1)    NOT NULL DEFAULT 0,
+  license_ok     TINYINT(1)    NOT NULL DEFAULT 0,
+  or_cr_ok       TINYINT(1)    NOT NULL DEFAULT 0,
+  waybill_ok     TINYINT(1)    NOT NULL DEFAULT 0,
+  fuel_po_ok     TINYINT(1)    NOT NULL DEFAULT 0,
+  -- Auto-computed: Passed only if ALL items are 1
+  result         ENUM('Passed','Failed') NOT NULL DEFAULT 'Failed',
+  notes          TEXT          NULL,
+  submitted_at   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (checklist_id),
+  INDEX idx_checklist_dispatch (dispatch_id),
+  INDEX idx_checklist_truck    (truck_id),
+  INDEX idx_checklist_trip     (trip_id),
+  CONSTRAINT fk_checklist_dispatch  FOREIGN KEY (dispatch_id)  REFERENCES dispatch_requests (dispatch_id),
+  CONSTRAINT fk_checklist_truck     FOREIGN KEY (truck_id)     REFERENCES trucks (truck_id),
+  CONSTRAINT fk_checklist_submitter FOREIGN KEY (submitted_by) REFERENCES users  (user_id),
+  CONSTRAINT fk_checklist_trip      FOREIGN KEY (trip_id)      REFERENCES trips  (trip_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 11: maintenance_records
+-- Every repair, preventive check, and inspection per truck.
+-- ============================================================
+CREATE TABLE maintenance_records (
+  record_id        INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  truck_id         INT UNSIGNED  NOT NULL,
+  performed_by     INT UNSIGNED  NOT NULL COMMENT 'References users.user_id (Maintenance role)',
+  incident_id      INT UNSIGNED  NULL     COMMENT 'Link if this record resolves an incident',
+  maintenance_type ENUM(
+                     'Preventive',
+                     'Corrective',
+                     'Inspection'
+                   )             NOT NULL,
+  truck_status     ENUM(
+                     'Operational',
+                     'Scheduled Maintenance',
+                     'Under Repair'
+                   )             NOT NULL DEFAULT 'Under Repair',
+  description      TEXT          NOT NULL,
+  cost             DECIMAL(12,2) NULL,
+  date_performed   DATE          NOT NULL,
+  next_due_date    DATE          NULL,
+  created_at       TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (record_id),
+  INDEX idx_maint_truck    (truck_id),
+  INDEX idx_maint_date     (date_performed),
+  INDEX idx_maint_incident (incident_id),
+  CONSTRAINT fk_maint_truck     FOREIGN KEY (truck_id)    REFERENCES trucks    (truck_id),
+  CONSTRAINT fk_maint_performer FOREIGN KEY (performed_by) REFERENCES users    (user_id),
+  CONSTRAINT fk_maint_incident  FOREIGN KEY (incident_id) REFERENCES incidents (incident_id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 12: parts_inventory
+-- Spare parts stock. `created_at` added so you can see when
+-- a part was first entered. Movements tracked in parts_movements.
+-- ============================================================
+CREATE TABLE parts_inventory (
+  part_id       INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  part_number   VARCHAR(50)   NULL UNIQUE  COMMENT 'Manufacturer or internal part number',
+  part_name     VARCHAR(150)  NOT NULL,
+  category      VARCHAR(100)  NOT NULL     COMMENT 'e.g. Engine, Tires, Brakes, Electrical',
+  unit          VARCHAR(30)   NOT NULL DEFAULT 'pcs' COMMENT 'e.g. pcs, liters, meters',
+  quantity      INT UNSIGNED  NOT NULL DEFAULT 0,
+  reorder_level INT UNSIGNED  NOT NULL DEFAULT 5,
+  unit_cost     DECIMAL(10,2) NULL,
+  supplier      VARCHAR(150)  NULL,
+  created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (part_id),
+  INDEX idx_parts_category (category),
+  INDEX idx_parts_stock    (quantity, reorder_level)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 13: parts_movements
+-- Every stock-in and stock-out event for a part.
+-- This makes the current `quantity` in parts_inventory auditable
+-- and allows the system to show usage history per maintenance job.
+-- ============================================================
+CREATE TABLE parts_movements (
+  movement_id      INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  part_id          INT UNSIGNED  NOT NULL,
+  maintenance_id   INT UNSIGNED  NULL     COMMENT 'Set if used in a maintenance job',
+  recorded_by      INT UNSIGNED  NOT NULL COMMENT 'References users.user_id',
+  movement_type    ENUM(
+                     'Stock In',
+                     'Stock Out',
+                     'Adjustment'
+                   )             NOT NULL,
+  quantity         INT           NOT NULL COMMENT 'Positive = in, negative = out, signed',
+  unit_cost        DECIMAL(10,2) NULL     COMMENT 'Cost at time of movement (for Stock In)',
+  reference_number VARCHAR(80)   NULL     COMMENT 'PO number, receipt number, etc.',
+  notes            TEXT          NULL,
+  moved_at         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (movement_id),
+  INDEX idx_movements_part        (part_id),
+  INDEX idx_movements_maintenance (maintenance_id),
+  INDEX idx_movements_time        (moved_at),
+  CONSTRAINT fk_movements_part       FOREIGN KEY (part_id)       REFERENCES parts_inventory   (part_id),
+  CONSTRAINT fk_movements_maint      FOREIGN KEY (maintenance_id) REFERENCES maintenance_records (record_id) ON DELETE SET NULL,
+  CONSTRAINT fk_movements_recorder   FOREIGN KEY (recorded_by)   REFERENCES users             (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 14: documents
+-- Digital repository for all uploaded files.
+-- `description` added for searchability.
+-- Billing documents now live here; billings just references
+-- the trip (not a single document_id) for flexibility.
+-- ============================================================
+CREATE TABLE documents (
+  document_id  INT UNSIGNED    NOT NULL AUTO_INCREMENT,
+  uploaded_by  INT UNSIGNED    NOT NULL,
+  trip_id      INT UNSIGNED    NULL     COMMENT 'Set if document belongs to a specific trip',
+  doc_type     ENUM(
+                 'OR/CR',
+                 'Delivery Receipt',
+                 'Waybill',
+                 'Maintenance Record',
+                 'Billing Record',
+                 'Company Document',
+                 'Other'
+               )               NOT NULL,
+  file_name    VARCHAR(255)    NOT NULL COMMENT 'Original filename as uploaded',
+  stored_name  VARCHAR(255)    NOT NULL COMMENT 'Renamed filename on disk (UUID-based)',
+  file_path    VARCHAR(500)    NOT NULL COMMENT 'Relative path inside /uploads/',
+  file_size    BIGINT UNSIGNED NOT NULL COMMENT 'Size in bytes',
+  mime_type    VARCHAR(100)    NULL     COMMENT 'e.g. application/pdf, image/jpeg',
+  description  VARCHAR(255)    NULL     COMMENT 'Short user-supplied description for search',
+  uploaded_at  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (document_id),
+  INDEX idx_documents_uploader (uploaded_by),
+  INDEX idx_documents_trip     (trip_id),
+  INDEX idx_documents_type     (doc_type),
+  CONSTRAINT fk_documents_uploader FOREIGN KEY (uploaded_by) REFERENCES users (user_id),
+  CONSTRAINT fk_documents_trip     FOREIGN KEY (trip_id)     REFERENCES trips (trip_id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 15: billings
+-- Billing statements generated by Accounting.
+-- Linked to a trip only (not a single document), because a
+-- billing may reference multiple DRs and Waybills.
+-- billing_documents junction table below handles that.
+-- ============================================================
+CREATE TABLE billings (
+  billing_id     INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  trip_id        INT UNSIGNED  NOT NULL,
+  created_by     INT UNSIGNED  NOT NULL COMMENT 'References users.user_id (Accounting role)',
+  billing_number VARCHAR(30)   NOT NULL UNIQUE COMMENT 'Format: BIL-YYYY-NNNN',
+  client_name    VARCHAR(150)  NULL     COMMENT 'Bill-to name if different from default',
+  amount         DECIMAL(14,2) NOT NULL,
+  due_date       DATE          NOT NULL,
+  status         ENUM(
+                   'Unpaid',
+                   'Partial',
+                   'Paid'
+                 )             NOT NULL DEFAULT 'Unpaid',
+  notes          TEXT          NULL,
+  created_at     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (billing_id),
+  INDEX idx_billings_trip   (trip_id),
+  INDEX idx_billings_status (status),
+  INDEX idx_billings_due    (due_date),
+  CONSTRAINT fk_billings_trip    FOREIGN KEY (trip_id)    REFERENCES trips (trip_id),
+  CONSTRAINT fk_billings_creator FOREIGN KEY (created_by) REFERENCES users (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 16: billing_documents
+-- Junction table: one billing can reference many documents
+-- (e.g. 3 Delivery Receipts + 1 Waybill for one billing).
+-- ============================================================
+CREATE TABLE billing_documents (
+  billing_id   INT UNSIGNED NOT NULL,
+  document_id  INT UNSIGNED NOT NULL,
+  PRIMARY KEY (billing_id, document_id),
+  CONSTRAINT fk_billing_docs_billing  FOREIGN KEY (billing_id)  REFERENCES billings   (billing_id) ON DELETE CASCADE,
+  CONSTRAINT fk_billing_docs_document FOREIGN KEY (document_id) REFERENCES documents  (document_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 17: collections
+-- Payment records per billing. Supports partial payments.
+-- ============================================================
+CREATE TABLE collections (
+  collection_id INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  billing_id    INT UNSIGNED  NOT NULL,
+  recorded_by   INT UNSIGNED  NOT NULL COMMENT 'References users.user_id (Accounting role)',
+  amount_paid   DECIMAL(14,2) NOT NULL,
+  payment_date  DATE          NOT NULL,
+  payment_mode  VARCHAR(50)   NOT NULL COMMENT 'Cash, Check, Bank Transfer, GCash, etc.',
+  reference_no  VARCHAR(100)  NULL     COMMENT 'Check no., transaction ID, etc.',
+  remarks       TEXT          NULL,
+  created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (collection_id),
+  INDEX idx_collections_billing (billing_id),
+  INDEX idx_collections_date    (payment_date),
+  CONSTRAINT fk_collections_billing  FOREIGN KEY (billing_id) REFERENCES billings (billing_id),
+  CONSTRAINT fk_collections_recorder FOREIGN KEY (recorded_by) REFERENCES users   (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 18: audit_logs
+-- Immutable trail of every user action. user_id is nullable
+-- so system-generated actions (cron jobs, triggers) can also
+-- be recorded. ON DELETE SET NULL preserves the log if a user
+-- account is deleted.
+-- ============================================================
+CREATE TABLE audit_logs (
+  log_id     BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id    INT UNSIGNED    NULL     COMMENT 'NULL for system/automated actions',
+  action     VARCHAR(100)    NOT NULL COMMENT 'LOGIN, LOGOUT, CREATE, UPDATE, DELETE, EXPORT…',
+  table_name VARCHAR(100)    NOT NULL COMMENT 'Affected table',
+  record_id  INT UNSIGNED    NULL     COMMENT 'PK of the affected row',
+  old_value  JSON            NULL     COMMENT 'Snapshot before change (UPDATE/DELETE)',
+  new_value  JSON            NULL     COMMENT 'Snapshot after change (CREATE/UPDATE)',
+  ip_address VARCHAR(45)     NULL     COMMENT 'IPv4 or IPv6',
+  logged_at  TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (log_id),
+  INDEX idx_audit_user   (user_id),
+  INDEX idx_audit_table  (table_name),
+  INDEX idx_audit_action (action),
+  INDEX idx_audit_logged (logged_at),
+  CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- ============================================================
+-- VIEWS
+-- ============================================================
+
+-- v_fleet_status
+-- Quick count of trucks grouped by status for the dashboard.
+CREATE OR REPLACE VIEW v_fleet_status AS
+SELECT
+  status,
+  COUNT(*) AS truck_count
+FROM trucks
+GROUP BY status;
+
+-- v_active_trips
+-- Running trips with full context: truck, driver, route, late flag.
+CREATE OR REPLACE VIEW v_active_trips AS
+SELECT
+  t.trip_id,
+  t.trip_number,
+  t.status           AS trip_status,
+  t.expected_arrival,
+  t.is_late,
+  tr.plate_number,
+  tr.brand,
+  tr.model,
+  e_drv.full_name    AS driver_name,
+  e_hlp.full_name    AS helper_name,
+  r.origin,
+  r.destination,
+  r.distance_km
+FROM trips t
+JOIN dispatch_requests dr  ON t.dispatch_id   = dr.dispatch_id
+JOIN trucks tr              ON dr.truck_id     = tr.truck_id
+JOIN employees e_drv        ON dr.driver_id    = e_drv.employee_id
+LEFT JOIN employees e_hlp   ON dr.helper_id    = e_hlp.employee_id
+JOIN routes r               ON dr.route_id     = r.route_id
+WHERE t.status NOT IN ('Completed', 'Cancelled');
+
+-- v_low_stock_parts
+-- Parts at or below reorder level for maintenance alerts.
+CREATE OR REPLACE VIEW v_low_stock_parts AS
+SELECT
+  part_id,
+  part_name,
+  category,
+  unit,
+  quantity,
+  reorder_level,
+  (reorder_level - quantity) AS shortage,
+  supplier
+FROM parts_inventory
+WHERE quantity <= reorder_level;
+
+-- v_billing_summary
+-- Per-billing: billed amount, total collected, outstanding balance.
+CREATE OR REPLACE VIEW v_billing_summary AS
+SELECT
+  b.billing_id,
+  b.billing_number,
+  b.client_name,
+  t.trip_number,
+  b.amount                                       AS billed_amount,
+  b.due_date,
+  b.status,
+  COALESCE(SUM(c.amount_paid), 0)                AS total_collected,
+  (b.amount - COALESCE(SUM(c.amount_paid), 0))   AS balance
+FROM billings b
+JOIN trips t ON b.trip_id = t.trip_id
+LEFT JOIN collections c ON b.billing_id = c.billing_id
+GROUP BY b.billing_id;
+
+-- v_license_expiry_alerts
+-- Drivers whose license expires within the next 60 days.
+CREATE OR REPLACE VIEW v_license_expiry_alerts AS
+SELECT
+  employee_id,
+  employee_code,
+  full_name,
+  license_number,
+  license_expiry,
+  DATEDIFF(license_expiry, CURDATE()) AS days_until_expiry
+FROM employees
+WHERE license_number IS NOT NULL
+  AND license_expiry IS NOT NULL
+  AND license_expiry <= DATE_ADD(CURDATE(), INTERVAL 60 DAY)
+  AND is_active = 1
+ORDER BY license_expiry ASC;

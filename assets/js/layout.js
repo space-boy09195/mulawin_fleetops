@@ -125,10 +125,67 @@
   });
 
   // Prevent flash of wrong theme — run immediately before DOM ready
-  // (Sets attribute on <html> before body renders)
   const savedThemeEarly = localStorage.getItem(THEME_KEY);
   if (savedThemeEarly === 'dark') {
     document.documentElement.setAttribute('data-theme', 'dark');
   }
 
 })();
+
+// ============================================================
+// Announcements — global functions (called from layout.php HTML)
+// ============================================================
+
+async function submitAnnouncement() {
+  const title   = document.getElementById('annTitle').value.trim();
+  const body    = document.getElementById('annBody').value.trim();
+  const pinned  = document.getElementById('annPinned').checked ? 1 : 0;
+  const errEl   = document.getElementById('annError');
+
+  errEl.style.display = 'none';
+
+  if (!title || !body) {
+    errEl.textContent   = 'Title and message are required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append('title',     title);
+  fd.append('body',      body);
+  fd.append('is_pinned', pinned);
+
+  try {
+    const res    = await fetch(window.APP_BASE + '/ajax/announcement_handler.php?action=add', { method: 'POST', body: fd });
+    const result = await res.json();
+    if (result.success) {
+      window.location.reload();
+    } else {
+      errEl.textContent   = result.message || 'Could not post announcement.';
+      errEl.style.display = 'block';
+    }
+  } catch (e) {
+    errEl.textContent   = 'Network error. Please try again.';
+    errEl.style.display = 'block';
+  }
+}
+
+async function deleteAnnouncement(id) {
+  if (!confirm('Delete this announcement?')) return;
+
+  const fd = new FormData();
+  fd.append('announcement_id', id);
+
+  try {
+    const res    = await fetch(window.APP_BASE + '/ajax/announcement_handler.php?action=delete', { method: 'POST', body: fd });
+    const result = await res.json();
+    if (result.success) {
+      const el = document.getElementById('ann-' + id);
+      if (el) el.remove();
+    } else {
+      alert(result.message || 'Could not delete.');
+    }
+  } catch (e) {
+    alert('Network error.');
+  }
+}

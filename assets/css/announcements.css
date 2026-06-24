@@ -1,0 +1,59 @@
+/* ============================================================
+   assets/css/announcements.css
+   ============================================================ */
+
+.ann-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ann-full-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.ann-full-body {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 10px;
+  white-space: pre-wrap;
+}
+
+.ann-meta {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.ann-delete-btn {
+  background: none;
+  border: 1px solid var(--card-border);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+}
+
+.ann-delete-btn:hover {
+  color: #dc2626;
+  background: rgba(220,38,38,0.08);
+  border-color: #fca5a5;
+}
+
+[data-theme="dark"] .form-control {
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+  border-color: var(--card-border);
+}
+
+[data-theme="dark"] .btn-close { filter: invert(1); }

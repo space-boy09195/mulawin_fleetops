@@ -5,169 +5,218 @@ require_once __DIR__ . '/../config/database.php';
 
 requireRole([ROLE_HEAD_MANAGEMENT]);
 
-$GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard.js';
-layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard.css');
+$GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard_head.js';
+layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_head.css');
 
 $pdo = getDBConnection();
 
-// ── Fleet ─────────────────────────────────────────────────────────────────────
+// ── Stat cards ────────────────────────────────────────────────────────────────
 $fleetRows = $pdo->query("SELECT status, truck_count FROM v_fleet_status")->fetchAll(PDO::FETCH_ASSOC);
 $fleet = [];
-foreach ($fleetRows as $r) $fleet[$r['status']] = $r['truck_count'];
-$totalTrucks = array_sum($fleet);
-$available   = $fleet['Available']         ?? 0;
-$deployed    = $fleet['Deployed']          ?? 0;
-$underMaint  = $fleet['Under Maintenance'] ?? 0;
+foreach ($fleetRows as $r) $fleet[$r['status']] = (int)$r['truck_count'];
+$available  = $fleet['Available']         ?? 0;
+$deployed   = $fleet['Deployed']          ?? 0;
+$underMaint = $fleet['Under Maintenance'] ?? 0;
+$inactive   = $fleet['Inactive']          ?? 0;
 
-// ── Active trips ──────────────────────────────────────────────────────────────
-$activeTrips = $pdo->query("
-    SELECT trip_id, trip_number, trip_status, plate_number,
-           driver_name, origin, destination, expected_arrival, is_late
-    FROM v_active_trips ORDER BY is_late DESC, expected_arrival ASC LIMIT 8
-")->fetchAll(PDO::FETCH_ASSOC);
-$lateCount = count(array_filter($activeTrips, fn($t) => $t['is_late']));
+$activeTripsCount = (int)$pdo->query("SELECT COUNT(*) FROM trips WHERE status NOT IN ('Completed','Cancelled')")->fetchColumn();
 
-// ── Pending dispatches ────────────────────────────────────────────────────────
-$pendingDispatches = (int)$pdo->query("SELECT COUNT(*) FROM dispatch_requests WHERE status='Pending'")->fetchColumn();
+// ── Diagnostic alerts (open incidents + late trips + low stock + pending dispatch) ──
+$alerts = [];
 
-// ── Open incidents ────────────────────────────────────────────────────────────
-$openIncidents = $pdo->query("
-    SELECT i.incident_type, i.reported_at, t.trip_number, tr.plate_number
-    FROM incidents i
-    JOIN trips t              ON i.trip_id     = t.trip_id
+// Late trips
+$lateTrips = $pdo->query("
+    SELECT t.trip_number, tr.plate_number, 'Late Trip' AS alert_type, 'Warning' AS severity
+    FROM trips t
     JOIN dispatch_requests dr ON t.dispatch_id = dr.dispatch_id
-    JOIN trucks tr            ON dr.truck_id   = tr.truck_id
-    WHERE i.resolved_at IS NULL ORDER BY i.reported_at DESC LIMIT 5
+    JOIN trucks tr ON dr.truck_id = tr.truck_id
+    WHERE t.is_late = 1 AND t.status NOT IN ('Completed','Cancelled')
+    LIMIT 3
+")->fetchAll(PDO::FETCH_ASSOC);
+foreach ($lateTrips as $lt) {
+    $alerts[] = ['alert' => 'Late trip detected', 'severity' => 'Warning',
+                 'source' => $lt['trip_number'], 'detail' => $lt['plate_number'],
+                 'type' => 'trip'];
+}
+
+// Open incidents
+$incidents = $pdo->query("
+    SELECT i.incident_type, t.trip_number, i.reported_at
+    FROM incidents i
+    JOIN trips t ON i.trip_id = t.trip_id
+    WHERE i.resolved_at IS NULL
+    ORDER BY i.reported_at DESC LIMIT 3
+")->fetchAll(PDO::FETCH_ASSOC);
+foreach ($incidents as $inc) {
+    $alerts[] = ['alert' => $inc['incident_type'], 'severity' => 'Critical',
+                 'source' => $inc['trip_number'], 'detail' => date('M d, Y H:i', strtotime($inc['reported_at'])),
+                 'type' => 'incident'];
+}
+
+// Low stock
+$lowStockAlerts = $pdo->query("
+    SELECT part_name, quantity, reorder_level FROM v_low_stock_parts LIMIT 2
+")->fetchAll(PDO::FETCH_ASSOC);
+foreach ($lowStockAlerts as $ls) {
+    $alerts[] = ['alert' => 'Low parts inventory (' . $ls['part_name'] . ')',
+                 'severity' => 'Info', 'source' => 'Maintenance',
+                 'detail' => $ls['quantity'] . '/' . $ls['reorder_level'] . ' remaining',
+                 'type' => 'stock'];
+}
+
+// Pending dispatches
+$pendingDispCount = (int)$pdo->query("SELECT COUNT(*) FROM dispatch_requests WHERE status='Pending'")->fetchColumn();
+if ($pendingDispCount > 0) {
+    $alerts[] = ['alert' => 'Unapproved dispatch request',
+                 'severity' => 'Info', 'source' => 'Dispatch',
+                 'detail' => $pendingDispCount . ' pending approval',
+                 'type' => 'dispatch'];
+}
+
+// ── Trip trends — last 14 days ────────────────────────────────────────────────
+$trendRows = $pdo->query("
+    SELECT DATE(created_at) AS day, COUNT(*) AS cnt
+    FROM trips
+    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 13 DAY)
+    GROUP BY DATE(created_at)
+    ORDER BY day ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// ── Billing ───────────────────────────────────────────────────────────────────
-$bilRow = $pdo->query("
-    SELECT SUM(status='Unpaid') AS unpaid, SUM(status='Partial') AS partial,
-           SUM(balance) AS outstanding FROM v_billing_summary
-")->fetch(PDO::FETCH_ASSOC);
+$trendMap = [];
+foreach ($trendRows as $r) $trendMap[$r['day']] = (int)$r['cnt'];
+$trendLabels = [];
+$trendData   = [];
+for ($i = 13; $i >= 0; $i--) {
+    $d = date('Y-m-d', strtotime("-$i days"));
+    $trendLabels[] = date('M d', strtotime($d));
+    $trendData[]   = $trendMap[$d] ?? 0;
+}
 
-// ── Low stock ─────────────────────────────────────────────────────────────────
-$lowStock = $pdo->query("
-    SELECT part_name, quantity, reorder_level, unit FROM v_low_stock_parts
-    ORDER BY shortage DESC LIMIT 5
-")->fetchAll(PDO::FETCH_ASSOC);
+// ── Fleet status for donut ────────────────────────────────────────────────────
+$donutData = [
+    'labels' => ['Deployed', 'Available', 'Maintenance', 'Inactive'],
+    'data'   => [$deployed, $available, $underMaint, $inactive],
+    'colors' => ['#0d6efd', '#198754', '#ffc107', '#6c757d'],
+];
+$totalFleet = array_sum($donutData['data']);
 
-// ── License alerts ────────────────────────────────────────────────────────────
-$licAlerts = $pdo->query("
-    SELECT full_name, license_expiry, days_until_expiry
-    FROM v_license_expiry_alerts LIMIT 5
-")->fetchAll(PDO::FETCH_ASSOC);
+// Pass to JS
+$GLOBALS['dash_data'] = json_encode([
+    'trend'  => ['labels' => $trendLabels, 'data' => $trendData],
+    'donut'  => $donutData,
+]);
 ?>
-<div class="dash-page">
-  <div class="dash-header mb-4">
-    <h1 class="dash-title">Dashboard</h1>
-    <p class="dash-subtitle">Welcome back, <?= htmlspecialchars($_SESSION['full_name']) ?> — here's what's happening today.</p>
+<div class="dh-page">
+
+  <!-- Header -->
+  <div class="dh-header">
+    <div>
+      <h1 class="dh-title">Dashboard</h1>
+      <p class="dh-subtitle">Operational analytics and diagnostic alerts</p>
+    </div>
+    <a href="<?= APP_BASE ?>/pages/dispatch.php" class="btn dh-btn-primary">
+      <i class="bi bi-send me-1"></i> New Dispatch
+    </a>
   </div>
 
   <!-- Stat cards -->
-  <div class="dash-stats mb-4">
-    <div class="stat-card"><div class="stat-icon stat-amber"><i class="bi bi-truck"></i></div><div class="stat-info"><div class="stat-value"><?= $totalTrucks ?></div><div class="stat-label">Total Trucks</div></div></div>
-    <div class="stat-card"><div class="stat-icon stat-green"><i class="bi bi-check-circle"></i></div><div class="stat-info"><div class="stat-value"><?= $available ?></div><div class="stat-label">Available</div></div></div>
-    <div class="stat-card"><div class="stat-icon stat-blue"><i class="bi bi-map"></i></div><div class="stat-info"><div class="stat-value"><?= count($activeTrips) ?></div><div class="stat-label">Active Trips</div></div></div>
-    <div class="stat-card <?= $lateCount > 0 ? 'stat-card-alert' : '' ?>"><div class="stat-icon stat-red"><i class="bi bi-clock-history"></i></div><div class="stat-info"><div class="stat-value"><?= $lateCount ?></div><div class="stat-label">Late Trips</div></div></div>
-    <div class="stat-card <?= $pendingDispatches > 0 ? 'stat-card-warn' : '' ?>"><div class="stat-icon stat-purple"><i class="bi bi-send"></i></div><div class="stat-info"><div class="stat-value"><?= $pendingDispatches ?></div><div class="stat-label">Pending Dispatches</div></div></div>
-    <div class="stat-card <?= count($openIncidents) > 0 ? 'stat-card-alert' : '' ?>"><div class="stat-icon stat-red"><i class="bi bi-exclamation-triangle"></i></div><div class="stat-info"><div class="stat-value"><?= count($openIncidents) ?></div><div class="stat-label">Open Incidents</div></div></div>
-    <div class="stat-card <?= ($bilRow['outstanding'] ?? 0) > 0 ? 'stat-card-warn' : '' ?>"><div class="stat-icon stat-green"><i class="bi bi-receipt"></i></div><div class="stat-info"><div class="stat-value">₱<?= number_format($bilRow['outstanding'] ?? 0, 0) ?></div><div class="stat-label">Outstanding Balance</div></div></div>
-    <div class="stat-card <?= $underMaint > 0 ? 'stat-card-warn' : '' ?>"><div class="stat-icon stat-orange"><i class="bi bi-tools"></i></div><div class="stat-info"><div class="stat-value"><?= $underMaint ?></div><div class="stat-label">Under Maintenance</div></div></div>
+  <div class="dh-stats">
+    <div class="dh-stat-card">
+      <div class="dh-stat-label">Available Trucks</div>
+      <div class="dh-stat-value dh-value-green"><?= $available ?></div>
+    </div>
+    <div class="dh-stat-card">
+      <div class="dh-stat-label">Deployed Trucks</div>
+      <div class="dh-stat-value"><?= $deployed ?></div>
+    </div>
+    <div class="dh-stat-card <?= $underMaint > 0 ? 'dh-stat-warn' : '' ?>">
+      <div class="dh-stat-label">Under Maintenance</div>
+      <div class="dh-stat-value dh-value-orange"><?= $underMaint ?></div>
+    </div>
+    <div class="dh-stat-card">
+      <div class="dh-stat-label">Active Trips</div>
+      <div class="dh-stat-value dh-value-blue"><?= $activeTripsCount ?></div>
+    </div>
   </div>
 
-  <div class="dash-grid">
-    <!-- Active Trips table -->
-    <div class="dash-widget dash-widget-wide">
-      <div class="dash-widget-header">
-        <span class="dash-widget-title"><i class="bi bi-map me-2"></i>Active Trips</span>
-        <a href="<?= APP_BASE ?>/pages/trip_monitor.php" class="dash-widget-link">View all</a>
+  <!-- Main grid -->
+  <div class="dh-grid">
+
+    <!-- Diagnostic Alerts -->
+    <div class="dh-widget dh-widget-alerts">
+      <div class="dh-widget-header">
+        <span class="dh-widget-title">
+          <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Diagnostic Alerts
+        </span>
+        <a href="<?= APP_BASE ?>/pages/incidents.php" class="dh-link">View All</a>
       </div>
-      <?php if (empty($activeTrips)): ?>
-      <div class="dash-empty"><i class="bi bi-map"></i><span>No active trips</span></div>
+      <?php if (empty($alerts)): ?>
+      <div class="dh-empty"><i class="bi bi-shield-check"></i><span>No active alerts</span></div>
       <?php else: ?>
-      <div class="dash-table-wrap">
-        <table class="table dash-table">
-          <thead><tr><th>Trip No.</th><th>Truck</th><th>Route</th><th>Driver</th><th>ETA</th><th>Status</th></tr></thead>
-          <tbody>
-            <?php foreach ($activeTrips as $t): ?>
-            <tr>
-              <td><span class="dash-ref"><?= htmlspecialchars($t['trip_number']) ?></span></td>
-              <td><?= htmlspecialchars($t['plate_number']) ?></td>
-              <td class="dash-route"><?= htmlspecialchars($t['origin']) ?> <i class="bi bi-arrow-right"></i> <?= htmlspecialchars($t['destination']) ?></td>
-              <td><?= htmlspecialchars($t['driver_name']) ?></td>
-              <td class="<?= $t['is_late'] ? 'dash-late' : '' ?>"><?= $t['expected_arrival'] ? date('M d, H:i', strtotime($t['expected_arrival'])) : '—' ?></td>
-              <td><?php if ($t['is_late']): ?><span class="dash-badge dash-badge-red">Late</span><?php else: ?><span class="dash-badge dash-badge-blue"><?= htmlspecialchars($t['trip_status']) ?></span><?php endif; ?></td>
-            </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
-      </div>
+      <table class="table dh-table">
+        <thead><tr><th>Alert</th><th>Severity</th><th>Source</th><th>Detail</th></tr></thead>
+        <tbody>
+          <?php foreach ($alerts as $a): ?>
+          <tr>
+            <td class="dh-alert-name"><?= htmlspecialchars($a['alert']) ?></td>
+            <td>
+              <?php
+              $sevCls = match($a['severity']) {
+                  'Critical' => 'dh-sev-critical',
+                  'Warning'  => 'dh-sev-warning',
+                  default    => 'dh-sev-info',
+              };
+              ?>
+              <span class="dh-severity <?= $sevCls ?>"><?= $a['severity'] ?></span>
+            </td>
+            <td class="dh-muted"><?= htmlspecialchars($a['source']) ?></td>
+            <td class="dh-muted"><?= htmlspecialchars($a['detail']) ?></td>
+          </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
       <?php endif; ?>
     </div>
 
-    <!-- Open Incidents -->
-    <div class="dash-widget">
-      <div class="dash-widget-header">
-        <span class="dash-widget-title"><i class="bi bi-exclamation-triangle me-2"></i>Open Incidents</span>
-        <a href="<?= APP_BASE ?>/pages/incidents.php" class="dash-widget-link">View all</a>
+    <!-- Trip Trends chart -->
+    <div class="dh-widget dh-widget-chart">
+      <div class="dh-widget-header">
+        <span class="dh-widget-title"><i class="bi bi-graph-up me-2"></i>Trip Trends (Last 14 Days)</span>
       </div>
-      <?php if (empty($openIncidents)): ?>
-      <div class="dash-empty"><i class="bi bi-shield-check"></i><span>No open incidents</span></div>
-      <?php else: ?>
-      <ul class="dash-list">
-        <?php foreach ($openIncidents as $inc): ?>
-        <li class="dash-list-item">
-          <span class="dash-list-icon dash-list-icon-red"><i class="bi bi-exclamation-triangle-fill"></i></span>
-          <div class="dash-list-body"><span class="dash-list-main"><?= htmlspecialchars($inc['incident_type']) ?></span><span class="dash-list-sub"><?= htmlspecialchars($inc['trip_number']) ?> · <?= htmlspecialchars($inc['plate_number']) ?></span></div>
-          <span class="dash-list-time"><?= date('M d', strtotime($inc['reported_at'])) ?></span>
-        </li>
-        <?php endforeach; ?>
-      </ul>
-      <?php endif; ?>
+      <div class="dh-chart-wrap">
+        <canvas id="tripTrendChart"></canvas>
+      </div>
     </div>
 
-    <!-- Low Stock -->
-    <div class="dash-widget">
-      <div class="dash-widget-header">
-        <span class="dash-widget-title"><i class="bi bi-box-seam me-2"></i>Low Stock Parts</span>
-        <a href="<?= APP_BASE ?>/pages/parts.php" class="dash-widget-link">View all</a>
+    <!-- Fleet Status donut -->
+    <div class="dh-widget dh-widget-donut">
+      <div class="dh-widget-header">
+        <span class="dh-widget-title"><i class="bi bi-pie-chart-fill me-2"></i>Fleet Status Distribution</span>
       </div>
-      <?php if (empty($lowStock)): ?>
-      <div class="dash-empty"><i class="bi bi-box-seam"></i><span>All parts adequately stocked</span></div>
-      <?php else: ?>
-      <ul class="dash-list">
-        <?php foreach ($lowStock as $p): ?>
-        <li class="dash-list-item">
-          <span class="dash-list-icon dash-list-icon-orange"><i class="bi bi-box-seam"></i></span>
-          <div class="dash-list-body"><span class="dash-list-main"><?= htmlspecialchars($p['part_name']) ?></span><span class="dash-list-sub"><?= $p['quantity'] ?>/<?= $p['reorder_level'] ?> <?= htmlspecialchars($p['unit']) ?></span></div>
-          <?php if ($p['quantity'] == 0): ?><span class="dash-badge dash-badge-red">Out</span><?php else: ?><span class="dash-badge dash-badge-orange">Low</span><?php endif; ?>
-        </li>
-        <?php endforeach; ?>
-      </ul>
-      <?php endif; ?>
+      <div class="dh-donut-wrap">
+        <div class="dh-donut-canvas-wrap">
+          <canvas id="fleetDonutChart"></canvas>
+          <div class="dh-donut-center">
+            <span class="dh-donut-total"><?= $totalFleet ?></span>
+            <span class="dh-donut-label">Total</span>
+          </div>
+        </div>
+        <div class="dh-donut-legend">
+          <?php foreach ($donutData['labels'] as $i => $lbl): ?>
+          <div class="dh-legend-item">
+            <span class="dh-legend-dot" style="background:<?= $donutData['colors'][$i] ?>"></span>
+            <span class="dh-legend-label"><?= $lbl ?></span>
+            <span class="dh-legend-val"><?= $donutData['data'][$i] ?></span>
+          </div>
+          <?php endforeach; ?>
+        </div>
+      </div>
     </div>
 
-    <!-- License Alerts -->
-    <div class="dash-widget">
-      <div class="dash-widget-header">
-        <span class="dash-widget-title"><i class="bi bi-card-text me-2"></i>License Expiry</span>
-        <a href="<?= APP_BASE ?>/pages/users.php" class="dash-widget-link">View all</a>
-      </div>
-      <?php if (empty($licAlerts)): ?>
-      <div class="dash-empty"><i class="bi bi-patch-check"></i><span>No expiring licenses</span></div>
-      <?php else: ?>
-      <ul class="dash-list">
-        <?php foreach ($licAlerts as $a): ?>
-        <li class="dash-list-item">
-          <span class="dash-list-icon <?= $a['days_until_expiry'] <= 14 ? 'dash-list-icon-red' : 'dash-list-icon-orange' ?>"><i class="bi bi-card-text"></i></span>
-          <div class="dash-list-body"><span class="dash-list-main"><?= htmlspecialchars($a['full_name']) ?></span><span class="dash-list-sub"><?= date('M d, Y', strtotime($a['license_expiry'])) ?></span></div>
-          <?php if ($a['days_until_expiry'] <= 0): ?><span class="dash-badge dash-badge-red">Expired</span><?php elseif ($a['days_until_expiry'] <= 14): ?><span class="dash-badge dash-badge-red"><?= $a['days_until_expiry'] ?>d</span><?php else: ?><span class="dash-badge dash-badge-orange"><?= $a['days_until_expiry'] ?>d</span><?php endif; ?>
-        </li>
-        <?php endforeach; ?>
-      </ul>
-      <?php endif; ?>
-    </div>
   </div>
 </div>
+
+<script>
+window.DASH_DATA = <?= $GLOBALS['dash_data'] ?>;
+</script>
 <?php layoutFoot(); ?>

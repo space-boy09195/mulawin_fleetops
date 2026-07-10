@@ -5,92 +5,157 @@ require_once __DIR__ . '/../config/database.php';
 
 requireRole([ROLE_MAINTENANCE]);
 
-$GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard.js';
-layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard.css');
+$GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard_maintenance.js';
+layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_maintenance.css');
 
 $pdo = getDBConnection();
 
-// ── Trucks under maintenance ──────────────────────────────────────────────────
-$trucksMaint = $pdo->query("
-    SELECT truck_id, plate_number, brand, model, status
-    FROM trucks WHERE status = 'Under Maintenance'
-    ORDER BY plate_number
+// ── Stat cards ────────────────────────────────────────────────────────────────
+$underMaint   = (int)$pdo->query("SELECT COUNT(*) FROM trucks WHERE status='Under Maintenance'")->fetchColumn();
+$openIncidents = (int)$pdo->query("SELECT COUNT(*) FROM incidents WHERE resolved_at IS NULL")->fetchColumn();
+$todayChecks  = (int)$pdo->query("SELECT COUNT(*) FROM maintenance_checklists WHERE DATE(submitted_at)=CURDATE()")->fetchColumn();
+$lowStockCount = (int)$pdo->query("SELECT COUNT(*) FROM v_low_stock_parts")->fetchColumn();
+
+// ── Trucks needing attention ──────────────────────────────────────────────────
+$trucksAttention = $pdo->query("
+    SELECT t.truck_id, t.plate_number, t.brand, t.model, t.status,
+           mr.truck_status AS last_maint_status, mr.date_performed
+    FROM trucks t
+    LEFT JOIN (
+        SELECT truck_id, truck_status, date_performed,
+               ROW_NUMBER() OVER (PARTITION BY truck_id ORDER BY date_performed DESC, created_at DESC) AS rn
+        FROM maintenance_records
+    ) mr ON t.truck_id = mr.truck_id AND mr.rn = 1
+    WHERE t.status IN ('Under Maintenance','Deployed')
+       OR mr.truck_status IN ('Under Repair','Scheduled Maintenance')
+    ORDER BY
+        CASE t.status WHEN 'Under Maintenance' THEN 0 ELSE 1 END,
+        mr.date_performed ASC
+    LIMIT 6
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// ── Pending checklists (approved dispatches without one) ──────────────────────
-$pendingChecklists = $pdo->query("
-    SELECT dr.dispatch_id, tr.plate_number, tr.brand, tr.model,
-           e.full_name AS driver_name, r.origin, r.destination, dr.scheduled_at
-    FROM dispatch_requests dr
-    JOIN trucks tr    ON dr.truck_id  = tr.truck_id
-    JOIN employees e  ON dr.driver_id = e.employee_id
-    JOIN routes r     ON dr.route_id  = r.route_id
-    WHERE dr.status = 'Approved'
-      AND NOT EXISTS (
-          SELECT 1 FROM maintenance_checklists mc WHERE mc.dispatch_id = dr.dispatch_id
-      )
-    ORDER BY dr.scheduled_at ASC LIMIT 6
+// ── Parts inventory with progress bars ───────────────────────────────────────
+$partsInventory = $pdo->query("
+    SELECT part_name, quantity, reorder_level, unit
+    FROM parts_inventory
+    ORDER BY (quantity / GREATEST(reorder_level,1)) ASC
+    LIMIT 6
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// ── Open incidents ────────────────────────────────────────────────────────────
-$openIncidents = $pdo->query("
-    SELECT i.incident_type, i.reported_at, i.description,
-           t.trip_number, tr.plate_number
+// ── Critical maintenance (open incidents on trucks) ───────────────────────────
+$criticalMaint = $pdo->query("
+    SELECT i.incident_id, i.incident_type, t.trip_number, tr.plate_number, tr.truck_id
     FROM incidents i
     JOIN trips t              ON i.trip_id     = t.trip_id
     JOIN dispatch_requests dr ON t.dispatch_id = dr.dispatch_id
     JOIN trucks tr            ON dr.truck_id   = tr.truck_id
-    WHERE i.resolved_at IS NULL ORDER BY i.reported_at DESC LIMIT 5
-")->fetchAll(PDO::FETCH_ASSOC);
+    WHERE i.resolved_at IS NULL AND i.incident_type = 'Vehicle Breakdown'
+    ORDER BY i.reported_at DESC LIMIT 1
+")->fetch(PDO::FETCH_ASSOC);
 
-// ── Low stock parts ───────────────────────────────────────────────────────────
-$lowStock = $pdo->query("
-    SELECT part_name, quantity, reorder_level, unit
-    FROM v_low_stock_parts ORDER BY shortage DESC LIMIT 6
+// ── Maintenance type distribution for donut ───────────────────────────────────
+$maintTypeRows = $pdo->query("
+    SELECT maintenance_type, COUNT(*) AS cnt
+    FROM maintenance_records
+    WHERE date_performed >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+    GROUP BY maintenance_type
 ")->fetchAll(PDO::FETCH_ASSOC);
+$maintTypeMap = [];
+foreach ($maintTypeRows as $r) $maintTypeMap[$r['maintenance_type']] = (int)$r['cnt'];
+$donutLabels = ['Preventive', 'Corrective', 'Inspection'];
+$donutData   = array_map(fn($l) => $maintTypeMap[$l] ?? 0, $donutLabels);
+$donutColors = ['#198754', '#dc3545', '#0d6efd'];
 
-// ── Recent maintenance records ────────────────────────────────────────────────
-$recentRecords = $pdo->query("
-    SELECT mr.maintenance_type, mr.date_performed, mr.description,
-           tr.plate_number
-    FROM maintenance_records mr
-    JOIN trucks tr ON mr.truck_id = tr.truck_id
-    ORDER BY mr.date_performed DESC, mr.created_at DESC LIMIT 5
+// ── Monthly maintenance cost for bar chart ────────────────────────────────────
+$costRows = $pdo->query("
+    SELECT DATE_FORMAT(date_performed,'%b') AS month,
+           MONTH(date_performed) AS mnum,
+           SUM(cost) AS total
+    FROM maintenance_records
+    WHERE date_performed >= DATE_SUB(CURDATE(), INTERVAL 5 MONTH)
+    GROUP BY YEAR(date_performed), MONTH(date_performed)
+    ORDER BY YEAR(date_performed), MONTH(date_performed)
 ")->fetchAll(PDO::FETCH_ASSOC);
+$costLabels = array_column($costRows, 'month');
+$costData   = array_map(fn($r) => round((float)$r['total'], 2), $costRows);
+
+$GLOBALS['dash_data'] = json_encode([
+    'donut' => ['labels' => $donutLabels, 'data' => $donutData, 'colors' => $donutColors],
+    'cost'  => ['labels' => $costLabels,  'data' => $costData],
+]);
 ?>
-<div class="dash-page">
-  <div class="dash-header mb-4">
-    <h1 class="dash-title">Dashboard</h1>
-    <p class="dash-subtitle">Welcome back, <?= htmlspecialchars($_SESSION['full_name']) ?></p>
+<div class="dm-page">
+
+  <!-- Header -->
+  <div class="dm-header">
+    <div>
+      <h1 class="dm-title">Dashboard</h1>
+      <p class="dm-subtitle">Fleet health, checklists, and parts status</p>
+    </div>
+    <a href="<?= APP_BASE ?>/pages/maintenance.php" class="btn dm-btn-primary">
+      <i class="bi bi-wrench me-1"></i> Log Record
+    </a>
   </div>
 
-  <div class="dash-stats mb-4">
-    <div class="stat-card <?= count($trucksMaint) > 0 ? 'stat-card-warn' : '' ?>"><div class="stat-icon stat-orange"><i class="bi bi-tools"></i></div><div class="stat-info"><div class="stat-value"><?= count($trucksMaint) ?></div><div class="stat-label">Under Maintenance</div></div></div>
-    <div class="stat-card <?= count($pendingChecklists) > 0 ? 'stat-card-warn' : '' ?>"><div class="stat-icon stat-purple"><i class="bi bi-clipboard-check"></i></div><div class="stat-info"><div class="stat-value"><?= count($pendingChecklists) ?></div><div class="stat-label">Pending Checklists</div></div></div>
-    <div class="stat-card <?= count($openIncidents) > 0 ? 'stat-card-alert' : '' ?>"><div class="stat-icon stat-red"><i class="bi bi-exclamation-triangle"></i></div><div class="stat-info"><div class="stat-value"><?= count($openIncidents) ?></div><div class="stat-label">Open Incidents</div></div></div>
-    <div class="stat-card <?= count($lowStock) > 0 ? 'stat-card-warn' : '' ?>"><div class="stat-icon stat-orange"><i class="bi bi-box-seam"></i></div><div class="stat-info"><div class="stat-value"><?= count($lowStock) ?></div><div class="stat-label">Low Stock Parts</div></div></div>
+  <!-- Stat cards -->
+  <div class="dm-stats">
+    <div class="dm-stat-card <?= $underMaint > 0 ? 'dm-stat-warn' : '' ?>">
+      <div class="dm-stat-label">Under Maintenance</div>
+      <div class="dm-stat-value dm-val-orange"><?= $underMaint ?></div>
+      <div class="dm-stat-sub">In garage now</div>
+    </div>
+    <div class="dm-stat-card <?= $openIncidents > 0 ? 'dm-stat-alert' : '' ?>">
+      <div class="dm-stat-label">Open Incidents</div>
+      <div class="dm-stat-value dm-val-red"><?= $openIncidents ?></div>
+      <div class="dm-stat-sub">Requires immediate work</div>
+    </div>
+    <div class="dm-stat-card">
+      <div class="dm-stat-label">Inspections Today</div>
+      <div class="dm-stat-value dm-val-blue"><?= $todayChecks ?></div>
+      <div class="dm-stat-sub">Pre-trip completed</div>
+    </div>
+    <div class="dm-stat-card <?= $lowStockCount > 0 ? 'dm-stat-warn' : '' ?>">
+      <div class="dm-stat-label">Low Stock Items</div>
+      <div class="dm-stat-value dm-val-orange"><?= $lowStockCount ?></div>
+      <div class="dm-stat-sub">Reorder needed</div>
+    </div>
   </div>
 
-  <div class="dash-grid">
-    <!-- Pending Checklists -->
-    <div class="dash-widget dash-widget-wide">
-      <div class="dash-widget-header">
-        <span class="dash-widget-title"><i class="bi bi-clipboard-check me-2"></i>Pending Checklists</span>
-        <a href="<?= APP_BASE ?>/pages/maintenance.php" class="dash-widget-link">View all</a>
+  <!-- Main grid -->
+  <div class="dm-grid">
+
+    <!-- Trucks needing attention -->
+    <div class="dm-widget">
+      <div class="dm-widget-header">
+        <span class="dm-widget-title"><i class="bi bi-truck me-2"></i>Trucks Needing Attention</span>
+        <a href="<?= APP_BASE ?>/pages/fleet_status.php" class="dm-link">View All</a>
       </div>
-      <?php if (empty($pendingChecklists)): ?>
-      <div class="dash-empty"><i class="bi bi-clipboard-check"></i><span>All dispatches have checklists</span></div>
+      <?php if (empty($trucksAttention)): ?>
+      <div class="dm-empty"><i class="bi bi-check-circle"></i><span>All trucks operational</span></div>
       <?php else: ?>
-      <div class="dash-table-wrap">
-        <table class="table dash-table">
-          <thead><tr><th>Truck</th><th>Driver</th><th>Route</th><th>Scheduled</th></tr></thead>
+      <div class="dm-table-wrap">
+        <table class="table dm-table">
+          <thead><tr><th>Truck</th><th>Plate</th><th>Health</th><th>Status</th></tr></thead>
           <tbody>
-            <?php foreach ($pendingChecklists as $cl): ?>
+            <?php foreach ($trucksAttention as $tr):
+              $health = match(true) {
+                  $tr['status'] === 'Under Maintenance' => ['Critical', 'dm-health-critical'],
+                  $tr['last_maint_status'] === 'Under Repair' => ['Critical', 'dm-health-critical'],
+                  $tr['last_maint_status'] === 'Scheduled Maintenance' => ['Warning', 'dm-health-warning'],
+                  default => ['OK', 'dm-health-ok'],
+              };
+              $statusCls = match($tr['status']) {
+                  'Under Maintenance' => 'dm-badge-orange',
+                  'Deployed' => 'dm-badge-blue',
+                  'Available' => 'dm-badge-green',
+                  default => 'dm-badge-gray',
+              };
+            ?>
             <tr>
-              <td><span class="dash-ref"><?= htmlspecialchars($cl['plate_number']) ?></span> <span class="dash-muted"><?= htmlspecialchars($cl['brand'] . ' ' . $cl['model']) ?></span></td>
-              <td><?= htmlspecialchars($cl['driver_name']) ?></td>
-              <td class="dash-route"><?= htmlspecialchars($cl['origin']) ?> <i class="bi bi-arrow-right"></i> <?= htmlspecialchars($cl['destination']) ?></td>
-              <td><?= $cl['scheduled_at'] ? date('M d, H:i', strtotime($cl['scheduled_at'])) : '<span class="dash-muted">—</span>' ?></td>
+              <td class="dm-muted"><?= htmlspecialchars($tr['brand'] . ' ' . $tr['model']) ?></td>
+              <td><span class="dm-plate"><?= htmlspecialchars($tr['plate_number']) ?></span></td>
+              <td><span class="dm-health-badge <?= $health[1] ?>"><?= $health[0] ?></span></td>
+              <td><span class="dm-status-badge <?= $statusCls ?>"><?= htmlspecialchars($tr['status']) ?></span></td>
             </tr>
             <?php endforeach; ?>
           </tbody>
@@ -99,71 +164,78 @@ $recentRecords = $pdo->query("
       <?php endif; ?>
     </div>
 
-    <!-- Open Incidents -->
-    <div class="dash-widget">
-      <div class="dash-widget-header">
-        <span class="dash-widget-title"><i class="bi bi-exclamation-triangle me-2"></i>Open Incidents</span>
-        <a href="<?= APP_BASE ?>/pages/incidents.php" class="dash-widget-link">View all</a>
+    <!-- Parts inventory progress bars -->
+    <div class="dm-widget">
+      <div class="dm-widget-header">
+        <span class="dm-widget-title"><i class="bi bi-box-seam me-2"></i>Parts Inventory</span>
+        <a href="<?= APP_BASE ?>/pages/parts.php" class="dm-link">View All</a>
       </div>
-      <?php if (empty($openIncidents)): ?>
-      <div class="dash-empty"><i class="bi bi-shield-check"></i><span>No open incidents</span></div>
+      <?php if (empty($partsInventory)): ?>
+      <div class="dm-empty"><i class="bi bi-box-seam"></i><span>No parts in inventory</span></div>
       <?php else: ?>
-      <ul class="dash-list">
-        <?php foreach ($openIncidents as $inc): ?>
-        <li class="dash-list-item">
-          <span class="dash-list-icon dash-list-icon-red"><i class="bi bi-exclamation-triangle-fill"></i></span>
-          <div class="dash-list-body"><span class="dash-list-main"><?= htmlspecialchars($inc['incident_type']) ?></span><span class="dash-list-sub"><?= htmlspecialchars($inc['trip_number']) ?> · <?= htmlspecialchars($inc['plate_number']) ?></span></div>
-          <span class="dash-list-time"><?= date('M d', strtotime($inc['reported_at'])) ?></span>
-        </li>
-        <?php endforeach; ?>
-      </ul>
-      <?php endif; ?>
-    </div>
-
-    <!-- Low Stock -->
-    <div class="dash-widget">
-      <div class="dash-widget-header">
-        <span class="dash-widget-title"><i class="bi bi-box-seam me-2"></i>Low Stock Parts</span>
-        <a href="<?= APP_BASE ?>/pages/parts.php" class="dash-widget-link">View all</a>
-      </div>
-      <?php if (empty($lowStock)): ?>
-      <div class="dash-empty"><i class="bi bi-box-seam"></i><span>All parts adequately stocked</span></div>
-      <?php else: ?>
-      <ul class="dash-list">
-        <?php foreach ($lowStock as $p): ?>
-        <li class="dash-list-item">
-          <span class="dash-list-icon dash-list-icon-orange"><i class="bi bi-box-seam"></i></span>
-          <div class="dash-list-body"><span class="dash-list-main"><?= htmlspecialchars($p['part_name']) ?></span><span class="dash-list-sub"><?= $p['quantity'] ?>/<?= $p['reorder_level'] ?> <?= htmlspecialchars($p['unit']) ?></span></div>
-          <?php if ($p['quantity'] == 0): ?><span class="dash-badge dash-badge-red">Out</span><?php else: ?><span class="dash-badge dash-badge-orange">Low</span><?php endif; ?>
-        </li>
-        <?php endforeach; ?>
-      </ul>
-      <?php endif; ?>
-    </div>
-
-    <!-- Recent Maintenance Records -->
-    <div class="dash-widget">
-      <div class="dash-widget-header">
-        <span class="dash-widget-title"><i class="bi bi-tools me-2"></i>Recent Records</span>
-        <a href="<?= APP_BASE ?>/pages/maintenance.php" class="dash-widget-link">View all</a>
-      </div>
-      <?php if (empty($recentRecords)): ?>
-      <div class="dash-empty"><i class="bi bi-tools"></i><span>No maintenance records yet</span></div>
-      <?php else: ?>
-      <ul class="dash-list">
-        <?php foreach ($recentRecords as $rec): ?>
-        <li class="dash-list-item">
-          <span class="dash-list-icon dash-list-icon-blue"><i class="bi bi-wrench"></i></span>
-          <div class="dash-list-body">
-            <span class="dash-list-main"><?= htmlspecialchars($rec['maintenance_type']) ?> · <?= htmlspecialchars($rec['plate_number']) ?></span>
-            <span class="dash-list-sub" style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:180px;"><?= htmlspecialchars($rec['description']) ?></span>
+      <div class="dm-parts-list">
+        <?php foreach ($partsInventory as $part):
+          $reorder = max($part['reorder_level'] * 2, 1);
+          $pct     = min(100, round(($part['quantity'] / $reorder) * 100));
+          $barCls  = $part['quantity'] == 0 ? 'dm-bar-empty'
+                   : ($part['quantity'] <= $part['reorder_level'] ? 'dm-bar-low' : 'dm-bar-ok');
+        ?>
+        <div class="dm-part-row">
+          <div class="dm-part-header">
+            <span class="dm-part-name"><?= htmlspecialchars($part['part_name']) ?></span>
+            <span class="dm-part-qty <?= $part['quantity'] == 0 ? 'dm-qty-empty' : ($part['quantity'] <= $part['reorder_level'] ? 'dm-qty-low' : '') ?>">
+              <?= $part['quantity'] ?> / <?= $part['reorder_level'] * 2 ?> <?= htmlspecialchars($part['unit']) ?>
+            </span>
           </div>
-          <span class="dash-list-time"><?= date('M d', strtotime($rec['date_performed'])) ?></span>
-        </li>
+          <div class="dm-bar-track">
+            <div class="dm-bar-fill <?= $barCls ?>" style="width:<?= $pct ?>%"></div>
+          </div>
+        </div>
         <?php endforeach; ?>
-      </ul>
+      </div>
       <?php endif; ?>
     </div>
+
+    <!-- Maintenance type donut -->
+    <div class="dm-widget">
+      <div class="dm-widget-header">
+        <span class="dm-widget-title"><i class="bi bi-pie-chart me-2"></i>Maintenance Type (90 Days)</span>
+      </div>
+      <div class="dm-chart-wrap">
+        <canvas id="maintTypeChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Monthly cost bar chart -->
+    <div class="dm-widget">
+      <div class="dm-widget-header">
+        <span class="dm-widget-title"><i class="bi bi-bar-chart me-2"></i>Maintenance Cost (₱)</span>
+      </div>
+      <div class="dm-chart-wrap">
+        <canvas id="maintCostChart"></canvas>
+      </div>
+    </div>
+
   </div>
+
+  <!-- Critical maintenance banner -->
+  <?php if ($criticalMaint): ?>
+  <div class="dm-alert-banner">
+    <i class="bi bi-exclamation-circle-fill dm-alert-icon"></i>
+    <div class="dm-alert-body">
+      <strong>Critical Maintenance Required</strong>
+      <span>
+        <?= htmlspecialchars($criticalMaint['plate_number']) ?>
+        flagged with <?= htmlspecialchars($criticalMaint['incident_type']) ?> on trip
+        <?= htmlspecialchars($criticalMaint['trip_number']) ?>.
+        Schedule maintenance before next dispatch.
+      </span>
+    </div>
+    <a href="<?= APP_BASE ?>/pages/maintenance.php" class="dm-alert-btn">Schedule</a>
+  </div>
+  <?php endif; ?>
+
 </div>
+
+<script>window.DASH_DATA = <?= $GLOBALS['dash_data'] ?>;</script>
 <?php layoutFoot(); ?>

@@ -1,0 +1,60 @@
+/* dashboard_accounting.css */
+.da-page { padding:1.5rem 2rem; max-width:1500px; margin:0 auto; }
+
+.da-header { display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--bs-border-color); padding-bottom:1rem; margin-bottom:1.5rem; }
+.da-title    { font-size:1.4rem; font-weight:700; color:var(--bs-emphasis-color); margin:0; letter-spacing:-.01em; }
+.da-subtitle { font-size:.82rem; color:var(--bs-secondary-color); margin:3px 0 0; }
+.da-btn-primary { background:#198754; border:none; color:#fff; font-weight:600; font-size:.875rem; padding:.45rem 1.1rem; border-radius:8px; }
+.da-btn-primary:hover { background:#146c43; color:#fff; }
+
+/* Stat cards */
+.da-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; margin-bottom:1.5rem; }
+.da-stat-card { background:var(--bs-body-bg); border:1px solid var(--bs-border-color); border-radius:12px; padding:1rem 1.25rem; }
+.da-stat-success { border-color:#19875440; background:rgba(25,135,84,.03); }
+.da-stat-warn    { border-color:#ffc10760; background:rgba(255,193,7,.03); }
+.da-stat-alert   { border-color:#dc354560; background:rgba(220,53,69,.03); }
+.da-stat-label { font-size:.75rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--bs-secondary-color); margin-bottom:4px; }
+.da-stat-value { font-size:1.9rem; font-weight:800; line-height:1.1; font-variant-numeric:tabular-nums; }
+.da-stat-sub   { font-size:.75rem; color:var(--bs-secondary-color); margin-top:3px; }
+.da-val-blue   { color:#0d6efd; }
+.da-val-green  { color:#198754; }
+.da-val-orange { color:#fd7e14; }
+.da-val-red    { color:#dc3545; }
+
+/* Grid */
+.da-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:1.1rem; }
+.da-widget { background:var(--bs-body-bg); border:1px solid var(--bs-border-color); border-radius:12px; overflow:hidden; }
+.da-widget-wide { grid-column:1 / -1; }
+
+.da-widget-header { display:flex; align-items:center; justify-content:space-between; padding:.8rem 1rem; border-bottom:1px solid var(--bs-border-color); background:var(--bs-tertiary-bg); }
+.da-widget-title  { font-size:.875rem; font-weight:700; color:var(--bs-emphasis-color); display:flex; align-items:center; }
+.da-link { font-size:.78rem; font-weight:600; color:#0d6efd; text-decoration:none; }
+.da-link:hover { text-decoration:underline; }
+
+.da-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.5rem; padding:2.5rem 1rem; color:var(--bs-secondary-color); font-size:.85rem; }
+.da-empty i { font-size:1.8rem; opacity:.3; }
+
+/* Tables */
+.da-table-wrap { overflow-x:auto; }
+.da-table { margin-bottom:0; font-size:.83rem; }
+.da-table thead th { background:transparent; font-size:.74rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--bs-secondary-color); border-bottom:1px solid var(--bs-border-color); padding:.6rem 1rem; white-space:nowrap; }
+.da-table tbody td { padding:.7rem 1rem; vertical-align:middle; border-bottom:1px solid var(--bs-border-color); color:var(--bs-body-color); }
+.da-table tbody tr:last-child td { border-bottom:none; }
+.da-table tbody tr:hover { background:var(--bs-tertiary-bg); }
+
+.da-ref { font-family:'Courier New',monospace; font-size:.8rem; font-weight:700; background:var(--bs-secondary-bg); padding:2px 6px; border-radius:4px; display:block; }
+.da-muted  { font-size:.78rem; color:var(--bs-secondary-color); }
+.da-amount { font-variant-numeric:tabular-nums; font-weight:600; white-space:nowrap; }
+.da-billing-num { font-family:'Courier New',monospace; font-size:.8rem; color:var(--bs-secondary-color); }
+.da-late   { color:#dc3545; font-weight:600; }
+
+.da-badge { display:inline-block; font-size:.72rem; font-weight:700; padding:2px 9px; border-radius:20px; white-space:nowrap; }
+.da-badge-orange { background:rgba(253,126,20,.12); color:#9a4300; }
+.da-badge-red    { background:rgba(220,53,69,.12);  color:#b02a37; }
+.da-badge-green  { background:rgba(25,135,84,.1);   color:#146c43; }
+
+/* Charts */
+.da-chart-wrap { padding:1rem; height:240px; }
+
+@media(max-width:1100px) { .da-grid { grid-template-columns:1fr; } .da-widget-wide { grid-column:auto; } }
+@media(max-width:768px)  { .da-page { padding:1.25rem 1rem; } .da-stats { grid-template-columns:repeat(2,1fr); } }

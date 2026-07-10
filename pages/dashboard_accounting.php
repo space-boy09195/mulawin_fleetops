@@ -5,99 +5,148 @@ require_once __DIR__ . '/../config/database.php';
 
 requireRole([ROLE_ACCOUNTING]);
 
-$GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard.js';
-layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard.css');
+$GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard_accounting.js';
+layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_accounting.css');
 
 $pdo = getDBConnection();
 
-// ── Billing summary ───────────────────────────────────────────────────────────
+// ── Stat cards ────────────────────────────────────────────────────────────────
 $bilStats = $pdo->query("
     SELECT
-        SUM(status = 'Unpaid')   AS unpaid_count,
-        SUM(status = 'Partial')  AS partial_count,
-        SUM(status = 'Paid')     AS paid_count,
-        SUM(billed_amount)       AS total_billed,
-        SUM(total_collected)     AS total_collected,
-        SUM(balance)             AS total_outstanding
+        SUM(billed_amount)                        AS total_billed,
+        SUM(total_collected)                      AS total_collected,
+        SUM(CASE WHEN status!='Paid' THEN balance ELSE 0 END) AS pending,
+        SUM(CASE WHEN status!='Paid' AND due_date < CURDATE() THEN balance ELSE 0 END) AS overdue,
+        COUNT(CASE WHEN status!='Paid' AND due_date < CURDATE() THEN 1 END) AS overdue_count
     FROM v_billing_summary
 ")->fetch(PDO::FETCH_ASSOC);
 
-// ── Overdue billings ──────────────────────────────────────────────────────────
-$overdue = $pdo->query("
-    SELECT b.billing_number, b.client_name, b.due_date,
-           vs.balance, t.trip_number
+$totalBilled    = (float)($bilStats['total_billed']    ?? 0);
+$totalCollected = (float)($bilStats['total_collected'] ?? 0);
+$pending        = (float)($bilStats['pending']         ?? 0);
+$overdue        = (float)($bilStats['overdue']         ?? 0);
+$overdueCount   = (int)($bilStats['overdue_count']     ?? 0);
+$collectionRate = $totalBilled > 0 ? round(($totalCollected / $totalBilled) * 100, 1) : 0;
+
+// ── Trips with billings but no documents ──────────────────────────────────────
+$tripsNoDocs = $pdo->query("
+    SELECT b.billing_number, b.amount, b.status AS billing_status,
+           t.trip_number, r.origin, r.destination,
+           (SELECT COUNT(*) FROM billing_documents bd WHERE bd.billing_id = b.billing_id) AS doc_count
+    FROM billings b
+    JOIN trips t              ON b.trip_id    = t.trip_id
+    JOIN dispatch_requests dr ON t.dispatch_id = dr.dispatch_id
+    JOIN routes r             ON dr.route_id   = r.route_id
+    WHERE b.status != 'Paid'
+    HAVING doc_count = 0
+    ORDER BY b.created_at DESC LIMIT 5
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// ── Overdue invoices ──────────────────────────────────────────────────────────
+$overdueInvoices = $pdo->query("
+    SELECT b.billing_number, b.client_name, b.due_date, vs.balance, t.trip_number
     FROM billings b
     JOIN v_billing_summary vs ON b.billing_id = vs.billing_id
     JOIN trips t              ON b.trip_id    = t.trip_id
     WHERE b.status != 'Paid' AND b.due_date < CURDATE()
-    ORDER BY b.due_date ASC LIMIT 6
+    ORDER BY b.due_date ASC LIMIT 5
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// ── Unpaid / partial billings ─────────────────────────────────────────────────
-$unpaidBillings = $pdo->query("
-    SELECT b.billing_number, b.client_name, b.due_date, b.status,
-           vs.balance, t.trip_number
+// ── Monthly billed vs collected — last 6 months ───────────────────────────────
+$monthlyRows = $pdo->query("
+    SELECT DATE_FORMAT(b.created_at,'%b') AS month,
+           MONTH(b.created_at)            AS mnum,
+           YEAR(b.created_at)             AS yr,
+           SUM(b.amount)                  AS billed,
+           COALESCE(SUM(c.total_paid),0)  AS collected
     FROM billings b
-    JOIN v_billing_summary vs ON b.billing_id = vs.billing_id
-    JOIN trips t              ON b.trip_id    = t.trip_id
-    WHERE b.status IN ('Unpaid', 'Partial')
-    ORDER BY b.due_date ASC LIMIT 8
+    LEFT JOIN (
+        SELECT billing_id, SUM(amount_paid) AS total_paid
+        FROM collections GROUP BY billing_id
+    ) c ON b.billing_id = c.billing_id
+    WHERE b.created_at >= DATE_SUB(CURDATE(), INTERVAL 5 MONTH)
+    GROUP BY YEAR(b.created_at), MONTH(b.created_at)
+    ORDER BY YEAR(b.created_at), MONTH(b.created_at)
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// ── Recent collections ────────────────────────────────────────────────────────
-$recentCollections = $pdo->query("
-    SELECT c.amount_paid, c.payment_mode, c.payment_date,
-           b.billing_number, b.client_name
-    FROM collections c
-    JOIN billings b ON c.billing_id = b.billing_id
-    ORDER BY c.created_at DESC LIMIT 6
-")->fetchAll(PDO::FETCH_ASSOC);
+$monthLabels    = array_column($monthlyRows, 'month');
+$billedData     = array_map(fn($r) => round((float)$r['billed'], 2),    $monthlyRows);
+$collectedData  = array_map(fn($r) => round((float)$r['collected'], 2), $monthlyRows);
+
+// ── Collection rate per month ─────────────────────────────────────────────────
+$rateData = array_map(function($r) {
+    $b = (float)$r['billed'];
+    $c = (float)$r['collected'];
+    return $b > 0 ? round(($c / $b) * 100, 1) : 0;
+}, $monthlyRows);
+
+$GLOBALS['dash_data'] = json_encode([
+    'monthly' => ['labels' => $monthLabels, 'billed' => $billedData, 'collected' => $collectedData],
+    'rate'    => ['labels' => $monthLabels, 'data'   => $rateData],
+]);
 ?>
-<div class="dash-page">
-  <div class="dash-header mb-4">
-    <h1 class="dash-title">Dashboard</h1>
-    <p class="dash-subtitle">Welcome back, <?= htmlspecialchars($_SESSION['full_name']) ?></p>
+<div class="da-page">
+
+  <!-- Header -->
+  <div class="da-header">
+    <div>
+      <h1 class="da-title">Dashboard</h1>
+      <p class="da-subtitle">Operational analytics and diagnostic alerts</p>
+    </div>
+    <a href="<?= APP_BASE ?>/pages/billing.php" class="btn da-btn-primary">
+      <i class="bi bi-receipt me-1"></i> Create Billing
+    </a>
   </div>
 
-  <div class="dash-stats mb-4">
-    <div class="stat-card"><div class="stat-icon stat-blue"><i class="bi bi-receipt"></i></div><div class="stat-info"><div class="stat-value">₱<?= number_format($bilStats['total_billed'] ?? 0, 0) ?></div><div class="stat-label">Total Billed</div></div></div>
-    <div class="stat-card stat-card-success"><div class="stat-icon stat-green"><i class="bi bi-cash-stack"></i></div><div class="stat-info"><div class="stat-value">₱<?= number_format($bilStats['total_collected'] ?? 0, 0) ?></div><div class="stat-label">Total Collected</div></div></div>
-    <div class="stat-card <?= ($bilStats['total_outstanding'] ?? 0) > 0 ? 'stat-card-alert' : '' ?>"><div class="stat-icon stat-red"><i class="bi bi-exclamation-circle"></i></div><div class="stat-info"><div class="stat-value">₱<?= number_format($bilStats['total_outstanding'] ?? 0, 0) ?></div><div class="stat-label">Outstanding</div></div></div>
-    <div class="stat-card <?= ($bilStats['unpaid_count'] ?? 0) > 0 ? 'stat-card-warn' : '' ?>"><div class="stat-icon stat-orange"><i class="bi bi-hourglass-split"></i></div><div class="stat-info"><div class="stat-value"><?= (int)($bilStats['unpaid_count'] ?? 0) ?></div><div class="stat-label">Unpaid</div></div></div>
-    <div class="stat-card <?= ($bilStats['partial_count'] ?? 0) > 0 ? 'stat-card-warn' : '' ?>"><div class="stat-icon stat-purple"><i class="bi bi-pie-chart"></i></div><div class="stat-info"><div class="stat-value"><?= (int)($bilStats['partial_count'] ?? 0) ?></div><div class="stat-label">Partial</div></div></div>
-    <div class="stat-card <?= count($overdue) > 0 ? 'stat-card-alert' : '' ?>"><div class="stat-icon stat-red"><i class="bi bi-calendar-x"></i></div><div class="stat-info"><div class="stat-value"><?= count($overdue) ?></div><div class="stat-label">Overdue</div></div></div>
+  <!-- Stat cards -->
+  <div class="da-stats">
+    <div class="da-stat-card">
+      <div class="da-stat-label">Total Billed</div>
+      <div class="da-stat-value da-val-blue">₱<?= number_format($totalBilled / 1000, 0) ?>K</div>
+      <div class="da-stat-sub"><?= date('M Y') ?></div>
+    </div>
+    <div class="da-stat-card da-stat-success">
+      <div class="da-stat-label">Collected</div>
+      <div class="da-stat-value da-val-green">₱<?= number_format($totalCollected / 1000, 0) ?>K</div>
+      <div class="da-stat-sub"><?= $collectionRate ?>% of billed</div>
+    </div>
+    <div class="da-stat-card <?= $pending > 0 ? 'da-stat-warn' : '' ?>">
+      <div class="da-stat-label">Pending</div>
+      <div class="da-stat-value da-val-orange">₱<?= number_format($pending / 1000, 0) ?>K</div>
+      <div class="da-stat-sub">Pending payment</div>
+    </div>
+    <div class="da-stat-card <?= $overdue > 0 ? 'da-stat-alert' : '' ?>">
+      <div class="da-stat-label">Overdue</div>
+      <div class="da-stat-value da-val-red">₱<?= number_format($overdue / 1000, 0) ?>K</div>
+      <div class="da-stat-sub"><?= $overdueCount ?> invoice<?= $overdueCount !== 1 ? 's' : '' ?></div>
+    </div>
   </div>
 
-  <div class="dash-grid">
-    <!-- Unpaid/Partial Billings -->
-    <div class="dash-widget dash-widget-wide">
-      <div class="dash-widget-header">
-        <span class="dash-widget-title"><i class="bi bi-receipt me-2"></i>Unpaid &amp; Partial Billings</span>
-        <a href="<?= APP_BASE ?>/pages/billing.php" class="dash-widget-link">View all</a>
+  <!-- Main grid -->
+  <div class="da-grid">
+
+    <!-- Trips awaiting documents -->
+    <div class="da-widget">
+      <div class="da-widget-header">
+        <span class="da-widget-title"><i class="bi bi-folder2-open me-2"></i>Billings Without Documents</span>
+        <a href="<?= APP_BASE ?>/pages/billing.php" class="da-link">View All</a>
       </div>
-      <?php if (empty($unpaidBillings)): ?>
-      <div class="dash-empty"><i class="bi bi-check-circle"></i><span>All billings are settled</span></div>
+      <?php if (empty($tripsNoDocs)): ?>
+      <div class="da-empty"><i class="bi bi-folder-check"></i><span>All billings have documents</span></div>
       <?php else: ?>
-      <div class="dash-table-wrap">
-        <table class="table dash-table">
-          <thead><tr><th>Billing No.</th><th>Trip</th><th>Client</th><th>Balance</th><th>Due Date</th><th>Status</th></tr></thead>
+      <div class="da-table-wrap">
+        <table class="table da-table">
+          <thead><tr><th>Trip</th><th>Billing No.</th><th>Amount</th><th>Status</th></tr></thead>
           <tbody>
-            <?php foreach ($unpaidBillings as $b):
-              $isOverdue = strtotime($b['due_date']) < time();
-            ?>
+            <?php foreach ($tripsNoDocs as $td): ?>
             <tr>
-              <td><span class="dash-ref"><?= htmlspecialchars($b['billing_number']) ?></span></td>
-              <td><span class="dash-muted"><?= htmlspecialchars($b['trip_number']) ?></span></td>
-              <td><?= $b['client_name'] ? htmlspecialchars($b['client_name']) : '<span class="dash-muted">—</span>' ?></td>
-              <td class="dash-amount">₱<?= number_format($b['balance'], 2) ?></td>
-              <td class="<?= $isOverdue ? 'dash-late' : '' ?>"><?= date('M d, Y', strtotime($b['due_date'])) ?></td>
               <td>
-                <?php if ($b['status'] === 'Partial'): ?>
-                <span class="dash-badge dash-badge-orange">Partial</span>
-                <?php else: ?>
-                <span class="dash-badge dash-badge-red">Unpaid</span>
-                <?php endif; ?>
+                <span class="da-ref"><?= htmlspecialchars($td['trip_number']) ?></span>
+                <span class="da-muted"><?= htmlspecialchars($td['origin']) ?> → <?= htmlspecialchars($td['destination']) ?></span>
               </td>
+              <td class="da-billing-num"><?= htmlspecialchars($td['billing_number']) ?></td>
+              <td class="da-amount">₱<?= number_format($td['amount'], 2) ?></td>
+              <td><span class="da-badge da-badge-orange">No Docs</span></td>
             </tr>
             <?php endforeach; ?>
           </tbody>
@@ -106,53 +155,55 @@ $recentCollections = $pdo->query("
       <?php endif; ?>
     </div>
 
-    <!-- Overdue Billings -->
-    <div class="dash-widget">
-      <div class="dash-widget-header">
-        <span class="dash-widget-title"><i class="bi bi-calendar-x me-2"></i>Overdue</span>
-        <a href="<?= APP_BASE ?>/pages/billing.php" class="dash-widget-link">View all</a>
+    <!-- Overdue Invoices -->
+    <div class="da-widget">
+      <div class="da-widget-header">
+        <span class="da-widget-title"><i class="bi bi-calendar-x me-2"></i>Overdue Invoices</span>
+        <a href="<?= APP_BASE ?>/pages/billing.php" class="da-link">View All</a>
       </div>
-      <?php if (empty($overdue)): ?>
-      <div class="dash-empty"><i class="bi bi-calendar-check"></i><span>No overdue billings</span></div>
+      <?php if (empty($overdueInvoices)): ?>
+      <div class="da-empty"><i class="bi bi-calendar-check"></i><span>No overdue invoices</span></div>
       <?php else: ?>
-      <ul class="dash-list">
-        <?php foreach ($overdue as $o): ?>
-        <li class="dash-list-item">
-          <span class="dash-list-icon dash-list-icon-red"><i class="bi bi-calendar-x"></i></span>
-          <div class="dash-list-body">
-            <span class="dash-list-main"><?= htmlspecialchars($o['billing_number']) ?></span>
-            <span class="dash-list-sub">₱<?= number_format($o['balance'], 2) ?> · <?= $o['client_name'] ? htmlspecialchars($o['client_name']) : $o['trip_number'] ?></span>
-          </div>
-          <span class="dash-list-time dash-late"><?= date('M d', strtotime($o['due_date'])) ?></span>
-        </li>
-        <?php endforeach; ?>
-      </ul>
+      <div class="da-table-wrap">
+        <table class="table da-table">
+          <thead><tr><th>Invoice</th><th>Client</th><th>Date</th><th>Amount</th></tr></thead>
+          <tbody>
+            <?php foreach ($overdueInvoices as $ov): ?>
+            <tr>
+              <td><span class="da-ref"><?= htmlspecialchars($ov['billing_number']) ?></span></td>
+              <td><?= $ov['client_name'] ? htmlspecialchars($ov['client_name']) : '<span class="da-muted">' . htmlspecialchars($ov['trip_number']) . '</span>' ?></td>
+              <td class="da-late"><?= date('Y-m-d', strtotime($ov['due_date'])) ?></td>
+              <td class="da-amount">₱<?= number_format($ov['balance'], 2) ?></td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
       <?php endif; ?>
     </div>
 
-    <!-- Recent Collections -->
-    <div class="dash-widget">
-      <div class="dash-widget-header">
-        <span class="dash-widget-title"><i class="bi bi-cash-stack me-2"></i>Recent Collections</span>
-        <a href="<?= APP_BASE ?>/pages/billing.php" class="dash-widget-link">View all</a>
+    <!-- Billed vs Collected bar chart -->
+    <div class="da-widget da-widget-wide">
+      <div class="da-widget-header">
+        <span class="da-widget-title"><i class="bi bi-bar-chart me-2"></i>Revenue: Billed vs Collected (₱ thousands)</span>
       </div>
-      <?php if (empty($recentCollections)): ?>
-      <div class="dash-empty"><i class="bi bi-cash-stack"></i><span>No collections recorded yet</span></div>
-      <?php else: ?>
-      <ul class="dash-list">
-        <?php foreach ($recentCollections as $c): ?>
-        <li class="dash-list-item">
-          <span class="dash-list-icon dash-list-icon-green"><i class="bi bi-cash"></i></span>
-          <div class="dash-list-body">
-            <span class="dash-list-main">₱<?= number_format($c['amount_paid'], 2) ?> · <?= htmlspecialchars($c['payment_mode']) ?></span>
-            <span class="dash-list-sub"><?= htmlspecialchars($c['billing_number']) ?><?= $c['client_name'] ? ' · ' . htmlspecialchars($c['client_name']) : '' ?></span>
-          </div>
-          <span class="dash-list-time"><?= date('M d', strtotime($c['payment_date'])) ?></span>
-        </li>
-        <?php endforeach; ?>
-      </ul>
-      <?php endif; ?>
+      <div class="da-chart-wrap">
+        <canvas id="billedCollectedChart"></canvas>
+      </div>
     </div>
+
+    <!-- Collection Rate line chart -->
+    <div class="da-widget da-widget-wide">
+      <div class="da-widget-header">
+        <span class="da-widget-title"><i class="bi bi-graph-up me-2"></i>Collection Rate (%)</span>
+      </div>
+      <div class="da-chart-wrap">
+        <canvas id="collectionRateChart"></canvas>
+      </div>
+    </div>
+
   </div>
 </div>
+
+<script>window.DASH_DATA = <?= $GLOBALS['dash_data'] ?>;</script>
 <?php layoutFoot(); ?>

@@ -1,7 +1,5 @@
 /* ============================================================
    assets/css/fleet_status.css
-   Styles specific to pages/fleet_status.php
-   General layout styles live in layout.css
    ============================================================ */
 
 /* ---- Filter buttons -------------------------------------- */
@@ -30,48 +28,82 @@
   font-weight: 600;
 }
 
-/* ---- Table tweaks for fleet page ------------------------- */
-#fleetTable tbody tr {
-  transition: background-color 0.1s ease;
+/* ---- Table tweaks ---------------------------------------- */
+#fleetTable tbody tr { transition: background-color 0.1s ease; }
+#fleetTable tbody tr.hidden-row { display: none; }
+#fleetTable td:first-child { font-size: 0.9rem; }
+
+/* ---- No results / row count ------------------------------ */
+#noResults { display:none; padding:32px; text-align:center; color:var(--text-muted); font-size:.9rem; }
+#rowCount  { font-size:.78rem; color:var(--text-muted); }
+
+/* ---- Modals ---------------------------------------------- */
+.fleet-modal {
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  overflow: hidden;
 }
 
-#fleetTable tbody tr.hidden-row {
-  display: none;
+.fleet-modal-header-add {
+  background: #198754;
+  color: #fff;
+  border-bottom: none;
+  padding: .9rem 1.25rem;
 }
 
-/* Plate number column */
-#fleetTable td:first-child {
-  font-size: 0.9rem;
+.fleet-modal-header-edit {
+  background: #0d6efd;
+  color: #fff;
+  border-bottom: none;
+  padding: .9rem 1.25rem;
 }
 
-/* ---- No results message ---------------------------------- */
-#noResults {
-  display: none;
-  padding: 32px;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 0.9rem;
+.fleet-modal-header-status {
+  background: #6c757d;
+  color: #fff;
+  border-bottom: none;
+  padding: .9rem 1.25rem;
 }
 
-/* ---- Row count label ------------------------------------- */
-#rowCount {
-  font-size: 0.78rem;
-  color: var(--text-muted);
+.fleet-modal-body {
+  padding: 1.25rem;
+  background: var(--card-bg);
 }
 
-/* ---- Modal dark mode fix --------------------------------- */
-[data-theme="dark"] .btn-close {
-  filter: invert(1);
+.fleet-modal-footer {
+  background: var(--card-bg);
+  border-top: 1px solid var(--card-border);
+  padding: .85rem 1.25rem;
 }
 
-[data-theme="dark"] .form-select {
-  background-color: var(--card-bg);
+.fleet-label {
+  display: block;
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 4px;
+}
+
+.fleet-input {
+  font-size: .875rem;
+  background: var(--card-bg);
   color: var(--text-primary);
   border-color: var(--card-border);
+  border-radius: 8px;
 }
 
-[data-theme="dark"] .form-control {
-  background-color: var(--card-bg);
+.fleet-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(13,110,253,.15);
+  background: var(--card-bg);
   color: var(--text-primary);
-  border-color: var(--card-border);
 }
+
+/* ---- Dark mode fixes ------------------------------------- */
+[data-theme="dark"] .btn-close    { filter: invert(1); }
+[data-theme="dark"] .fleet-input  { background-color: var(--card-bg); color: var(--text-primary); border-color: var(--card-border); }
+[data-theme="dark"] .fleet-input:focus { background-color: var(--card-bg); }

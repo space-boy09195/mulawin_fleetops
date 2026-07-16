@@ -2,6 +2,7 @@
    assets/css/dispatch.css
    ============================================================ */
 
+/* ── Filter buttons ─────────────────────────────────────────── */
 .filter-btn {
   padding: 5px 14px;
   border-radius: 20px;
@@ -17,15 +18,142 @@
 .filter-btn:hover  { border-color: var(--accent); color: var(--accent); }
 .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 
+/* ── Hidden rows ─────────────────────────────────────────────── */
 tr.hidden-row { display: none; }
 
-[data-theme="dark"] .form-select,
-[data-theme="dark"] .form-control {
+/* ── No results ──────────────────────────────────────────────── */
+.disp-no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+.disp-no-results i { font-size: 2rem; opacity: 0.3; }
+
+/* ── Tabs ────────────────────────────────────────────────────── */
+.disp-tabs {
+  border-bottom: 2px solid var(--card-border);
+  gap: 0.25rem;
+}
+
+.disp-tab {
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  padding: 0.55rem 1.1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 0;
+}
+
+.disp-tab:hover { color: var(--text-primary); }
+
+.disp-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.disp-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card-border);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+}
+
+.disp-tab.active .disp-tab-count {
+  background: rgba(13, 110, 253, 0.15);
+  color: var(--accent);
+}
+
+/* ── Modals ──────────────────────────────────────────────────── */
+.disp-modal {
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.disp-modal-header-blue {
+  background: #0d6efd;
+  color: #fff;
+  border-bottom: none;
+  padding: 0.9rem 1.25rem;
+}
+
+.disp-modal-header-green {
+  background: #198754;
+  color: #fff;
+  border-bottom: none;
+  padding: 0.9rem 1.25rem;
+}
+
+.disp-modal-header-red {
+  background: #dc3545;
+  color: #fff;
+  border-bottom: none;
+  padding: 0.9rem 1.25rem;
+}
+
+.disp-modal-body {
+  padding: 1.25rem;
+  background: var(--card-bg);
+}
+
+.disp-modal-footer {
+  background: var(--card-bg);
+  border-top: 1px solid var(--card-border);
+  padding: 0.85rem 1.25rem;
+}
+
+.disp-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.disp-input {
+  font-size: 0.875rem;
   background-color: var(--card-bg);
   color: var(--text-primary);
   border-color: var(--card-border);
+  border-radius: 8px;
 }
-[data-theme="dark"] .btn-close { filter: invert(1); }
 
-.btn-success { background:#16a34a; border-color:#16a34a; }
-.btn-success:hover { background:#15803d; border-color:#15803d; }
+.disp-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15);
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+}
+
+/* ── Dark mode fixes ─────────────────────────────────────────── */
+[data-theme="dark"] .btn-close      { filter: invert(1); }
+[data-theme="dark"] .disp-input     { background-color: var(--card-bg); color: var(--text-primary); border-color: var(--card-border); }
+[data-theme="dark"] .disp-input:focus { background-color: var(--card-bg); }
+
+/* ── Route table helper ──────────────────────────────────────── */
+#routesTable .fw-600 { font-weight: 600; }

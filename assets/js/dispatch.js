@@ -414,6 +414,41 @@ document.addEventListener('DOMContentLoaded', () => {
       });
   });
 
+  // ── View Route (read-only, all roles) ────────────────────────────────────────
+  const viewRouteModal    = document.getElementById('viewRouteModal');
+  const vr_origin         = document.getElementById('vr_origin');
+  const vr_destination    = document.getElementById('vr_destination');
+  const vr_title          = document.getElementById('vr_title');
+  const vr_origin_text    = document.getElementById('vr_origin_text');
+  const vr_destination_text = document.getElementById('vr_destination_text');
+  const vr_distance_text  = document.getElementById('vr_distance_text');
+
+  const vrMapPreview = wireMapPreview('vr', vr_origin, vr_destination);
+
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('.btn-view-route');
+    if (!btn) return;
+
+    const name        = btn.dataset.name        ?? '';
+    const origin      = btn.dataset.origin      ?? '';
+    const destination  = btn.dataset.destination ?? '';
+    const distance     = btn.dataset.distance    ?? '';
+
+    if (vr_title)       vr_title.textContent = name || 'Route Preview';
+    if (vr_origin_text) vr_origin_text.textContent = origin;
+    if (vr_destination_text) vr_destination_text.textContent = destination;
+    if (vr_distance_text) vr_distance_text.textContent = distance ? `${distance} km` : '—';
+    if (vr_origin)      vr_origin.value      = origin;
+    if (vr_destination) vr_destination.value = destination;
+
+    vrMapPreview.refreshAll();
+    new bootstrap.Modal(viewRouteModal).show();
+  });
+
+  viewRouteModal?.addEventListener('hidden.bs.modal', () => {
+    vrMapPreview.reset();
+  });
+
   // ── Toggle Route active/inactive ─────────────────────────────────────────────
   document.addEventListener('click', e => {
     const btn = e.target.closest('.btn-toggle-route');

@@ -293,6 +293,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
               <th>Destination</th>
               <th>Distance</th>
               <th>Status</th>
+              <th>Map</th>
               <?php if ($isHead): ?>
               <th>Actions</th>
               <?php endif; ?>
@@ -313,6 +314,16 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                 <span class="status-badge <?= $rt['is_active'] ? 'available' : 'inactive' ?>">
                   <?= $rt['is_active'] ? '🟢 Active' : '⚫ Inactive' ?>
                 </span>
+              </td>
+              <td>
+                <button class="btn btn-sm btn-outline-secondary btn-view-route"
+                        title="View route on map"
+                        data-name="<?= htmlspecialchars($rt['route_name'], ENT_QUOTES) ?>"
+                        data-origin="<?= htmlspecialchars($rt['origin'], ENT_QUOTES) ?>"
+                        data-destination="<?= htmlspecialchars($rt['destination'], ENT_QUOTES) ?>"
+                        data-distance="<?= htmlspecialchars($rt['distance_km'] ?? '', ENT_QUOTES) ?>">
+                  <i class="bi bi-map"></i>
+                </button>
               </td>
               <?php if ($isHead): ?>
               <td>
@@ -623,5 +634,67 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
   </div>
 </div>
 <?php endif; ?>
+
+<!-- ══ View Route Modal (read-only, all roles) ═══════════════════════════════ -->
+<div class="modal fade" id="viewRouteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content disp-modal">
+      <div class="modal-header disp-modal-header-blue">
+        <h5 class="modal-title"><i class="bi bi-map me-2"></i><span id="vr_title">Route Preview</span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body disp-modal-body">
+        <input type="hidden" id="vr_origin">
+        <input type="hidden" id="vr_destination">
+        <div class="row g-3 mb-2">
+          <div class="col-md-6">
+            <label class="disp-label">Origin</label>
+            <div id="vr_origin_text" class="fw-600"></div>
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label">Destination</label>
+            <div id="vr_destination_text" class="fw-600"></div>
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label">Distance</label>
+            <div id="vr_distance_text"></div>
+          </div>
+        </div>
+        <div class="row g-2">
+          <div class="col-md-6">
+            <div class="route-map-wrap" id="vr_origin_map_wrap">
+              <div class="route-map-placeholder" id="vr_origin_map_placeholder">
+                <i class="bi bi-geo-alt"></i><span>Origin preview</span>
+              </div>
+              <iframe class="route-map-frame d-none" id="vr_origin_map"
+                      loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="route-map-wrap" id="vr_destination_map_wrap">
+              <div class="route-map-placeholder" id="vr_destination_map_placeholder">
+                <i class="bi bi-geo-alt-fill"></i><span>Destination preview</span>
+              </div>
+              <iframe class="route-map-frame d-none" id="vr_destination_map"
+                      loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="route-map-wrap route-map-wrap-lg" id="vr_route_map_wrap">
+              <div class="route-map-placeholder" id="vr_route_map_placeholder">
+                <i class="bi bi-signpost-2"></i><span>Route preview</span>
+              </div>
+              <iframe class="route-map-frame route-map-frame-lg d-none" id="vr_route_map"
+                      loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer disp-modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <?php layoutFoot(); ?>

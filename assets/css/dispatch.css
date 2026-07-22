@@ -157,3 +157,40 @@ tr.hidden-row { display: none; }
 
 /* ── Route table helper ──────────────────────────────────────── */
 #routesTable .fw-600 { font-weight: 600; }
+
+/* ── Route map preview (Google Maps embed, no API key) ────────── */
+.route-map-wrap {
+  position: relative;
+  width: 100%;
+  height: 160px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--card-bg);
+}
+
+.route-map-wrap-lg { height: 220px; }
+
+.route-map-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.route-map-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-align: center;
+  padding: 0.5rem;
+  background: var(--card-bg);
+}
+
+.route-map-placeholder i { font-size: 1.4rem; opacity: 0.35; }

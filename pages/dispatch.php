@@ -167,7 +167,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             <?php if (empty($requests)): ?>
             <tr>
               <td colspan="8" class="text-center text-muted py-4">
-                No dispatch requests yet.
+              
               </td>
             </tr>
             <?php else: ?>
@@ -496,6 +496,40 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             <input type="number" class="form-control disp-input" id="ar_distance"
                    min="0" step="0.1" placeholder="e.g. 1180.5">
           </div>
+
+          <!-- ── Map Preview ─────────────────────────────────────────────── -->
+          <div class="col-12">
+            <label class="disp-label">Map Preview</label>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <div class="route-map-wrap" id="ar_origin_map_wrap">
+                  <div class="route-map-placeholder" id="ar_origin_map_placeholder">
+                    <i class="bi bi-geo-alt"></i><span>Origin preview</span>
+                  </div>
+                  <iframe class="route-map-frame d-none" id="ar_origin_map"
+                          loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="route-map-wrap" id="ar_destination_map_wrap">
+                  <div class="route-map-placeholder" id="ar_destination_map_placeholder">
+                    <i class="bi bi-geo-alt-fill"></i><span>Destination preview</span>
+                  </div>
+                  <iframe class="route-map-frame d-none" id="ar_destination_map"
+                          loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="route-map-wrap route-map-wrap-lg" id="ar_route_map_wrap">
+                  <div class="route-map-placeholder" id="ar_route_map_placeholder">
+                    <i class="bi bi-signpost-2"></i><span>Enter both origin and destination to preview the route</span>
+                  </div>
+                  <iframe class="route-map-frame route-map-frame-lg d-none" id="ar_route_map"
+                          loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="modal-footer disp-modal-footer">
@@ -539,6 +573,40 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             <label class="disp-label">Distance (km) <span class="text-muted" style="font-weight:400;">(optional)</span></label>
             <input type="number" class="form-control disp-input" id="er_distance"
                    min="0" step="0.1">
+          </div>
+
+          <!-- ── Map Preview ─────────────────────────────────────────────── -->
+          <div class="col-12">
+            <label class="disp-label">Map Preview</label>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <div class="route-map-wrap" id="er_origin_map_wrap">
+                  <div class="route-map-placeholder" id="er_origin_map_placeholder">
+                    <i class="bi bi-geo-alt"></i><span>Origin preview</span>
+                  </div>
+                  <iframe class="route-map-frame d-none" id="er_origin_map"
+                          loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="route-map-wrap" id="er_destination_map_wrap">
+                  <div class="route-map-placeholder" id="er_destination_map_placeholder">
+                    <i class="bi bi-geo-alt-fill"></i><span>Destination preview</span>
+                  </div>
+                  <iframe class="route-map-frame d-none" id="er_destination_map"
+                          loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
+              </div>
+              <div class="col-12">
+                <div class="route-map-wrap route-map-wrap-lg" id="er_route_map_wrap">
+                  <div class="route-map-placeholder" id="er_route_map_placeholder">
+                    <i class="bi bi-signpost-2"></i><span>Enter both origin and destination to preview the route</span>
+                  </div>
+                  <iframe class="route-map-frame route-map-frame-lg d-none" id="er_route_map"
+                          loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -213,6 +213,76 @@ document.addEventListener('DOMContentLoaded', () => {
   // ROUTE MANAGEMENT
   // ══════════════════════════════════════════════════════════════════════════
 
+  // ── Map preview helpers (Google Maps Embed, no API key) ──────────────────────
+  function mapPinSrc(place) {
+    return 'https://maps.google.com/maps?q=' + encodeURIComponent(place) + '&output=embed';
+  }
+  function mapRouteSrc(origin, destination) {
+    return 'https://maps.google.com/maps?saddr=' + encodeURIComponent(origin) +
+           '&daddr=' + encodeURIComponent(destination) + '&output=embed';
+  }
+
+  // Wires up a pair of origin/destination inputs to their preview iframes.
+  // prefix e.g. 'ar' or 'er' -> expects #{prefix}_origin_map, #{prefix}_destination_map,
+  // #{prefix}_route_map and matching *_placeholder elements.
+  function wireMapPreview(prefix, originInput, destinationInput) {
+    const originFrame      = document.getElementById(prefix + '_origin_map');
+    const originPlaceholder = document.getElementById(prefix + '_origin_map_placeholder');
+    const destFrame         = document.getElementById(prefix + '_destination_map');
+    const destPlaceholder   = document.getElementById(prefix + '_destination_map_placeholder');
+    const routeFrame        = document.getElementById(prefix + '_route_map');
+    const routePlaceholder  = document.getElementById(prefix + '_route_map_placeholder');
+
+    let debounceTimer = null;
+
+    function updateSingle(input, frame, placeholder) {
+      const val = input?.value.trim() ?? '';
+      if (val.length < 3) {
+        frame?.classList.add('d-none');
+        placeholder?.classList.remove('d-none');
+        if (frame) frame.src = '';
+        return;
+      }
+      if (frame) frame.src = mapPinSrc(val);
+      frame?.classList.remove('d-none');
+      placeholder?.classList.add('d-none');
+    }
+
+    function updateRoute() {
+      const origin      = originInput?.value.trim() ?? '';
+      const destination  = destinationInput?.value.trim() ?? '';
+      if (origin.length < 3 || destination.length < 3) {
+        routeFrame?.classList.add('d-none');
+        routePlaceholder?.classList.remove('d-none');
+        if (routeFrame) routeFrame.src = '';
+        return;
+      }
+      if (routeFrame) routeFrame.src = mapRouteSrc(origin, destination);
+      routeFrame?.classList.remove('d-none');
+      routePlaceholder?.classList.add('d-none');
+    }
+
+    function refreshAll() {
+      updateSingle(originInput, originFrame, originPlaceholder);
+      updateSingle(destinationInput, destFrame, destPlaceholder);
+      updateRoute();
+    }
+
+    function scheduleRefresh() {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(refreshAll, 600);
+    }
+
+    originInput?.addEventListener('input', scheduleRefresh);
+    destinationInput?.addEventListener('input', scheduleRefresh);
+
+    return { refreshAll, reset: () => {
+      clearTimeout(debounceTimer);
+      [originFrame, destFrame, routeFrame].forEach(f => { if (f) { f.src = ''; f.classList.add('d-none'); } });
+      [originPlaceholder, destPlaceholder, routePlaceholder].forEach(p => p?.classList.remove('d-none'));
+    }};
+  }
+
   // ── Add Route ────────────────────────────────────────────────────────────────
   const addRouteModal = document.getElementById('addRouteModal');
   const ar_name       = document.getElementById('ar_name');
@@ -224,10 +294,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const arBtnSpinner  = document.getElementById('arBtnSpinner');
   const addRouteAlert = document.getElementById('addRouteAlert');
 
+  const arMapPreview = wireMapPreview('ar', ar_origin, ar_destination);
+
   addRouteModal?.addEventListener('hidden.bs.modal', () => {
     [ar_name, ar_origin, ar_destination, ar_distance].forEach(el => { if (el) el.value = ''; });
     hideAlert(addRouteAlert);
     setBusy(arBtnText, arBtnSpinner, false);
+    arMapPreview.reset();
   });
 
   submitAddRoute?.addEventListener('click', () => {
@@ -279,6 +352,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const erBtnSpinner    = document.getElementById('erBtnSpinner');
   const editRouteAlert  = document.getElementById('editRouteAlert');
 
+  const erMapPreview = wireMapPreview('er', er_origin, er_destination);
+
   document.addEventListener('click', e => {
     const btn = e.target.closest('.btn-edit-route');
     if (!btn) return;
@@ -291,12 +366,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     hideAlert(editRouteAlert);
     setBusy(erBtnText, erBtnSpinner, false);
+    erMapPreview.refreshAll();
     new bootstrap.Modal(editRouteModal).show();
   });
 
   editRouteModal?.addEventListener('hidden.bs.modal', () => {
     hideAlert(editRouteAlert);
     setBusy(erBtnText, erBtnSpinner, false);
+    erMapPreview.reset();
   });
 
   submitEditRoute?.addEventListener('click', () => {

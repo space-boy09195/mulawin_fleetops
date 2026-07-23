@@ -15,6 +15,7 @@
   const filterStatus  = document.getElementById('filterStatus');
   const filterSearch  = document.getElementById('filterSearch');
   const tableBody     = document.querySelector('#incidentsTable tbody');
+  const noResults     = document.getElementById('noIncidentResults');
 
   // Log modal
   const logModal      = document.getElementById('logIncidentModal');
@@ -43,13 +44,18 @@
     const typeVal   = filterType?.value   ?? '';
     const statusVal = filterStatus?.value ?? '';
     const searchVal = (filterSearch?.value ?? '').toLowerCase();
+    let visibleCount = 0;
 
-    tableBody.querySelectorAll('tr').forEach(row => {
+    tableBody.querySelectorAll('tr[data-id]').forEach(row => {
       const matchType   = !typeVal   || row.dataset.type   === typeVal;
       const matchStatus = !statusVal || row.dataset.status === statusVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      row.classList.toggle('inc-row-hidden', !(matchType && matchStatus && matchSearch));
+      const isMatch = matchType && matchStatus && matchSearch;
+      row.classList.toggle('inc-row-hidden', !isMatch);
+      if (isMatch) visibleCount++;
     });
+
+    if (noResults) noResults.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterType?.addEventListener('change', applyFilters);

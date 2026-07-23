@@ -46,17 +46,23 @@
   const filterBilStatus = document.getElementById('filterBilStatus');
   const filterBilSearch = document.getElementById('filterBilSearch');
   const billingsTbody   = document.querySelector('#billingsTable tbody');
+  const noBillingResults = document.getElementById('noBillingResults');
 
   function applyBillingFilters() {
     if (!billingsTbody) return;
     const statusVal = filterBilStatus?.value ?? '';
     const searchVal = (filterBilSearch?.value ?? '').toLowerCase();
+    let visibleCount = 0;
 
     billingsTbody.querySelectorAll('tr').forEach(row => {
       const matchStatus = !statusVal || row.dataset.status === statusVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      row.classList.toggle('bil-row-hidden', !(matchStatus && matchSearch));
+      const isMatch = matchStatus && matchSearch;
+      row.classList.toggle('bil-row-hidden', !isMatch);
+      if (isMatch) visibleCount++;
     });
+
+    noBillingResults?.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterBilStatus?.addEventListener('change', applyBillingFilters);
@@ -66,17 +72,23 @@
   const filterColMode   = document.getElementById('filterColMode');
   const filterColSearch = document.getElementById('filterColSearch');
   const colTbody        = document.querySelector('#collectionsTable tbody');
+  const noCollectionResults = document.getElementById('noCollectionResults');
 
   function applyColFilters() {
     if (!colTbody) return;
     const modeVal   = filterColMode?.value   ?? '';
     const searchVal = (filterColSearch?.value ?? '').toLowerCase();
+    let visibleCount = 0;
 
     colTbody.querySelectorAll('tr').forEach(row => {
       const matchMode   = !modeVal   || row.dataset.mode === modeVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      row.classList.toggle('bil-row-hidden', !(matchMode && matchSearch));
+      const isMatch = matchMode && matchSearch;
+      row.classList.toggle('bil-row-hidden', !isMatch);
+      if (isMatch) visibleCount++;
     });
+
+    noCollectionResults?.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterColMode?.addEventListener('change', applyColFilters);

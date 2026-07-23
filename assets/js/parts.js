@@ -92,13 +92,18 @@
     const catVal    = filterCategory?.value   ?? '';
     const stockVal  = filterStock?.value      ?? '';
     const searchVal = (filterPartSearch?.value ?? '').toLowerCase();
+    let visibleCount = 0;
 
     stockTbody.querySelectorAll('tr').forEach(row => {
       const matchCat    = !catVal    || row.dataset.category === catVal;
       const matchStock  = !stockVal  || row.dataset.low      === stockVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      row.classList.toggle('pts-row-hidden', !(matchCat && matchStock && matchSearch));
+      const isMatch = matchCat && matchStock && matchSearch;
+      row.classList.toggle('pts-row-hidden', !isMatch);
+      if (isMatch) visibleCount++;
     });
+
+    document.getElementById('noStockResults')?.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterCategory?.addEventListener('change', applyStockFilters);
@@ -114,12 +119,17 @@
     if (!movTbody) return;
     const typeVal   = filterMovType?.value   ?? '';
     const searchVal = (filterMovSearch?.value ?? '').toLowerCase();
+    let visibleCount = 0;
 
     movTbody.querySelectorAll('tr').forEach(row => {
       const matchType   = !typeVal   || row.dataset.movtype === typeVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      row.classList.toggle('pts-row-hidden', !(matchType && matchSearch));
+      const isMatch = matchType && matchSearch;
+      row.classList.toggle('pts-row-hidden', !isMatch);
+      if (isMatch) visibleCount++;
     });
+
+    document.getElementById('noMovementResults')?.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterMovType?.addEventListener('change', applyMovFilters);

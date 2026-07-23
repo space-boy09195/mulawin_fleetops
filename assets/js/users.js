@@ -57,16 +57,21 @@
   const filterUserRole   = document.getElementById('filterUserRole');
   const filterUserSearch = document.getElementById('filterUserSearch');
   const usersTbody       = document.querySelector('#usersTable tbody');
+  const noUserResults    = document.getElementById('noUserResults');
 
   function applyUserFilters() {
     if (!usersTbody) return;
     const roleVal   = filterUserRole?.value   ?? '';
     const searchVal = (filterUserSearch?.value ?? '').toLowerCase();
+    let visibleCount = 0;
     usersTbody.querySelectorAll('tr').forEach(row => {
       const matchRole   = !roleVal   || row.dataset.role   === roleVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      row.classList.toggle('usr-row-hidden', !(matchRole && matchSearch));
+      const isMatch = matchRole && matchSearch;
+      row.classList.toggle('usr-row-hidden', !isMatch);
+      if (isMatch) visibleCount++;
     });
+    noUserResults?.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterUserRole?.addEventListener('change', applyUserFilters);
@@ -76,16 +81,21 @@
   const filterEmpStatus = document.getElementById('filterEmpStatus');
   const filterEmpSearch = document.getElementById('filterEmpSearch');
   const empTbody        = document.querySelector('#employeesTable tbody');
+  const noEmployeeResults = document.getElementById('noEmployeeResults');
 
   function applyEmpFilters() {
     if (!empTbody) return;
     const statusVal = filterEmpStatus?.value ?? '';
     const searchVal = (filterEmpSearch?.value ?? '').toLowerCase();
+    let visibleCount = 0;
     empTbody.querySelectorAll('tr').forEach(row => {
       const matchStatus = !statusVal || row.dataset.active === statusVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      row.classList.toggle('usr-row-hidden', !(matchStatus && matchSearch));
+      const isMatch = matchStatus && matchSearch;
+      row.classList.toggle('usr-row-hidden', !isMatch);
+      if (isMatch) visibleCount++;
     });
+    noEmployeeResults?.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterEmpStatus?.addEventListener('change', applyEmpFilters);

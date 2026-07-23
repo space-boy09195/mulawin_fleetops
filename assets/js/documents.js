@@ -93,12 +93,18 @@
     if (!docGrid) return;
     const typeVal   = filterDocType?.value   ?? '';
     const searchVal = (filterDocSearch?.value ?? '').toLowerCase();
+    let visibleCount = 0;
 
     docGrid.querySelectorAll('.doc-card').forEach(card => {
       const matchType   = !typeVal   || card.dataset.type === typeVal;
       const matchSearch = !searchVal || (card.dataset.search ?? '').includes(searchVal);
-      card.classList.toggle('doc-card-hidden', !(matchType && matchSearch));
+      const isMatch = matchType && matchSearch;
+      card.classList.toggle('doc-card-hidden', !isMatch);
+      if (isMatch) visibleCount++;
     });
+
+    const noResults = document.getElementById('noDocResults');
+    noResults?.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterDocType?.addEventListener('change', applyFilters);

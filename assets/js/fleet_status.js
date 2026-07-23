@@ -14,17 +14,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const rowCountEl  = document.getElementById('rowCount');
   const searchInput = document.getElementById('truckSearch');
   const filterBtns  = document.querySelectorAll('.filter-btn');
+  const noResults   = document.getElementById('noFleetResults');
 
   let activeFilter = 'all';
   let searchTerm   = '';
 
   function updateRowCount() {
     if (!tbody || !rowCountEl) return;
-    const visible = tbody.querySelectorAll('tr:not(.hidden-row)').length;
+    const visible = tbody.querySelectorAll('tr[data-status]:not(.hidden-row)').length;
     const total   = tbody.querySelectorAll('tr[data-status]').length;
     rowCountEl.textContent = visible === total
       ? `${total} truck${total !== 1 ? 's' : ''}`
       : `${visible} of ${total} trucks`;
+    if (noResults) noResults.classList.toggle('d-none', visible > 0 || total === 0);
   }
 
   function applyFilters() {

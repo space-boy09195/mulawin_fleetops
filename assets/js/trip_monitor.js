@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const rowCountEl = document.getElementById('rowCount');
   const searchInput= document.getElementById('tripSearch');
   const filterBtns = document.querySelectorAll('.filter-btn');
+  const noResults  = document.getElementById('noTripResults');
 
   let activeFilter = 'all';
   let searchTerm   = '';
@@ -21,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     rowCountEl.textContent = visible === total
       ? `${total} trip${total !== 1 ? 's' : ''}`
       : `${visible} of ${total} trips`;
+    if (noResults) noResults.classList.toggle('d-none', visible > 0 || total === 0);
   }
 
   // ---- Apply filters + search ----------------------------

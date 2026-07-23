@@ -42,17 +42,23 @@
   const filterRecordType   = document.getElementById('filterRecordType');
   const filterRecordSearch = document.getElementById('filterRecordSearch');
   const recordsTbody       = document.querySelector('#recordsTable tbody');
+  const noRecordResults    = document.getElementById('noRecordResults');
 
   function applyRecordFilters() {
     if (!recordsTbody) return;
     const typeVal   = filterRecordType?.value ?? '';
     const searchVal = (filterRecordSearch?.value ?? '').toLowerCase();
+    let visibleCount = 0;
 
     recordsTbody.querySelectorAll('tr').forEach(row => {
       const matchType   = !typeVal   || row.dataset.type === typeVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      row.classList.toggle('mnt-row-hidden', !(matchType && matchSearch));
+      const isMatch = matchType && matchSearch;
+      row.classList.toggle('mnt-row-hidden', !isMatch);
+      if (isMatch) visibleCount++;
     });
+
+    noRecordResults?.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterRecordType?.addEventListener('change', applyRecordFilters);
@@ -62,17 +68,23 @@
   const filterCheckResult = document.getElementById('filterCheckResult');
   const filterCheckSearch = document.getElementById('filterCheckSearch');
   const checklistsTbody   = document.querySelector('#checklistsTable tbody');
+  const noChecklistResults = document.getElementById('noChecklistResults');
 
   function applyChecklistFilters() {
     if (!checklistsTbody) return;
     const resultVal = filterCheckResult?.value ?? '';
     const searchVal = (filterCheckSearch?.value ?? '').toLowerCase();
+    let visibleCount = 0;
 
     checklistsTbody.querySelectorAll('tr').forEach(row => {
       const matchResult = !resultVal || row.dataset.result === resultVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      row.classList.toggle('mnt-row-hidden', !(matchResult && matchSearch));
+      const isMatch = matchResult && matchSearch;
+      row.classList.toggle('mnt-row-hidden', !isMatch);
+      if (isMatch) visibleCount++;
     });
+
+    noChecklistResults?.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterCheckResult?.addEventListener('change', applyChecklistFilters);

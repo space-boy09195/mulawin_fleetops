@@ -248,6 +248,14 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
         </tr>
         <?php endforeach; ?>
         <?php endif; ?>
+        <tr id="noFleetResults" class="d-none">
+          <td colspan="8">
+            <div class="no-results">
+              <i class="bi bi-search"></i>
+              <span>No trucks match your filters.</span>
+            </div>
+          </td>
+        </tr>
       </tbody>
     </table>
   </div>

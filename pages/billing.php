@@ -225,6 +225,10 @@ function isOverdue(string $dueDate, string $status): bool {
             <?php endforeach; ?>
           </tbody>
         </table>
+        <div id="noBillingResults" class="no-results d-none">
+          <i class="bi bi-search"></i>
+          <span>No billings match your filters.</span>
+        </div>
         <?php endif; ?>
       </div>
     </div>
@@ -293,6 +297,10 @@ function isOverdue(string $dueDate, string $status): bool {
             <?php endforeach; ?>
           </tbody>
         </table>
+        <div id="noCollectionResults" class="no-results d-none">
+          <i class="bi bi-search"></i>
+          <span>No payments match your filters.</span>
+        </div>
         <?php endif; ?>
       </div>
     </div>

@@ -262,6 +262,10 @@ $checklistItems = [
             <?php endforeach; ?>
           </tbody>
         </table>
+        <div id="noRecordResults" class="no-results d-none">
+          <i class="bi bi-search"></i>
+          <span>No maintenance records match your filters.</span>
+        </div>
         <?php endif; ?>
       </div>
     </div>
@@ -344,6 +348,10 @@ $checklistItems = [
             <?php endforeach; ?>
           </tbody>
         </table>
+        <div id="noChecklistResults" class="no-results d-none">
+          <i class="bi bi-search"></i>
+          <span>No checklists match your filters.</span>
+        </div>
         <?php endif; ?>
       </div>
     </div>

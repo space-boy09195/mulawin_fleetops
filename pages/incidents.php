@@ -170,6 +170,14 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
           </td>
         </tr>
         <?php endforeach; ?>
+        <tr id="noIncidentResults" class="d-none">
+          <td colspan="9">
+            <div class="no-results">
+              <i class="bi bi-search"></i>
+              <span>No incidents match your filters.</span>
+            </div>
+          </td>
+        </tr>
       </tbody>
     </table>
     <?php endif; ?>

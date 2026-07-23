@@ -170,6 +170,10 @@ function mimeIcon(?string $mime): string {
     </div>
     <?php endforeach; ?>
   </div>
+  <div id="noDocResults" class="no-results d-none">
+    <i class="bi bi-search"></i>
+    <span>No documents match your filters.</span>
+  </div>
   <?php endif; ?>
 </div>
 

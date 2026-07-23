@@ -271,6 +271,14 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
         </tr>
         <?php endforeach; ?>
         <?php endif; ?>
+        <tr id="noTripResults" class="d-none">
+          <td colspan="8">
+            <div class="no-results">
+              <i class="bi bi-search"></i>
+              <span>No trips match your filters.</span>
+            </div>
+          </td>
+        </tr>
       </tbody>
     </table>
   </div>

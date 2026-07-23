@@ -221,6 +221,10 @@ $alertCount  = count($alerts);
             <?php endforeach; ?>
           </tbody>
         </table>
+        <div id="noUserResults" class="no-results d-none">
+          <i class="bi bi-search"></i>
+          <span>No users match your filters.</span>
+        </div>
         <?php endif; ?>
       </div>
     </div>
@@ -340,6 +344,10 @@ $alertCount  = count($alerts);
             <?php endforeach; ?>
           </tbody>
         </table>
+        <div id="noEmployeeResults" class="no-results d-none">
+          <i class="bi bi-search"></i>
+          <span>No employees match your filters.</span>
+        </div>
         <?php endif; ?>
       </div>
     </div>

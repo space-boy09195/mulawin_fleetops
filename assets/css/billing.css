@@ -356,6 +356,20 @@
 .bil-empty-icon { font-size: 2.8rem; margin-bottom: 0.75rem; opacity: 0.35; }
 .bil-empty p    { font-size: 0.9rem; margin: 0; }
 
+/* ── No filtered results ──────────────────────── */
+.no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 3rem 1rem;
+  color: var(--bs-secondary-color);
+  font-size: 0.875rem;
+  text-align: center;
+}
+.no-results i { font-size: 2rem; opacity: 0.35; }
+
 /* ── Modals ──────────────────────────────────── */
 .bil-modal-content {
   border: none;

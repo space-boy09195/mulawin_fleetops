@@ -185,6 +185,20 @@
 .usr-empty-icon { font-size: 2.8rem; margin-bottom: 0.75rem; opacity: 0.35; }
 .usr-empty p    { font-size: 0.9rem; margin: 0; }
 
+/* ── No filtered results ──────────────────────── */
+.no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 3rem 1rem;
+  color: var(--bs-secondary-color);
+  font-size: 0.875rem;
+  text-align: center;
+}
+.no-results i { font-size: 2rem; opacity: 0.35; }
+
 /* ── Modals ──────────────────────────────────── */
 .usr-modal-content { border: none; border-radius: 14px; overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,0.2); }
 .usr-modal-header-primary   { background: #0d6efd; color: #fff; border-bottom: none; padding: 1rem 1.25rem; }

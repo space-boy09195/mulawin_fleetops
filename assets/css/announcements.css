@@ -13,6 +13,79 @@
   letter-spacing: 0.05em;
 }
 
+/* ── Severity badge ──────────────────────────── */
+.ann-severity {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 9px;
+  border-radius: 20px;
+}
+
+.ann-severity-high {
+  color: #b02a37;
+  background: rgba(220,53,69,0.12);
+}
+
+.ann-severity-medium {
+  color: #9a5500;
+  background: rgba(230,126,0,0.14);
+}
+
+.ann-severity-low {
+  color: #146c43;
+  background: rgba(25,135,84,0.12);
+}
+
+/* ── Severity picker (Add/Edit modals) ──────────── */
+.ann-severity-picker {
+  flex-wrap: wrap;
+}
+
+.ann-severity-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1.5px solid var(--card-border);
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+  color: var(--text-secondary);
+}
+
+.ann-severity-option input {
+  accent-color: currentColor;
+  margin: 0;
+}
+
+.ann-severity-option-high:has(input:checked),
+.ann-severity-option-high.ann-severity-option-selected {
+  border-color: #dc3545;
+  background: rgba(220,53,69,0.1);
+  color: #b02a37;
+}
+
+.ann-severity-option-medium:has(input:checked),
+.ann-severity-option-medium.ann-severity-option-selected {
+  border-color: #e67e00;
+  background: rgba(230,126,0,0.12);
+  color: #9a5500;
+}
+
+.ann-severity-option-low:has(input:checked),
+.ann-severity-option-low.ann-severity-option-selected {
+  border-color: #198754;
+  background: rgba(25,135,84,0.1);
+  color: #146c43;
+}
+
 .ann-full-title {
   font-size: 1.05rem;
   font-weight: 700;
@@ -50,7 +123,44 @@
   border-color: #fca5a5;
 }
 
+.ann-edit-btn {
+  background: none;
+  border: 1px solid var(--card-border);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+}
+
+.ann-edit-btn:hover {
+  color: var(--accent);
+  background: rgba(13,110,253,0.08);
+  border-color: var(--accent);
+}
+
+.ann-sort-select {
+  width: auto;
+  font-size: 0.85rem;
+  border-radius: 8px;
+  border-color: var(--card-border);
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+}
+
+.ann-sort-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(13,110,253,.15);
+}
+
 [data-theme="dark"] .form-control {
+  background-color: var(--card-bg);
+  color: var(--text-primary);
+  border-color: var(--card-border);
+}
+
+[data-theme="dark"] .ann-sort-select {
   background-color: var(--card-bg);
   color: var(--text-primary);
   border-color: var(--card-border);

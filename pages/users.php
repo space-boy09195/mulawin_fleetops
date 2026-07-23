@@ -567,21 +567,36 @@ $alertCount  = count($alerts);
             <label class="form-label usr-label" for="aeAddress">Address</label>
             <textarea class="form-control usr-input" id="aeAddress" rows="2" placeholder="Optional"></textarea>
           </div>
-          <div class="col-md-4">
-            <label class="form-label usr-label" for="aeLicense">License Number</label>
-            <input type="text" class="form-control usr-input" id="aeLicense" placeholder="Drivers only">
+          <div class="col-12">
+            <div id="aeDriverHint" class="usr-driver-hint d-none">
+              <i class="bi bi-info-circle"></i>
+              License Number, Expiry, Type, and Date Hired are required for Drivers.
+            </div>
           </div>
           <div class="col-md-4">
-            <label class="form-label usr-label" for="aeLicenseExpiry">License Expiry</label>
+            <label class="form-label usr-label" for="aeLicense">
+              License Number <span class="text-danger d-none" id="aeLicenseReq">*</span>
+            </label>
+            <input type="text" class="form-control usr-input" id="aeLicense"
+                   placeholder="e.g. N01-12-123456" style="text-transform:uppercase;">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label usr-label" for="aeLicenseExpiry">
+              License Expiry <span class="text-danger d-none" id="aeLicExpiryReq">*</span>
+            </label>
             <input type="date" class="form-control usr-input" id="aeLicenseExpiry">
           </div>
           <div class="col-md-4">
-            <label class="form-label usr-label" for="aeLicenseType">License Type</label>
+            <label class="form-label usr-label" for="aeLicenseType">
+              License Type <span class="text-danger d-none" id="aeLicTypeReq">*</span>
+            </label>
             <input type="text" class="form-control usr-input" id="aeLicenseType"
                    placeholder="e.g. Professional">
           </div>
           <div class="col-md-4">
-            <label class="form-label usr-label" for="aeDateHired">Date Hired</label>
+            <label class="form-label usr-label" for="aeDateHired">
+              Date Hired <span class="text-danger d-none" id="aeDateHiredReq">*</span>
+            </label>
             <input type="date" class="form-control usr-input" id="aeDateHired">
           </div>
         </div>
@@ -631,20 +646,35 @@ $alertCount  = count($alerts);
             <label class="form-label usr-label" for="eeAddress">Address</label>
             <textarea class="form-control usr-input" id="eeAddress" rows="2"></textarea>
           </div>
-          <div class="col-md-4">
-            <label class="form-label usr-label" for="eeLicense">License Number</label>
-            <input type="text" class="form-control usr-input" id="eeLicense">
+          <div class="col-12">
+            <div id="eeDriverHint" class="usr-driver-hint d-none">
+              <i class="bi bi-info-circle"></i>
+              License Number, Expiry, Type, and Date Hired are required for Drivers.
+            </div>
           </div>
           <div class="col-md-4">
-            <label class="form-label usr-label" for="eeLicenseExpiry">License Expiry</label>
+            <label class="form-label usr-label" for="eeLicense">
+              License Number <span class="text-danger d-none" id="eeLicenseReq">*</span>
+            </label>
+            <input type="text" class="form-control usr-input" id="eeLicense"
+                   placeholder="e.g. N01-12-123456" style="text-transform:uppercase;">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label usr-label" for="eeLicenseExpiry">
+              License Expiry <span class="text-danger d-none" id="eeLicExpiryReq">*</span>
+            </label>
             <input type="date" class="form-control usr-input" id="eeLicenseExpiry">
           </div>
           <div class="col-md-4">
-            <label class="form-label usr-label" for="eeLicenseType">License Type</label>
+            <label class="form-label usr-label" for="eeLicenseType">
+              License Type <span class="text-danger d-none" id="eeLicTypeReq">*</span>
+            </label>
             <input type="text" class="form-control usr-input" id="eeLicenseType">
           </div>
           <div class="col-md-4">
-            <label class="form-label usr-label" for="eeDateHired">Date Hired</label>
+            <label class="form-label usr-label" for="eeDateHired">
+              Date Hired <span class="text-danger d-none" id="eeDateHiredReq">*</span>
+            </label>
             <input type="date" class="form-control usr-input" id="eeDateHired">
           </div>
           <div class="col-md-4 d-flex align-items-end">

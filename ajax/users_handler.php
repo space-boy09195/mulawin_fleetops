@@ -227,9 +227,26 @@ function validateEmpFields(array $f): ?string {
     if (!$f['employee_code']) return 'Employee code is required.';
     if (!$f['full_name'])     return 'Full name is required.';
     if (!$f['position'])      return 'Position is required.';
+
+    $isDriver = strcasecmp(trim($f['position']), 'Driver') === 0;
+
+    // License number and expiry must travel together regardless of position.
     $hasLic = $f['license_number'] || $f['license_expiry'];
     if ($hasLic && !$f['license_number']) return 'License number is required with expiry.';
     if ($hasLic && !$f['license_expiry']) return 'License expiry is required with license number.';
+
+    // Drivers must have a complete license record on file.
+    if ($isDriver) {
+        if (!$f['license_number']) return 'License number is required for drivers.';
+        if (!$f['license_expiry']) return 'License expiry is required for drivers.';
+        if (!$f['license_type'])   return 'License type is required for drivers.';
+        if (!$f['date_hired'])     return 'Date hired is required for drivers.';
+    }
+
+    // Philippine LTO license number format: X00-00-000000 (e.g. N01-12-123456).
+    if ($f['license_number'] && !preg_match('/^[A-Za-z]\d{2}-\d{2}-\d{6}$/', $f['license_number']))
+        return 'License number must be in the format X00-00-000000 (e.g. N01-12-123456).';
+
     if ($f['license_expiry'] && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f['license_expiry']))
         return 'Invalid license expiry date.';
     if ($f['date_hired'] && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f['date_hired']))

@@ -38,6 +38,49 @@
     spinner.classList.toggle('d-none', !busy);
   }
 
+  // ── Driver-conditional employee validation helpers ──────────────────────────
+  const LICENSE_FORMAT_RE = /^[A-Za-z]\d{2}-\d{2}-\d{6}$/;
+
+  function isDriverPosition(value) {
+    return (value ?? '').trim().toLowerCase() === 'driver';
+  }
+
+  // Toggles the red-asterisk "required" indicators for the license/date-hired
+  // fields based on whether the entered position is "Driver".
+  function updateDriverRequiredUI(prefix) {
+    const positionEl = document.getElementById(prefix + 'Position');
+    const hintEl      = document.getElementById(prefix + 'DriverHint');
+    const isDriver    = isDriverPosition(positionEl?.value);
+
+    hintEl?.classList.toggle('d-none', !isDriver);
+    ['LicenseReq', 'LicExpiryReq', 'LicTypeReq', 'DateHiredReq'].forEach(suffix => {
+      document.getElementById(prefix + suffix)?.classList.toggle('d-none', !isDriver);
+    });
+  }
+
+  // Runs the same license/driver validation the backend enforces, so the
+  // person gets immediate feedback instead of waiting on a round trip.
+  function validateEmpFieldsClient({ position, license, licExpiry, licType, dateHired }) {
+    const isDriver = isDriverPosition(position);
+    const hasLic   = !!license || !!licExpiry;
+
+    if (hasLic && !license)   return 'License number is required with expiry.';
+    if (hasLic && !licExpiry) return 'License expiry is required with license number.';
+
+    if (isDriver) {
+      if (!license)   return 'License number is required for drivers.';
+      if (!licExpiry) return 'License expiry is required for drivers.';
+      if (!licType)   return 'License type is required for drivers.';
+      if (!dateHired) return 'Date hired is required for drivers.';
+    }
+
+    if (license && !LICENSE_FORMAT_RE.test(license)) {
+      return 'License number must be in the format X00-00-000000 (e.g. N01-12-123456).';
+    }
+
+    return null;
+  }
+
   function clearInputs(...els) {
     els.forEach(el => { if (el) el.value = ''; });
   }
@@ -305,13 +348,29 @@
     if (aeAddress) aeAddress.value = '';
     hideAlert(addEmpAlert);
     setBusy(submitAddEmp, aeSpinner, false);
+    updateDriverRequiredUI('ae');
   });
+
+  aePosition?.addEventListener('input', () => updateDriverRequiredUI('ae'));
 
   submitAddEmp?.addEventListener('click', () => {
     hideAlert(addEmpAlert);
 
     if (!aeCode?.value.trim() || !aeName?.value.trim() || !aePosition?.value.trim()) {
       showAlert(addEmpAlert, 'Employee code, name, and position are required.');
+      return;
+    }
+
+    const license   = aeLicense?.value.trim()   ?? '';
+    const licExpiry = aeLicExpiry?.value        ?? '';
+    const licType   = aeLicType?.value.trim()   ?? '';
+    const dateHired = aeDateHired?.value        ?? '';
+
+    const empErr = validateEmpFieldsClient({
+      position: aePosition.value, license, licExpiry, licType, dateHired,
+    });
+    if (empErr) {
+      showAlert(addEmpAlert, empErr);
       return;
     }
 
@@ -324,10 +383,10 @@
       position:        aePosition.value.trim(),
       contact_number:  aeContact?.value.trim()  ?? '',
       address:         aeAddress?.value.trim()  ?? '',
-      license_number:  aeLicense?.value.trim()  ?? '',
-      license_expiry:  aeLicExpiry?.value        ?? '',
-      license_type:    aeLicType?.value.trim()  ?? '',
-      date_hired:      aeDateHired?.value        ?? '',
+      license_number:  license,
+      license_expiry:  licExpiry,
+      license_type:    licType,
+      date_hired:      dateHired,
     }).then(res => {
       setBusy(submitAddEmp, aeSpinner, false);
       if (res.success) { bootstrap.Modal.getInstance(addEmpModal)?.hide(); window.location.reload(); }
@@ -375,8 +434,11 @@
 
     hideAlert(editEmpAlert);
     setBusy(submitEditEmp, eeSpinner, false);
+    updateDriverRequiredUI('ee');
     new bootstrap.Modal(editEmpModal).show();
   });
+
+  eePosition?.addEventListener('input', () => updateDriverRequiredUI('ee'));
 
   editEmpModal?.addEventListener('hidden.bs.modal', () => {
     hideAlert(editEmpAlert);
@@ -391,6 +453,19 @@
       return;
     }
 
+    const license   = eeLicense?.value.trim()   ?? '';
+    const licExpiry = eeLicExpiry?.value        ?? '';
+    const licType   = eeLicType?.value.trim()   ?? '';
+    const dateHired = eeDateHired?.value        ?? '';
+
+    const empErr = validateEmpFieldsClient({
+      position: eePosition.value, license, licExpiry, licType, dateHired,
+    });
+    if (empErr) {
+      showAlert(editEmpAlert, empErr);
+      return;
+    }
+
     setBusy(submitEditEmp, eeSpinner, true);
 
     postAjax({
@@ -401,10 +476,10 @@
       position:        eePosition.value.trim(),
       contact_number:  eeContact?.value.trim()  ?? '',
       address:         eeAddress?.value.trim()  ?? '',
-      license_number:  eeLicense?.value.trim()  ?? '',
-      license_expiry:  eeLicExpiry?.value        ?? '',
-      license_type:    eeLicType?.value.trim()  ?? '',
-      date_hired:      eeDateHired?.value        ?? '',
+      license_number:  license,
+      license_expiry:  licExpiry,
+      license_type:    licType,
+      date_hired:      dateHired,
       is_active:       eeActive?.checked ? '1' : '0',
     }).then(res => {
       setBusy(submitEditEmp, eeSpinner, false);

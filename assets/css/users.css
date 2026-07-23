@@ -239,6 +239,19 @@ textarea.usr-input { resize: vertical; min-height: 70px; }
 .usr-active-toggle { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0; }
 .usr-active-toggle .form-check-input { width: 2.5em; height: 1.3em; cursor: pointer; }
 
+/* ── Driver requirement hint ─────────────────── */
+.usr-driver-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: #9a5500;
+  background: rgba(230,126,0,0.1);
+  border: 1px solid rgba(230,126,0,0.25);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+}
+
 /* ── Responsive ──────────────────────────────── */
 @media (max-width: 992px) { .usr-cards { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 768px) {

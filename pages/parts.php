@@ -67,6 +67,12 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
 
 <div class="pts-page">
 
+  <!-- Toast feedback (add part / record movement confirmations) -->
+  <div id="ptsToast" class="pts-toast pts-toast-hidden" role="status" aria-live="polite">
+    <i id="ptsToastIcon" class="bi bi-check-circle-fill me-2"></i>
+    <span id="ptsToastMsg"></span>
+  </div>
+
   <!-- Header -->
   <div class="pts-header d-flex align-items-center justify-content-between mb-4">
     <div>
@@ -378,7 +384,7 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
         <div id="addPartAlert" class="alert d-none" role="alert"></div>
         <div class="row g-3">
           <div class="col-md-8">
-            <label class="form-label pts-label" for="apName">Part Name</label>
+            <label class="form-label pts-label" for="apName">Part Name <span class="text-danger">*</span></label>
             <input type="text" class="form-control pts-input" id="apName"
                    placeholder="e.g. Oil Filter" required>
           </div>
@@ -388,7 +394,7 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
                    placeholder="Optional">
           </div>
           <div class="col-md-6">
-            <label class="form-label pts-label" for="apCategory">Category</label>
+            <label class="form-label pts-label" for="apCategory">Category <span class="text-danger">*</span></label>
             <input type="text" class="form-control pts-input" id="apCategory"
                    placeholder="e.g. Engine, Tires, Brakes" list="categoryList" required>
             <datalist id="categoryList">
@@ -398,12 +404,12 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
             </datalist>
           </div>
           <div class="col-md-3">
-            <label class="form-label pts-label" for="apUnit">Unit</label>
+            <label class="form-label pts-label" for="apUnit">Unit <span class="text-danger">*</span></label>
             <input type="text" class="form-control pts-input" id="apUnit"
                    placeholder="pcs, liters…" value="pcs" required>
           </div>
           <div class="col-md-3">
-            <label class="form-label pts-label" for="apReorderLevel">Reorder Level</label>
+            <label class="form-label pts-label" for="apReorderLevel">Reorder Level <span class="text-danger">*</span></label>
             <input type="number" class="form-control pts-input" id="apReorderLevel"
                    min="0" value="5" required>
           </div>
@@ -413,9 +419,9 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
                    min="0" step="0.01" placeholder="Optional">
           </div>
           <div class="col-md-4">
-            <label class="form-label pts-label" for="apInitialQty">Initial Quantity</label>
+            <label class="form-label pts-label" for="apInitialQty">Initial Quantity <span class="text-danger">*</span></label>
             <input type="number" class="form-control pts-input" id="apInitialQty"
-                   min="0" value="0" required>
+                   min="0" placeholder="e.g. 50" required>
           </div>
           <div class="col-md-4">
             <label class="form-label pts-label" for="apSupplier">Supplier</label>
@@ -449,7 +455,7 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
         <div id="movementAlert" class="alert d-none" role="alert"></div>
 
         <div class="mb-3">
-          <label class="form-label pts-label" for="movPartId">Part</label>
+          <label class="form-label pts-label" for="movPartId">Part <span class="text-danger">*</span></label>
           <select class="form-select pts-input" id="movPartId" required>
             <option value="">— Select part —</option>
             <?php foreach ($parts as $part): ?>
@@ -464,7 +470,7 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
         </div>
 
         <div class="mb-3">
-          <label class="form-label pts-label" for="movType">Movement Type</label>
+          <label class="form-label pts-label" for="movType">Movement Type <span class="text-danger">*</span></label>
           <select class="form-select pts-input" id="movType" required>
             <option value="">— Select type —</option>
             <?php foreach ($movementTypes as $mt): ?>
@@ -476,7 +482,7 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
         <div class="row g-3 mb-3">
           <div class="col-6">
             <label class="form-label pts-label" for="movQty">
-              Quantity <span id="movUnitLabel" class="pts-unit-hint"></span>
+              Quantity <span class="text-danger">*</span> <span id="movUnitLabel" class="pts-unit-hint"></span>
             </label>
             <input type="number" class="form-control pts-input" id="movQty"
                    min="1" placeholder="0" required>

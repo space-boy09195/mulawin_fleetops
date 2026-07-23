@@ -502,3 +502,46 @@ textarea.pts-input {
   .pts-table-wrap { overflow-x: auto; }
   .pts-table { min-width: 820px; }
 }
+
+/* ── Toast feedback ──────────────────────────── */
+.pts-toast {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 1080;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 380px;
+  padding: 0.75rem 1.1rem;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+  background: #198754;
+  color: #fff;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.pts-toast.pts-toast-danger {
+  background: #dc3545;
+}
+
+.pts-toast.pts-toast-hidden {
+  opacity: 0;
+  transform: translateY(-12px);
+  pointer-events: none;
+}
+
+.pts-toast.pts-toast-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (max-width: 768px) {
+  .pts-toast {
+    left: 1rem;
+    right: 1rem;
+    max-width: none;
+  }
+}

@@ -24,13 +24,20 @@ if ($action === 'add_part') {
     $unit         = trim($_POST['unit']          ?? 'pcs');
     $reorderLevel = (int)($_POST['reorder_level'] ?? 5);
     $unitCost     = $_POST['unit_cost'] !== '' ? (float)$_POST['unit_cost'] : null;
-    $initialQty   = (int)($_POST['initial_qty']  ?? 0);
+    $rawInitialQty = $_POST['initial_qty'] ?? '';
     $supplier     = trim($_POST['supplier']      ?? '') ?: null;
 
     if (!$name || !$category || !$unit) {
         echo json_encode(['success' => false, 'message' => 'Part name, category, and unit are required.']);
         exit;
     }
+
+    if ($rawInitialQty === '') {
+        echo json_encode(['success' => false, 'message' => 'Initial quantity is required.']);
+        exit;
+    }
+
+    $initialQty = (int)$rawInitialQty;
 
     if ($reorderLevel < 0 || $initialQty < 0) {
         echo json_encode(['success' => false, 'message' => 'Quantity and reorder level cannot be negative.']);

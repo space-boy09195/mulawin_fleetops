@@ -38,6 +38,49 @@
     spinner.classList.toggle('d-none', !busy);
   }
 
+  // ── Toast feedback (persists across the page reload after a save) ───────────
+  const ptsToast     = document.getElementById('ptsToast');
+  const ptsToastMsg  = document.getElementById('ptsToastMsg');
+  const ptsToastIcon = document.getElementById('ptsToastIcon');
+  let toastTimer     = null;
+
+  function showToast(message, type = 'success') {
+    if (!ptsToast || !ptsToastMsg) return;
+    ptsToast.classList.toggle('pts-toast-danger', type === 'danger');
+    if (ptsToastIcon) {
+      ptsToastIcon.className = type === 'danger'
+        ? 'bi bi-exclamation-circle-fill me-2'
+        : 'bi bi-check-circle-fill me-2';
+    }
+    ptsToastMsg.innerHTML = message;
+    ptsToast.classList.remove('pts-toast-hidden');
+    ptsToast.classList.add('pts-toast-visible');
+
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      ptsToast.classList.remove('pts-toast-visible');
+      ptsToast.classList.add('pts-toast-hidden');
+    }, 4000);
+  }
+
+  function queueToast(message, type = 'success') {
+    try {
+      sessionStorage.setItem('pts_toast', JSON.stringify({ message, type }));
+    } catch { /* sessionStorage unavailable — skip silently */ }
+  }
+
+  // Show a queued toast left over from before the last reload, if any.
+  (function showQueuedToast() {
+    let raw;
+    try { raw = sessionStorage.getItem('pts_toast'); } catch { return; }
+    if (!raw) return;
+    try { sessionStorage.removeItem('pts_toast'); } catch { /* ignore */ }
+    try {
+      const data = JSON.parse(raw);
+      showToast(data.message, data.type);
+    } catch { /* malformed — ignore */ }
+  })();
+
   // ── Stock filter ──────────────────────────────────────────────────────────
   const filterCategory  = document.getElementById('filterCategory');
   const filterStock     = document.getElementById('filterStock');
@@ -103,7 +146,7 @@
       if (el) el.value = el.id === 'apUnit' ? 'pcs' : '';
     });
     if (apReorderLevel) apReorderLevel.value = '5';
-    if (apInitialQty)   apInitialQty.value   = '0';
+    if (apInitialQty)   apInitialQty.value   = '';
     hideAlert(addPartAlert);
     setBusy(submitAddPartBtn, apBtnSpinner, false);
   });
@@ -117,11 +160,22 @@
     const unit        = apUnit?.value.trim()        ?? 'pcs';
     const reorderLevel = apReorderLevel?.value      ?? '5';
     const unitCost    = apUnitCost?.value           ?? '';
-    const initialQty  = apInitialQty?.value         ?? '0';
+    const initialQty  = apInitialQty?.value         ?? '';
     const supplier    = apSupplier?.value.trim()    ?? '';
 
     if (!name || !category || !unit) {
       showAlert(addPartAlert, 'Part name, category, and unit are required.');
+      return;
+    }
+
+    if (initialQty === '') {
+      showAlert(addPartAlert, 'Initial quantity is required.');
+      apInitialQty?.focus();
+      return;
+    }
+
+    if (parseInt(initialQty, 10) < 0) {
+      showAlert(addPartAlert, 'Initial quantity cannot be negative.');
       return;
     }
 
@@ -141,6 +195,7 @@
       .then(res => {
         setBusy(submitAddPartBtn, apBtnSpinner, false);
         if (res.success) {
+          queueToast(res.message || 'Part added successfully.', 'success');
           bootstrap.Modal.getInstance(addPartModal)?.hide();
           window.location.reload();
         } else {
@@ -222,6 +277,7 @@
       .then(res => {
         setBusy(submitMovementBtn, movBtnSpinner, false);
         if (res.success) {
+          queueToast(res.message || 'Movement recorded successfully.', 'success');
           bootstrap.Modal.getInstance(movementModal)?.hide();
           window.location.reload();
         } else {

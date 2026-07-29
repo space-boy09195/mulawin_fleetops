@@ -34,13 +34,19 @@
   margin: 3px 0 0;
 }
 
+.an-period-form {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
 .an-period-select {
   font-size: 0.85rem;
   border-radius: 8px;
   border-color: var(--bs-border-color);
   background-color: var(--bs-body-bg);
   color: var(--bs-body-color);
-  min-width: 180px;
+  min-width: 150px;
 }
 
 /* ── KPI cards ───────────────────────────────── */

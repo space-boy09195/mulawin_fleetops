@@ -16,112 +16,189 @@ layoutHead('Analytics', APP_BASE . '/assets/css/analytics.css');
 
 $pdo = getDBConnection();
 
-// ── Period filter (whitelisted — safe to interpolate into SQL) ───────────────
+// ── Period filter ──────────────────────────────────────────────────────────
 $periods = [
-    '1m'  => ['label' => 'This Month',      'interval' => '1 MONTH'],
-    '3m'  => ['label' => 'Last 3 Months',   'interval' => '3 MONTH'],
-    '6m'  => ['label' => 'Last 6 Months',   'interval' => '6 MONTH'],
-    '1y'  => ['label' => 'Last 12 Months',  'interval' => '1 YEAR'],
-    'all' => ['label' => 'All Time',        'interval' => null],
+    '1m'  => ['label' => 'This Month',      'months' => 1],
+    '3m'  => ['label' => 'Last 3 Months',   'months' => 3],
+    '6m'  => ['label' => 'Last 6 Months',   'months' => 6],
+    '1y'  => ['label' => 'Last 12 Months',  'months' => 12],
+    'all' => ['label' => 'All Time',        'months' => null],
 ];
 $period = $_GET['period'] ?? '6m';
 if (!isset($periods[$period])) $period = '6m';
-$interval    = $periods[$period]['interval'];
 $periodLabel = $periods[$period]['label'];
+$months      = $periods[$period]['months'];
 
-$tripDateFilter  = $interval ? "AND t.created_at >= DATE_SUB(CURDATE(), INTERVAL $interval)"       : '';
-$billDateFilter  = $interval ? "AND b.created_at >= DATE_SUB(CURDATE(), INTERVAL $interval)"       : '';
-$collDateFilter  = $interval ? "AND c.payment_date >= DATE_SUB(CURDATE(), INTERVAL $interval)"      : '';
-$maintDateFilter = $interval ? "AND date_performed >= DATE_SUB(CURDATE(), INTERVAL $interval)"      : '';
-$incDateFilter   = $interval ? "AND reported_at >= DATE_SUB(CURDATE(), INTERVAL $interval)"          : '';
+// ── Granularity filter (controls trend chart bucketing) ──────────────────────
+$granularities = ['day' => 'Daily', 'week' => 'Weekly', 'month' => 'Monthly'];
+$granularity = $_GET['granularity'] ?? 'month';
+if (!isset($granularities[$granularity])) $granularity = 'month';
+$granularityLabel = $granularities[$granularity];
+
+// ── Resolve the actual date range (shared by KPIs, leaderboards, and trends) ──
+$rangeEnd = new DateTime('today');
+if ($months !== null) {
+    $rangeStart = (new DateTime('today'))->modify("-$months months");
+} else {
+    // "All Time" — find the earliest relevant record, but clamp to 24 months
+    // back so a Daily view over years of history doesn't produce an
+    // unreasonably huge chart.
+    $earliest = $pdo->query("
+        SELECT MIN(d) FROM (
+            SELECT MIN(created_at)     AS d FROM billings
+            UNION ALL SELECT MIN(date_performed) FROM maintenance_records
+            UNION ALL SELECT MIN(reported_at)    FROM incidents
+        ) x
+    ")->fetchColumn();
+    $rangeStart = $earliest ? new DateTime($earliest) : (new DateTime('today'))->modify('-6 months');
+    $clamp = (new DateTime('today'))->modify('-24 months');
+    if ($rangeStart < $clamp) $rangeStart = $clamp;
+}
+$rangeStartSql = $rangeStart->format('Y-m-d 00:00:00');
+
+// Date filters as bindable clauses — $months === null (All Time) still uses
+// the clamped $rangeStart so trend buckets stay bounded; KPIs/leaderboards
+// use the same start for consistency across the page.
+$tripDateFilter  = "AND t.created_at >= :rangeStart";
+$billDateFilter  = "AND b.created_at >= :rangeStart";
+$collDateFilter  = "AND c.payment_date >= :rangeStart";
+$maintDateFilter = "AND date_performed >= :rangeStart";
+
+// ── Bucket-expression helper for the selected granularity ────────────────────
+function bucketExpr(string $col, string $granularity): string {
+    return match ($granularity) {
+        'day'   => "DATE_FORMAT($col, '%Y-%m-%d')",
+        'week'  => "DATE_FORMAT(DATE_SUB($col, INTERVAL WEEKDAY($col) DAY), '%Y-%m-%d')",
+        default => "DATE_FORMAT($col, '%Y-%m')", // month
+    };
+}
+
+// Generates the full list of bucket keys + display labels between two dates,
+// so months/weeks/days with zero activity still show as 0 instead of a gap.
+function buildBuckets(DateTime $start, DateTime $end, string $granularity): array {
+    $keys = [];
+    $labels = [];
+    $cursor = clone $start;
+
+    if ($granularity === 'day') {
+        $cursor->setTime(0, 0, 0);
+        while ($cursor <= $end) {
+            $keys[]   = $cursor->format('Y-m-d');
+            $labels[] = $cursor->format('M d');
+            $cursor->modify('+1 day');
+        }
+    } elseif ($granularity === 'week') {
+        $cursor->modify('monday this week');
+        while ($cursor <= $end) {
+            $keys[]   = $cursor->format('Y-m-d');
+            $labels[] = $cursor->format('M d');
+            $cursor->modify('+7 days');
+        }
+    } else {
+        $cursor->modify('first day of this month');
+        while ($cursor <= $end) {
+            $keys[]   = $cursor->format('Y-m');
+            $labels[] = $cursor->format('M Y');
+            $cursor->modify('first day of next month');
+        }
+    }
+    return ['keys' => $keys, 'labels' => $labels];
+}
+
+$buckets = buildBuckets($rangeStart, $rangeEnd, $granularity);
+
+// Runs a query that references :rangeStart, binding it once so every call
+// site doesn't have to repeat the bind boilerplate.
+function qRange(PDO $pdo, string $sql, string $rangeStartSql): PDOStatement {
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([':rangeStart' => $rangeStartSql]);
+    return $stmt;
+}
 
 // ── KPI: Revenue billed vs collected ──────────────────────────────────────────
-$revenue = (float)$pdo->query("
+$revenue = (float)qRange($pdo, "
     SELECT COALESCE(SUM(b.amount), 0) FROM billings b WHERE 1=1 $billDateFilter
-")->fetchColumn();
+", $rangeStartSql)->fetchColumn();
 
-$collected = (float)$pdo->query("
+$collected = (float)qRange($pdo, "
     SELECT COALESCE(SUM(c.amount_paid), 0) FROM collections c WHERE 1=1 $collDateFilter
-")->fetchColumn();
+", $rangeStartSql)->fetchColumn();
 
 $collectionRate = $revenue > 0 ? round(($collected / $revenue) * 100, 1) : 0;
 
 // ── KPI: Maintenance cost ─────────────────────────────────────────────────────
-$maintCost = (float)$pdo->query("
+$maintCost = (float)qRange($pdo, "
     SELECT COALESCE(SUM(cost), 0) FROM maintenance_records WHERE 1=1 $maintDateFilter
-")->fetchColumn();
+", $rangeStartSql)->fetchColumn();
 
 // ── KPI: Completed trips + on-time rate ───────────────────────────────────────
-$tripStats = $pdo->query("
+$tripStats = qRange($pdo, "
     SELECT
         COUNT(*)                                            AS completed,
         SUM(CASE WHEN is_late = 1 THEN 1 ELSE 0 END)         AS late_count
     FROM trips t
     WHERE t.status = 'Completed' $tripDateFilter
-")->fetch(PDO::FETCH_ASSOC);
+", $rangeStartSql)->fetch(PDO::FETCH_ASSOC);
 $completedTrips = (int)($tripStats['completed'] ?? 0);
 $lateCount      = (int)($tripStats['late_count'] ?? 0);
 $onTimeRate     = $completedTrips > 0 ? round((($completedTrips - $lateCount) / $completedTrips) * 100, 1) : 0;
 
 // ── KPI: Fleet utilization (distinct trucks dispatched / total trucks) ───────
 $totalTrucks = (int)$pdo->query("SELECT COUNT(*) FROM trucks")->fetchColumn();
-$utilizedTrucks = (int)$pdo->query("
+$utilizedTrucks = (int)qRange($pdo, "
     SELECT COUNT(DISTINCT dr.truck_id)
     FROM dispatch_requests dr
     JOIN trips t ON t.dispatch_id = dr.dispatch_id
     WHERE 1=1 $tripDateFilter
-")->fetchColumn();
+", $rangeStartSql)->fetchColumn();
 $utilizationRate = $totalTrucks > 0 ? round(($utilizedTrucks / $totalTrucks) * 100, 1) : 0;
 
 // ── KPI: Avg revenue per completed trip ───────────────────────────────────────
 $avgRevenuePerTrip = $completedTrips > 0 ? $revenue / $completedTrips : 0;
 
-// ── Revenue vs Maintenance Cost — trailing 6 months (independent of filter) ──
-$revByMonth = $pdo->query("
-    SELECT DATE_FORMAT(created_at, '%Y-%m') AS ym, SUM(amount) AS total
+// ── Revenue vs Maintenance Cost trend (bucketed by selected granularity) ─────
+$revBucketExpr  = bucketExpr('created_at', $granularity);
+$costBucketExpr = bucketExpr('date_performed', $granularity);
+
+$revByBucket = qRange($pdo, "
+    SELECT $revBucketExpr AS bucket, SUM(amount) AS total
     FROM billings
-    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
-    GROUP BY ym
-")->fetchAll(PDO::FETCH_KEY_PAIR);
+    WHERE created_at >= :rangeStart
+    GROUP BY bucket
+", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
 
-$costByMonth = $pdo->query("
-    SELECT DATE_FORMAT(date_performed, '%Y-%m') AS ym, SUM(cost) AS total
+$costByBucket = qRange($pdo, "
+    SELECT $costBucketExpr AS bucket, SUM(cost) AS total
     FROM maintenance_records
-    WHERE date_performed >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
-    GROUP BY ym
-")->fetchAll(PDO::FETCH_KEY_PAIR);
+    WHERE date_performed >= :rangeStart
+    GROUP BY bucket
+", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
 
-$monthLabels = [];
-$revTrend    = [];
-$costTrend   = [];
-for ($i = 5; $i >= 0; $i--) {
-    $ym = date('Y-m', strtotime("-$i months"));
-    $monthLabels[] = date('M Y', strtotime("-$i months"));
-    $revTrend[]    = round((float)($revByMonth[$ym]  ?? 0), 2);
-    $costTrend[]   = round((float)($costByMonth[$ym] ?? 0), 2);
-}
+$trendLabels = $buckets['labels'];
+$revTrend    = array_map(fn($k) => round((float)($revByBucket[$k]  ?? 0), 2), $buckets['keys']);
+$costTrend   = array_map(fn($k) => round((float)($costByBucket[$k] ?? 0), 2), $buckets['keys']);
 
 // ── Trip status breakdown (period-aware) ──────────────────────────────────────
-$statusRows = $pdo->query("
+$statusRows = qRange($pdo, "
     SELECT status, COUNT(*) AS cnt FROM trips t WHERE 1=1 $tripDateFilter GROUP BY status
-")->fetchAll(PDO::FETCH_KEY_PAIR);
+", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
 $statusLabels = ['Loading', 'In Transit', 'Unloading', 'Completed', 'Cancelled'];
 $statusData   = array_map(fn($s) => (int)($statusRows[$s] ?? 0), $statusLabels);
 $statusColors = ['#6c757d', '#0d6efd', '#0dcaf0', '#198754', '#dc3545'];
 
 // ── Maintenance cost by type (period-aware) ───────────────────────────────────
-$maintTypeRows = $pdo->query("
+$maintTypeRows = qRange($pdo, "
     SELECT maintenance_type, COALESCE(SUM(cost), 0) AS total_cost
     FROM maintenance_records
     WHERE 1=1 $maintDateFilter
     GROUP BY maintenance_type
-")->fetchAll(PDO::FETCH_KEY_PAIR);
+", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
 $maintTypeLabels = ['Preventive', 'Corrective', 'Inspection'];
 $maintTypeData   = array_map(fn($t) => round((float)($maintTypeRows[$t] ?? 0), 2), $maintTypeLabels);
 $maintTypeColors = ['#198754', '#dc3545', '#0d6efd'];
 
 // ── Top 5 trucks by revenue ────────────────────────────────────────────────────
-$topTrucks = $pdo->query("
+$topTrucks = qRange($pdo, "
     SELECT tr.plate_number, tr.brand, tr.model,
            COUNT(DISTINCT t.trip_id) AS trip_count,
            COALESCE(SUM(b.amount), 0) AS revenue
@@ -133,10 +210,10 @@ $topTrucks = $pdo->query("
     GROUP BY tr.truck_id
     ORDER BY revenue DESC
     LIMIT 5
-")->fetchAll(PDO::FETCH_ASSOC);
+", $rangeStartSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Top 5 drivers by completed trips ──────────────────────────────────────────
-$topDrivers = $pdo->query("
+$topDrivers = qRange($pdo, "
     SELECT e.full_name,
            COUNT(*) AS trip_count,
            SUM(CASE WHEN t.is_late = 1 THEN 1 ELSE 0 END) AS late_count
@@ -147,27 +224,24 @@ $topDrivers = $pdo->query("
     GROUP BY e.employee_id
     ORDER BY trip_count DESC
     LIMIT 5
-")->fetchAll(PDO::FETCH_ASSOC);
+", $rangeStartSql)->fetchAll(PDO::FETCH_ASSOC);
 
-// ── Incident trend — trailing 6 months ────────────────────────────────────────
-$incByMonth = $pdo->query("
-    SELECT DATE_FORMAT(reported_at, '%Y-%m') AS ym, COUNT(*) AS cnt
+// ── Incident trend (bucketed by selected granularity) ─────────────────────────
+$incBucketExpr = bucketExpr('reported_at', $granularity);
+$incByBucket = qRange($pdo, "
+    SELECT $incBucketExpr AS bucket, COUNT(*) AS cnt
     FROM incidents
-    WHERE reported_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
-    GROUP BY ym
-")->fetchAll(PDO::FETCH_KEY_PAIR);
-$incTrend = [];
-for ($i = 5; $i >= 0; $i--) {
-    $ym = date('Y-m', strtotime("-$i months"));
-    $incTrend[] = (int)($incByMonth[$ym] ?? 0);
-}
+    WHERE reported_at >= :rangeStart
+    GROUP BY bucket
+", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+$incTrend = array_map(fn($k) => (int)($incByBucket[$k] ?? 0), $buckets['keys']);
 
 // Pass chart data to JS
 $GLOBALS['analytics_data'] = json_encode([
-    'revCostTrend' => ['labels' => $monthLabels, 'revenue' => $revTrend, 'cost' => $costTrend],
+    'revCostTrend' => ['labels' => $trendLabels, 'revenue' => $revTrend, 'cost' => $costTrend],
     'tripStatus'   => ['labels' => $statusLabels, 'data' => $statusData, 'colors' => $statusColors],
     'maintType'    => ['labels' => $maintTypeLabels, 'data' => $maintTypeData, 'colors' => $maintTypeColors],
-    'incTrend'     => ['labels' => $monthLabels, 'data' => $incTrend],
+    'incTrend'     => ['labels' => $trendLabels, 'data' => $incTrend],
 ]);
 ?>
 <div class="an-page">
@@ -182,6 +256,11 @@ $GLOBALS['analytics_data'] = json_encode([
       <select name="period" class="form-select an-period-select" onchange="this.form.submit()">
         <?php foreach ($periods as $key => $p): ?>
         <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($p['label']) ?></option>
+        <?php endforeach; ?>
+      </select>
+      <select name="granularity" class="form-select an-period-select" onchange="this.form.submit()">
+        <?php foreach ($granularities as $key => $label): ?>
+        <option value="<?= $key ?>" <?= $key === $granularity ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
         <?php endforeach; ?>
       </select>
     </form>
@@ -228,7 +307,7 @@ $GLOBALS['analytics_data'] = json_encode([
 
     <div class="an-widget an-widget-wide">
       <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-bar-chart-line me-2"></i>Revenue vs Maintenance Cost (Last 6 Months)</span>
+        <span class="an-widget-title"><i class="bi bi-bar-chart-line me-2"></i>Revenue vs Maintenance Cost (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
       </div>
       <div class="an-chart-wrap an-chart-tall">
         <canvas id="revCostChart"></canvas>
@@ -277,7 +356,7 @@ $GLOBALS['analytics_data'] = json_encode([
 
     <div class="an-widget an-widget-wide">
       <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-exclamation-triangle me-2"></i>Incident Trend (Last 6 Months)</span>
+        <span class="an-widget-title"><i class="bi bi-exclamation-triangle me-2"></i>Incident Trend (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
       </div>
       <div class="an-chart-wrap">
         <canvas id="incTrendChart"></canvas>

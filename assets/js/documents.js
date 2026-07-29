@@ -189,6 +189,19 @@
     if (uploadBtnText) uploadBtnText.textContent = 'Upload';
   });
 
+  // Enter key inside the modal's fields has nowhere to go (there's no <form>
+  // element here), so it currently does nothing. Make it submit the upload,
+  // matching how a real form would behave — the click handler below still
+  // runs all the same validation (file selected, type selected, etc).
+  uploadModal?.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT') {
+      e.preventDefault();
+      submitUploadBtn?.click();
+    }
+  });
+
   // ── Submit upload ─────────────────────────────────────────────────────────
   submitUploadBtn?.addEventListener('click', () => {
     hideAlert(uploadAlert);

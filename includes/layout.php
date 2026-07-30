@@ -26,7 +26,7 @@ function getNavItems(): array {
         ['section' => 'Insights'],
         ['label' => 'Analytics',           'href' => '/pages/analytics.php',    'icon' => 'bi-graph-up-arrow',      'roles' => [ROLE_HEAD_MANAGEMENT]],
         ['section' => 'Operations'],
-        ['label' => 'Fleet Status',        'href' => '/pages/fleet_status.php', 'icon' => 'bi-truck',               'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
+        ['label' => 'Fleet Status',        'href' => '/pages/fleet_status.php', 'icon' => 'bi-truck',               'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE]],
         ['label' => 'Trip Monitoring',     'href' => '/pages/trip_monitor.php', 'icon' => 'bi-map',                 'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
         ['label' => 'Dispatch',            'href' => '/pages/dispatch.php',     'icon' => 'bi-send',                'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
         ['label' => 'Incidents',           'href' => '/pages/incidents.php',    'icon' => 'bi-exclamation-triangle','roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],

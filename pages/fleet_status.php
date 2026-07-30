@@ -9,7 +9,7 @@ require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]);
+requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE]);
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/fleet_status.js';
 
@@ -72,10 +72,12 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
       <i class="bi bi-plus-lg"></i> Add Truck
     </button>
     <?php endif; ?>
+    <?php if (in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER])): ?>
     <a href="<?= APP_BASE ?>/pages/dispatch.php"
        class="btn btn-primary btn-sm d-flex align-items-center gap-2">
       <i class="bi bi-send"></i> New Dispatch
     </a>
+    <?php endif; ?>
   </div>
 </div>
 

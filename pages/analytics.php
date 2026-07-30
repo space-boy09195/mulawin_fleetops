@@ -31,9 +31,8 @@ $months      = $periods[$period]['months'];
 
 // ── Granularity filter (controls trend chart bucketing) ──────────────────────
 $granularities = ['day' => 'Daily', 'week' => 'Weekly', 'month' => 'Monthly'];
-$granularity = $_GET['granularity'] ?? 'month';
-if (!isset($granularities[$granularity])) $granularity = 'month';
-$granularityLabel = $granularities[$granularity];
+$requestedGranularity = $_GET['granularity'] ?? 'month';
+if (!isset($granularities[$requestedGranularity])) $requestedGranularity = 'month';
 
 // ── Resolve the actual date range (shared by KPIs, leaderboards, and trends) ──
 $rangeEnd = new DateTime('today');
@@ -55,6 +54,22 @@ if ($months !== null) {
     if ($rangeStart < $clamp) $rangeStart = $clamp;
 }
 $rangeStartSql = $rangeStart->format('Y-m-d 00:00:00');
+$rangeDays     = (int)$rangeStart->diff($rangeEnd)->days;
+
+// ── Guardrail: which granularities are practical for this date range? ────────
+// Daily over a long range produces hundreds of dense, unreadable points.
+// Monthly over a very short range produces only 1 bucket, which is degenerate.
+$granularityAllowed = [
+    'day'   => $rangeDays <= 92,   // ~3 months — beyond this, daily gets too dense
+    'week'  => true,               // reasonable at any range, always available
+    'month' => $rangeDays >= 32,   // needs at least ~1 month to be meaningful
+];
+
+// If the requested granularity isn't practical for this range, fall back to
+// Weekly (always allowed above) rather than silently ignoring the request.
+$granularity = $granularityAllowed[$requestedGranularity] ? $requestedGranularity : 'week';
+$granularityLabel = $granularities[$granularity];
+$granularityWasAdjusted = $granularity !== $requestedGranularity;
 
 // Date filters as bindable clauses — $months === null (All Time) still uses
 // the clamped $rangeStart so trend buckets stay bounded; KPIs/leaderboards
@@ -259,12 +274,28 @@ $GLOBALS['analytics_data'] = json_encode([
         <?php endforeach; ?>
       </select>
       <select name="granularity" class="form-select an-period-select" onchange="this.form.submit()">
-        <?php foreach ($granularities as $key => $label): ?>
-        <option value="<?= $key ?>" <?= $key === $granularity ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+        <?php foreach ($granularities as $key => $label):
+          $isAllowed = $granularityAllowed[$key];
+          $reason = $key === 'day'
+            ? 'Daily view needs a range of ~3 months or less'
+            : ($key === 'month' ? 'Monthly view needs a range of at least ~1 month' : '');
+        ?>
+        <option value="<?= $key ?>"
+                <?= $key === $granularity ? 'selected' : '' ?>
+                <?= $isAllowed ? '' : 'disabled' ?>
+                <?= $isAllowed ? '' : 'title="' . htmlspecialchars($reason) . '"' ?>>
+          <?= htmlspecialchars($label) ?><?= $isAllowed ? '' : ' (unavailable for this range)' ?>
+        </option>
         <?php endforeach; ?>
       </select>
     </form>
   </div>
+  <?php if ($granularityWasAdjusted): ?>
+  <div class="an-adjust-note">
+    <i class="bi bi-info-circle"></i>
+    "<?= htmlspecialchars($granularities[$requestedGranularity]) ?>" isn't practical for "<?= htmlspecialchars($periodLabel) ?>", so this is showing <?= htmlspecialchars($granularityLabel) ?> instead.
+  </div>
+  <?php endif; ?>
 
   <!-- KPI cards -->
   <div class="an-kpis">

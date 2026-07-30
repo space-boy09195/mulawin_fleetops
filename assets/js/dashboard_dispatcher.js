@@ -53,4 +53,44 @@
   }
 
   setTimeout(() => window.location.reload(), 120000);
+
+  // ── Quick status update (Live Trips widget) ─────────────────────────────────
+  const BASE = window.APP_BASE ?? '';
+
+  document.querySelectorAll('.dd-quick-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tripId = btn.dataset.tripId;
+      const select = document.querySelector(`.dd-quick-select[data-trip-id="${tripId}"]`);
+      const status = select?.value;
+      if (!tripId || !status) return;
+
+      if (status === 'Cancelled' && !confirm('Cancel this trip?')) return;
+
+      btn.disabled = true;
+      const icon = btn.querySelector('i');
+      const originalClass = icon.className;
+      icon.className = 'spinner-border spinner-border-sm';
+
+      fetch(BASE + '/ajax/update_trip_status.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ trip_id: tripId, status }),
+      })
+        .then(r => r.json())
+        .then(res => {
+          if (res.success) {
+            window.location.reload();
+          } else {
+            icon.className = originalClass;
+            btn.disabled = false;
+            alert(res.message || 'Failed to update trip status.');
+          }
+        })
+        .catch(() => {
+          icon.className = originalClass;
+          btn.disabled = false;
+          alert('Network error. Please try again.');
+        });
+    });
+  });
 })();

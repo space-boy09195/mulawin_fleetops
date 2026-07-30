@@ -18,7 +18,7 @@ $delayedTrips = (int)$pdo->query("SELECT COUNT(*) FROM trips WHERE is_late=1 AND
 
 // ── Live trips ────────────────────────────────────────────────────────────────
 $liveTrips = $pdo->query("
-    SELECT t.trip_number, t.status, t.is_late, t.expected_arrival,
+    SELECT t.trip_id, t.trip_number, t.status, t.is_late, t.expected_arrival,
            e.full_name AS driver_name, r.origin, r.destination,
            tr.plate_number
     FROM trips t
@@ -30,6 +30,48 @@ $liveTrips = $pdo->query("
     ORDER BY t.is_late DESC, t.updated_at DESC
     LIMIT 8
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+// ── Upcoming trips — loading now, scheduled to roll within 48h ───────────────
+$upcomingTrips = $pdo->query("
+    SELECT t.trip_id, t.trip_number, e.full_name AS driver_name,
+           r.origin, r.destination, tr.plate_number, dr.scheduled_at
+    FROM trips t
+    JOIN dispatch_requests dr ON t.dispatch_id = dr.dispatch_id
+    JOIN employees e          ON dr.driver_id  = e.employee_id
+    JOIN routes r             ON dr.route_id   = r.route_id
+    JOIN trucks tr            ON dr.truck_id   = tr.truck_id
+    WHERE t.status = 'Loading'
+      AND dr.scheduled_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 48 HOUR)
+    ORDER BY dr.scheduled_at ASC
+    LIMIT 6
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// ── This week's personal activity ─────────────────────────────────────────────
+$weekStart = date('Y-m-d 00:00:00', strtotime('monday this week'));
+$currentUserId = $_SESSION['user_id'] ?? 0;
+
+$weeklyReq = $pdo->prepare("
+    SELECT
+        COUNT(*)                                            AS submitted,
+        SUM(CASE WHEN status = 'Approved' THEN 1 ELSE 0 END) AS approved,
+        SUM(CASE WHEN status = 'Rejected' THEN 1 ELSE 0 END) AS rejected
+    FROM dispatch_requests
+    WHERE requested_by = ? AND requested_at >= ?
+");
+$weeklyReq->execute([$currentUserId, $weekStart]);
+$weekly = $weeklyReq->fetch(PDO::FETCH_ASSOC);
+$weeklySubmitted = (int)($weekly['submitted'] ?? 0);
+$weeklyApproved  = (int)($weekly['approved']  ?? 0);
+$weeklyRejected  = (int)($weekly['rejected']  ?? 0);
+
+$weeklyDone = $pdo->prepare("
+    SELECT COUNT(*)
+    FROM trips t
+    JOIN dispatch_requests dr ON t.dispatch_id = dr.dispatch_id
+    WHERE dr.requested_by = ? AND t.status = 'Completed' AND t.actual_arrival >= ?
+");
+$weeklyDone->execute([$currentUserId, $weekStart]);
+$weeklyCompleted = (int)$weeklyDone->fetchColumn();
 
 // ── My pending dispatch requests ──────────────────────────────────────────────
 $stmt = $pdo->prepare(
@@ -101,6 +143,15 @@ $GLOBALS['dash_data'] = json_encode([
     </a>
   </div>
 
+  <!-- Your activity this week -->
+  <div class="dd-activity-strip">
+    <span class="dd-activity-label"><i class="bi bi-calendar-week"></i> This Week</span>
+    <span class="dd-activity-item"><strong><?= $weeklySubmitted ?></strong> submitted</span>
+    <span class="dd-activity-item dd-activity-green"><strong><?= $weeklyApproved ?></strong> approved</span>
+    <span class="dd-activity-item dd-activity-red"><strong><?= $weeklyRejected ?></strong> rejected</span>
+    <span class="dd-activity-item dd-activity-blue"><strong><?= $weeklyCompleted ?></strong> trips completed</span>
+  </div>
+
   <!-- Stat cards -->
   <div class="dd-stats">
     <div class="dd-stat-card">
@@ -143,7 +194,7 @@ $GLOBALS['dash_data'] = json_encode([
       <div class="dd-table-wrap">
         <table class="table dd-table">
           <thead>
-            <tr><th>Trip</th><th>Driver</th><th>Route</th><th>ETA</th><th>Status</th></tr>
+            <tr><th>Trip</th><th>Driver</th><th>Route</th><th>ETA</th><th>Status</th><th>Update</th></tr>
           </thead>
           <tbody>
             <?php foreach ($liveTrips as $t): ?>
@@ -173,6 +224,18 @@ $GLOBALS['dash_data'] = json_encode([
                 <?php else: ?>
                 <span class="dd-status-badge <?= $stCls ?>"><?= htmlspecialchars($t['status']) ?></span>
                 <?php endif; ?>
+              </td>
+              <td>
+                <div class="dd-quick-update">
+                  <select class="form-select dd-quick-select" data-trip-id="<?= $t['trip_id'] ?>">
+                    <?php foreach (['Loading', 'In Transit', 'Unloading', 'Completed', 'Cancelled'] as $st): ?>
+                    <option value="<?= $st ?>" <?= $st === $t['status'] ? 'selected' : '' ?>><?= $st ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                  <button class="dd-quick-btn" data-trip-id="<?= $t['trip_id'] ?>" title="Apply status update">
+                    <i class="bi bi-check-lg"></i>
+                  </button>
+                </div>
               </td>
             </tr>
             <?php endforeach; ?>
@@ -226,6 +289,37 @@ $GLOBALS['dash_data'] = json_encode([
       <div class="dd-chart-wrap">
         <canvas id="tripStatusChart"></canvas>
       </div>
+    </div>
+
+    <!-- Upcoming Trips -->
+    <div class="dd-widget dd-widget-wide">
+      <div class="dd-widget-header">
+        <span class="dd-widget-title"><i class="bi bi-calendar2-check me-2"></i>Upcoming (Next 48h)</span>
+      </div>
+      <?php if (empty($upcomingTrips)): ?>
+      <div class="dd-empty"><i class="bi bi-calendar2-check"></i><span>Nothing scheduled to roll out in the next 48 hours</span></div>
+      <?php else: ?>
+      <div class="dd-table-wrap">
+        <table class="table dd-table">
+          <thead><tr><th>Trip</th><th>Driver</th><th>Truck</th><th>Route</th><th>Scheduled</th></tr></thead>
+          <tbody>
+            <?php foreach ($upcomingTrips as $u): ?>
+            <tr>
+              <td><span class="dd-ref"><?= htmlspecialchars($u['trip_number']) ?></span></td>
+              <td><?= htmlspecialchars($u['driver_name']) ?></td>
+              <td><?= htmlspecialchars($u['plate_number']) ?></td>
+              <td class="dd-route">
+                <?= htmlspecialchars($u['origin']) ?>
+                <i class="bi bi-arrow-right"></i>
+                <?= htmlspecialchars($u['destination']) ?>
+              </td>
+              <td class="dd-muted"><?= date('M d, H:i', strtotime($u['scheduled_at'])) ?></td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+      <?php endif; ?>
     </div>
 
   </div>

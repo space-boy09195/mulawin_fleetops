@@ -36,7 +36,7 @@ $trucksAttention = $pdo->query("
 
 // ── Parts inventory with progress bars ───────────────────────────────────────
 $partsInventory = $pdo->query("
-    SELECT part_name, quantity, reorder_level, unit
+    SELECT part_id, part_name, quantity, reorder_level, unit
     FROM parts_inventory
     ORDER BY (quantity / GREATEST(reorder_level,1)) ASC
     LIMIT 6
@@ -52,6 +52,46 @@ $criticalMaint = $pdo->query("
     WHERE i.resolved_at IS NULL AND i.incident_type = 'Vehicle Breakdown'
     ORDER BY i.reported_at DESC LIMIT 1
 ")->fetch(PDO::FETCH_ASSOC);
+
+// ── Upcoming maintenance due — based on each truck's latest next_due_date ────
+$upcomingMaint = $pdo->query("
+    SELECT tr.plate_number, tr.brand, tr.model, mr.next_due_date, mr.maintenance_type
+    FROM trucks tr
+    JOIN (
+        SELECT truck_id, next_due_date, maintenance_type,
+               ROW_NUMBER() OVER (PARTITION BY truck_id ORDER BY date_performed DESC, created_at DESC) AS rn
+        FROM maintenance_records
+        WHERE next_due_date IS NOT NULL
+    ) mr ON tr.truck_id = mr.truck_id AND mr.rn = 1
+    WHERE mr.next_due_date <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)
+    ORDER BY mr.next_due_date ASC
+    LIMIT 6
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// ── This week's personal activity ─────────────────────────────────────────────
+$weekStart = date('Y-m-d 00:00:00', strtotime('monday this week'));
+$currentUserId = $_SESSION['user_id'] ?? 0;
+
+$weeklyChecklists = $pdo->prepare("
+    SELECT COUNT(*) FROM maintenance_checklists
+    WHERE submitted_by = ? AND submitted_at >= ?
+");
+$weeklyChecklists->execute([$currentUserId, $weekStart]);
+$weeklyChecklistCount = (int)$weeklyChecklists->fetchColumn();
+
+$weeklyRecords = $pdo->prepare("
+    SELECT COUNT(*) FROM maintenance_records
+    WHERE performed_by = ? AND created_at >= ?
+");
+$weeklyRecords->execute([$currentUserId, $weekStart]);
+$weeklyRecordCount = (int)$weeklyRecords->fetchColumn();
+
+$weeklyMovements = $pdo->prepare("
+    SELECT COUNT(*) FROM parts_movements
+    WHERE recorded_by = ? AND moved_at >= ?
+");
+$weeklyMovements->execute([$currentUserId, $weekStart]);
+$weeklyMovementCount = (int)$weeklyMovements->fetchColumn();
 
 // ── Maintenance type distribution for donut ───────────────────────────────────
 $maintTypeRows = $pdo->query("
@@ -95,6 +135,14 @@ $GLOBALS['dash_data'] = json_encode([
     <a href="<?= APP_BASE ?>/pages/maintenance.php" class="btn dm-btn-primary">
       <i class="bi bi-wrench me-1"></i> Log Record
     </a>
+  </div>
+
+  <!-- Your activity this week -->
+  <div class="dm-activity-strip">
+    <span class="dm-activity-label"><i class="bi bi-calendar-week"></i> This Week</span>
+    <span class="dm-activity-item"><strong><?= $weeklyChecklistCount ?></strong> checklists submitted</span>
+    <span class="dm-activity-item"><strong><?= $weeklyRecordCount ?></strong> records logged</span>
+    <span class="dm-activity-item"><strong><?= $weeklyMovementCount ?></strong> parts movements</span>
   </div>
 
   <!-- Stat cards -->
@@ -190,6 +238,12 @@ $GLOBALS['dash_data'] = json_encode([
           <div class="dm-bar-track">
             <div class="dm-bar-fill <?= $barCls ?>" style="width:<?= $pct ?>%"></div>
           </div>
+          <?php if ($part['quantity'] <= $part['reorder_level']): ?>
+          <a href="<?= APP_BASE ?>/pages/parts.php?quick_movement=<?= $part['part_id'] ?>&type=Stock+In"
+             class="dm-reorder-btn">
+            <i class="bi bi-box-arrow-in-down"></i> Reorder
+          </a>
+          <?php endif; ?>
         </div>
         <?php endforeach; ?>
       </div>
@@ -214,6 +268,44 @@ $GLOBALS['dash_data'] = json_encode([
       <div class="dm-chart-wrap">
         <canvas id="maintCostChart"></canvas>
       </div>
+    </div>
+
+    <!-- Upcoming Maintenance Due -->
+    <div class="dm-widget dm-widget-wide">
+      <div class="dm-widget-header">
+        <span class="dm-widget-title"><i class="bi bi-calendar2-week me-2"></i>Upcoming Maintenance Due (Next 14 Days)</span>
+        <a href="<?= APP_BASE ?>/pages/maintenance.php" class="dm-link">Log Record</a>
+      </div>
+      <?php if (empty($upcomingMaint)): ?>
+      <div class="dm-empty"><i class="bi bi-calendar2-check"></i><span>Nothing due for preventive maintenance soon</span></div>
+      <?php else: ?>
+      <div class="dm-table-wrap">
+        <table class="table dm-table">
+          <thead><tr><th>Truck</th><th>Type</th><th>Due Date</th><th>Status</th></tr></thead>
+          <tbody>
+            <?php foreach ($upcomingMaint as $um):
+              $isOverdue = strtotime($um['next_due_date']) < strtotime('today');
+              $isSoon    = !$isOverdue && strtotime($um['next_due_date']) <= strtotime('+3 days');
+            ?>
+            <tr>
+              <td class="dm-muted"><?= htmlspecialchars($um['brand'] . ' ' . $um['model']) ?></td>
+              <td><?= htmlspecialchars($um['maintenance_type']) ?></td>
+              <td><?= date('M d, Y', strtotime($um['next_due_date'])) ?></td>
+              <td>
+                <?php if ($isOverdue): ?>
+                <span class="dm-health-badge dm-health-critical">Overdue</span>
+                <?php elseif ($isSoon): ?>
+                <span class="dm-health-badge dm-health-warning">Due Soon</span>
+                <?php else: ?>
+                <span class="dm-health-badge dm-health-ok">Upcoming</span>
+                <?php endif; ?>
+              </td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+      <?php endif; ?>
     </div>
 
   </div>

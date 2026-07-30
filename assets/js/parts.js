@@ -92,18 +92,13 @@
     const catVal    = filterCategory?.value   ?? '';
     const stockVal  = filterStock?.value      ?? '';
     const searchVal = (filterPartSearch?.value ?? '').toLowerCase();
-    let visibleCount = 0;
 
     stockTbody.querySelectorAll('tr').forEach(row => {
       const matchCat    = !catVal    || row.dataset.category === catVal;
       const matchStock  = !stockVal  || row.dataset.low      === stockVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      const isMatch = matchCat && matchStock && matchSearch;
-      row.classList.toggle('pts-row-hidden', !isMatch);
-      if (isMatch) visibleCount++;
+      row.classList.toggle('pts-row-hidden', !(matchCat && matchStock && matchSearch));
     });
-
-    document.getElementById('noStockResults')?.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterCategory?.addEventListener('change', applyStockFilters);
@@ -119,17 +114,12 @@
     if (!movTbody) return;
     const typeVal   = filterMovType?.value   ?? '';
     const searchVal = (filterMovSearch?.value ?? '').toLowerCase();
-    let visibleCount = 0;
 
     movTbody.querySelectorAll('tr').forEach(row => {
       const matchType   = !typeVal   || row.dataset.movtype === typeVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      const isMatch = matchType && matchSearch;
-      row.classList.toggle('pts-row-hidden', !isMatch);
-      if (isMatch) visibleCount++;
+      row.classList.toggle('pts-row-hidden', !(matchType && matchSearch));
     });
-
-    document.getElementById('noMovementResults')?.classList.toggle('d-none', visibleCount > 0);
   }
 
   filterMovType?.addEventListener('change', applyMovFilters);
@@ -299,5 +289,32 @@
         showAlert(movementAlert, 'Network error. Please try again.');
       });
   });
+
+  // ── Deep link: ?quick_movement=<part_id>&type=Stock+In ───────────────────────
+  // Lets other pages (e.g. the Maintenance dashboard's "Reorder" shortcut) jump
+  // straight into a pre-filled Record Movement modal instead of making the
+  // person hunt down the part and open the modal themselves.
+  (function handleQuickMovementDeepLink() {
+    const params  = new URLSearchParams(window.location.search);
+    const partId  = params.get('quick_movement');
+    const typeVal = params.get('type');
+    if (!partId || !movPartId) return;
+
+    const partOption = movPartId.querySelector(`option[value="${partId}"]`);
+    if (!partOption) return; // part not found in the dropdown — skip silently
+
+    movPartId.value = partId;
+    movPartId.dispatchEvent(new Event('change', { bubbles: true }));
+
+    if (typeVal && movType?.querySelector(`option[value="${typeVal}"]`)) {
+      movType.value = typeVal;
+      movType.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    if (movementModal) new bootstrap.Modal(movementModal).show();
+
+    // Clean the query string so a page refresh doesn't reopen the modal.
+    window.history.replaceState({}, '', window.location.pathname);
+  })();
 
 })();

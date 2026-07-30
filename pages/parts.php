@@ -233,10 +233,6 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
             <?php endforeach; ?>
           </tbody>
         </table>
-        <div id="noStockResults" class="no-results d-none">
-          <i class="bi bi-search"></i>
-          <span>No parts match your filters.</span>
-        </div>
         <?php endif; ?>
       </div>
     </div>
@@ -320,10 +316,6 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
             <?php endforeach; ?>
           </tbody>
         </table>
-        <div id="noMovementResults" class="no-results d-none">
-          <i class="bi bi-search"></i>
-          <span>No movements match your filters.</span>
-        </div>
         <?php endif; ?>
       </div>
     </div>

@@ -9,7 +9,9 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE, ROLE_ACCOUNTING]);
+$role   = currentRoleId();
+$isHead = $role === ROLE_HEAD_MANAGEMENT;
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/analytics.js';
 layoutHead('Analytics', APP_BASE . '/assets/css/analytics.css');
@@ -251,12 +253,94 @@ $incByBucket = qRange($pdo, "
 ", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
 $incTrend = array_map(fn($k) => (int)($incByBucket[$k] ?? 0), $buckets['keys']);
 
+// ══════════════════════════════════════════════════════════════════════════
+// ROLE-SPECIFIC DATA — each role gets its own relevant slice, not a
+// relabeled copy of the Head Management view.
+// ══════════════════════════════════════════════════════════════════════════
+
+// ── Dispatcher: trip volume trend + trucks by trip count ─────────────────────
+if ($role === ROLE_DISPATCHER) {
+    $tripVolBucketExpr = bucketExpr('t.created_at', $granularity);
+    $tripVolByBucket = qRange($pdo, "
+        SELECT $tripVolBucketExpr AS bucket, COUNT(*) AS cnt
+        FROM trips t
+        WHERE t.status = 'Completed' AND t.created_at >= :rangeStart
+        GROUP BY bucket
+    ", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+    $tripVolumeTrend = array_map(fn($k) => (int)($tripVolByBucket[$k] ?? 0), $buckets['keys']);
+
+    $topTrucksByTrips = qRange($pdo, "
+        SELECT tr.plate_number, tr.brand, tr.model,
+               COUNT(*) AS trip_count,
+               SUM(CASE WHEN t.is_late = 1 THEN 1 ELSE 0 END) AS late_count
+        FROM trucks tr
+        JOIN dispatch_requests dr ON dr.truck_id = tr.truck_id
+        JOIN trips t ON t.dispatch_id = dr.dispatch_id AND t.status = 'Completed'
+        WHERE t.created_at >= :rangeStart
+        GROUP BY tr.truck_id
+        ORDER BY trip_count DESC
+        LIMIT 5
+    ", $rangeStartSql)->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// ── Maintenance: cost-only trend, open incidents, records logged, top trucks ─
+if ($role === ROLE_MAINTENANCE) {
+    $openIncidentsCount = (int)$pdo->query("
+        SELECT COUNT(*) FROM incidents WHERE resolved_at IS NULL
+    ")->fetchColumn();
+
+    $maintRecordsLoggedCount = (int)qRange($pdo, "
+        SELECT COUNT(*) FROM maintenance_records WHERE date_performed >= :rangeStart
+    ", $rangeStartSql)->fetchColumn();
+
+    $avgCostPerTruck = $totalTrucks > 0 ? $maintCost / $totalTrucks : 0;
+
+    $topTrucksByMaintCost = qRange($pdo, "
+        SELECT tr.plate_number, tr.brand, tr.model,
+               COUNT(*) AS record_count,
+               COALESCE(SUM(mr.cost), 0) AS total_cost
+        FROM trucks tr
+        JOIN maintenance_records mr ON mr.truck_id = tr.truck_id
+        WHERE mr.date_performed >= :rangeStart
+        GROUP BY tr.truck_id
+        ORDER BY total_cost DESC
+        LIMIT 5
+    ", $rangeStartSql)->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// ── Accounting: billed vs collected trend, top clients ────────────────────────
+if ($role === ROLE_ACCOUNTING) {
+    $collBucketExpr = bucketExpr('c.payment_date', $granularity);
+    $collByBucket = qRange($pdo, "
+        SELECT $collBucketExpr AS bucket, SUM(c.amount_paid) AS total
+        FROM collections c
+        WHERE c.payment_date >= :rangeStart
+        GROUP BY bucket
+    ", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+    $collTrend = array_map(fn($k) => round((float)($collByBucket[$k] ?? 0), 2), $buckets['keys']);
+
+    $topClientsByRevenue = qRange($pdo, "
+        SELECT COALESCE(NULLIF(b.client_name, ''), CONCAT('Trip ', t.trip_number)) AS client_label,
+               COUNT(*) AS invoice_count,
+               COALESCE(SUM(b.amount), 0) AS revenue
+        FROM billings b
+        JOIN trips t ON b.trip_id = t.trip_id
+        WHERE b.created_at >= :rangeStart
+        GROUP BY client_label
+        ORDER BY revenue DESC
+        LIMIT 5
+    ", $rangeStartSql)->fetchAll(PDO::FETCH_ASSOC);
+}
+
 // Pass chart data to JS
 $GLOBALS['analytics_data'] = json_encode([
-    'revCostTrend' => ['labels' => $trendLabels, 'revenue' => $revTrend, 'cost' => $costTrend],
-    'tripStatus'   => ['labels' => $statusLabels, 'data' => $statusData, 'colors' => $statusColors],
-    'maintType'    => ['labels' => $maintTypeLabels, 'data' => $maintTypeData, 'colors' => $maintTypeColors],
-    'incTrend'     => ['labels' => $trendLabels, 'data' => $incTrend],
+    'revCostTrend'     => ['labels' => $trendLabels, 'revenue' => $revTrend, 'cost' => $costTrend],
+    'tripStatus'       => ['labels' => $statusLabels, 'data' => $statusData, 'colors' => $statusColors],
+    'maintType'        => ['labels' => $maintTypeLabels, 'data' => $maintTypeData, 'colors' => $maintTypeColors],
+    'incTrend'         => ['labels' => $trendLabels, 'data' => $incTrend],
+    'tripVolumeTrend'  => $role === ROLE_DISPATCHER  ? ['labels' => $trendLabels, 'data' => $tripVolumeTrend] : null,
+    'maintCostTrend'   => $role === ROLE_MAINTENANCE ? ['labels' => $trendLabels, 'data' => $costTrend]       : null,
+    'billedCollected'  => $role === ROLE_ACCOUNTING  ? ['labels' => $trendLabels, 'revenue' => $revTrend, 'collected' => $collTrend] : null,
 ]);
 ?>
 <div class="an-page">
@@ -265,7 +349,17 @@ $GLOBALS['analytics_data'] = json_encode([
   <div class="an-header">
     <div>
       <h1 class="an-title">Analytics</h1>
-      <p class="an-subtitle">Cross-functional performance across Operations, Maintenance, and Accounting</p>
+      <p class="an-subtitle">
+        <?php if ($isHead): ?>
+        Cross-functional performance across Operations, Maintenance, and Accounting
+        <?php elseif ($role === ROLE_DISPATCHER): ?>
+        Your operations performance — trips, fleet utilization, and on-time delivery
+        <?php elseif ($role === ROLE_MAINTENANCE): ?>
+        Your maintenance performance — costs, incidents, and fleet health
+        <?php elseif ($role === ROLE_ACCOUNTING): ?>
+        Your billing performance — revenue, collections, and client activity
+        <?php endif; ?>
+      </p>
     </div>
     <form method="get" class="an-period-form">
       <select name="period" class="form-select an-period-select" onchange="this.form.submit()">
@@ -299,6 +393,7 @@ $GLOBALS['analytics_data'] = json_encode([
 
   <!-- KPI cards -->
   <div class="an-kpis">
+    <?php if ($isHead): ?>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-cash-coin"></i> Revenue Billed</div>
       <div class="an-kpi-value">₱<?= number_format($revenue, 2) ?></div>
@@ -331,11 +426,76 @@ $GLOBALS['analytics_data'] = json_encode([
       <div class="an-kpi-value">₱<?= number_format($avgRevenuePerTrip, 2) ?></div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
     </div>
+
+    <?php elseif ($role === ROLE_DISPATCHER): ?>
+    <div class="an-kpi-card">
+      <div class="an-kpi-label"><i class="bi bi-clock-history"></i> On-Time Delivery</div>
+      <div class="an-kpi-value <?= $onTimeRate >= 85 ? 'an-value-green' : ($onTimeRate >= 60 ? 'an-value-orange' : 'an-value-red') ?>">
+        <?= $onTimeRate ?>%
+      </div>
+      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+    </div>
+    <div class="an-kpi-card">
+      <div class="an-kpi-label"><i class="bi bi-speedometer2"></i> Fleet Utilization</div>
+      <div class="an-kpi-value an-value-blue"><?= $utilizationRate ?>%</div>
+      <div class="an-kpi-sub"><?= $utilizedTrucks ?> of <?= $totalTrucks ?> trucks active</div>
+    </div>
+    <div class="an-kpi-card">
+      <div class="an-kpi-label"><i class="bi bi-check-circle"></i> Completed Trips</div>
+      <div class="an-kpi-value an-value-green"><?= $completedTrips ?></div>
+      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+    </div>
+    <div class="an-kpi-card">
+      <div class="an-kpi-label"><i class="bi bi-exclamation-triangle"></i> Late Trips</div>
+      <div class="an-kpi-value <?= $lateCount === 0 ? 'an-value-green' : 'an-value-red' ?>"><?= $lateCount ?></div>
+      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+    </div>
+
+    <?php elseif ($role === ROLE_MAINTENANCE): ?>
+    <div class="an-kpi-card">
+      <div class="an-kpi-label"><i class="bi bi-tools"></i> Maintenance Cost</div>
+      <div class="an-kpi-value an-value-orange">₱<?= number_format($maintCost, 2) ?></div>
+      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+    </div>
+    <div class="an-kpi-card">
+      <div class="an-kpi-label"><i class="bi bi-clipboard-check"></i> Records Logged</div>
+      <div class="an-kpi-value"><?= $maintRecordsLoggedCount ?></div>
+      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+    </div>
+    <div class="an-kpi-card">
+      <div class="an-kpi-label"><i class="bi bi-exclamation-octagon"></i> Open Incidents</div>
+      <div class="an-kpi-value <?= $openIncidentsCount === 0 ? 'an-value-green' : 'an-value-red' ?>"><?= $openIncidentsCount ?></div>
+      <div class="an-kpi-sub">Currently unresolved</div>
+    </div>
+    <div class="an-kpi-card">
+      <div class="an-kpi-label"><i class="bi bi-truck"></i> Avg Cost / Truck</div>
+      <div class="an-kpi-value">₱<?= number_format($avgCostPerTruck, 2) ?></div>
+      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+    </div>
+
+    <?php elseif ($role === ROLE_ACCOUNTING): ?>
+    <div class="an-kpi-card">
+      <div class="an-kpi-label"><i class="bi bi-cash-coin"></i> Revenue Billed</div>
+      <div class="an-kpi-value">₱<?= number_format($revenue, 2) ?></div>
+      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+    </div>
+    <div class="an-kpi-card">
+      <div class="an-kpi-label"><i class="bi bi-wallet2"></i> Collected</div>
+      <div class="an-kpi-value an-value-green">₱<?= number_format($collected, 2) ?></div>
+      <div class="an-kpi-sub"><?= $collectionRate ?>% collection rate</div>
+    </div>
+    <div class="an-kpi-card">
+      <div class="an-kpi-label"><i class="bi bi-graph-up-arrow"></i> Avg Revenue / Trip</div>
+      <div class="an-kpi-value">₱<?= number_format($avgRevenuePerTrip, 2) ?></div>
+      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+    </div>
+    <?php endif; ?>
   </div>
 
   <!-- Chart grid -->
   <div class="an-grid">
 
+    <?php if ($isHead): ?>
     <div class="an-widget an-widget-wide">
       <div class="an-widget-header">
         <span class="an-widget-title"><i class="bi bi-bar-chart-line me-2"></i>Revenue vs Maintenance Cost (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
@@ -344,7 +504,42 @@ $GLOBALS['analytics_data'] = json_encode([
         <canvas id="revCostChart"></canvas>
       </div>
     </div>
+    <?php endif; ?>
 
+    <?php if ($role === ROLE_DISPATCHER): ?>
+    <div class="an-widget an-widget-wide">
+      <div class="an-widget-header">
+        <span class="an-widget-title"><i class="bi bi-bar-chart-line me-2"></i>Completed Trips (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
+      </div>
+      <div class="an-chart-wrap an-chart-tall">
+        <canvas id="tripVolumeChart"></canvas>
+      </div>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($role === ROLE_MAINTENANCE): ?>
+    <div class="an-widget an-widget-wide">
+      <div class="an-widget-header">
+        <span class="an-widget-title"><i class="bi bi-bar-chart-line me-2"></i>Maintenance Cost (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
+      </div>
+      <div class="an-chart-wrap an-chart-tall">
+        <canvas id="maintCostTrendChart"></canvas>
+      </div>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($role === ROLE_ACCOUNTING): ?>
+    <div class="an-widget an-widget-wide">
+      <div class="an-widget-header">
+        <span class="an-widget-title"><i class="bi bi-bar-chart-line me-2"></i>Billed vs Collected (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
+      </div>
+      <div class="an-chart-wrap an-chart-tall">
+        <canvas id="billedCollectedChart"></canvas>
+      </div>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($isHead || $role === ROLE_DISPATCHER): ?>
     <div class="an-widget">
       <div class="an-widget-header">
         <span class="an-widget-title"><i class="bi bi-pie-chart-fill me-2"></i>Trip Status</span>
@@ -364,7 +559,9 @@ $GLOBALS['analytics_data'] = json_encode([
         </div>
       </div>
     </div>
+    <?php endif; ?>
 
+    <?php if ($isHead || $role === ROLE_MAINTENANCE): ?>
     <div class="an-widget">
       <div class="an-widget-header">
         <span class="an-widget-title"><i class="bi bi-wrench-adjustable me-2"></i>Maintenance Cost by Type</span>
@@ -384,7 +581,9 @@ $GLOBALS['analytics_data'] = json_encode([
         </div>
       </div>
     </div>
+    <?php endif; ?>
 
+    <?php if ($isHead || $role === ROLE_DISPATCHER || $role === ROLE_MAINTENANCE): ?>
     <div class="an-widget an-widget-wide">
       <div class="an-widget-header">
         <span class="an-widget-title"><i class="bi bi-exclamation-triangle me-2"></i>Incident Trend (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
@@ -393,12 +592,14 @@ $GLOBALS['analytics_data'] = json_encode([
         <canvas id="incTrendChart"></canvas>
       </div>
     </div>
+    <?php endif; ?>
 
   </div>
 
   <!-- Leaderboards -->
   <div class="an-tables-grid">
 
+    <?php if ($isHead || $role === ROLE_ACCOUNTING): ?>
     <div class="an-widget">
       <div class="an-widget-header">
         <span class="an-widget-title"><i class="bi bi-trophy me-2"></i>Top 5 Trucks by Revenue</span>
@@ -424,7 +625,9 @@ $GLOBALS['analytics_data'] = json_encode([
       </table>
       <?php endif; ?>
     </div>
+    <?php endif; ?>
 
+    <?php if ($isHead || $role === ROLE_DISPATCHER): ?>
     <div class="an-widget">
       <div class="an-widget-header">
         <span class="an-widget-title"><i class="bi bi-person-badge me-2"></i>Top 5 Drivers by Trips</span>
@@ -456,6 +659,90 @@ $GLOBALS['analytics_data'] = json_encode([
       </table>
       <?php endif; ?>
     </div>
+    <?php endif; ?>
+
+    <?php if ($role === ROLE_DISPATCHER): ?>
+    <div class="an-widget">
+      <div class="an-widget-header">
+        <span class="an-widget-title"><i class="bi bi-truck me-2"></i>Top 5 Trucks by Trip Count</span>
+        <button class="an-export-btn" data-export="topTrucksByTripsTable" data-filename="top-trucks-by-trips">
+          <i class="bi bi-download"></i> CSV
+        </button>
+      </div>
+      <?php if (empty($topTrucksByTrips)): ?>
+      <div class="an-empty"><i class="bi bi-truck"></i><span>No completed trips in this period</span></div>
+      <?php else: ?>
+      <table class="table an-table" id="topTrucksByTripsTable">
+        <thead><tr><th>Plate No.</th><th>Truck</th><th>Trips</th><th>Late</th></tr></thead>
+        <tbody>
+          <?php foreach ($topTrucksByTrips as $tt): ?>
+          <tr>
+            <td class="an-mono"><?= htmlspecialchars($tt['plate_number']) ?></td>
+            <td><?= htmlspecialchars($tt['brand'] . ' ' . $tt['model']) ?></td>
+            <td><?= (int)$tt['trip_count'] ?></td>
+            <td><?= (int)$tt['late_count'] ?></td>
+          </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+      <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($role === ROLE_MAINTENANCE): ?>
+    <div class="an-widget an-widget-wide">
+      <div class="an-widget-header">
+        <span class="an-widget-title"><i class="bi bi-truck me-2"></i>Top 5 Trucks by Maintenance Cost</span>
+        <button class="an-export-btn" data-export="topTrucksByMaintCostTable" data-filename="top-trucks-by-maintenance-cost">
+          <i class="bi bi-download"></i> CSV
+        </button>
+      </div>
+      <?php if (empty($topTrucksByMaintCost)): ?>
+      <div class="an-empty"><i class="bi bi-tools"></i><span>No maintenance records in this period</span></div>
+      <?php else: ?>
+      <table class="table an-table" id="topTrucksByMaintCostTable">
+        <thead><tr><th>Plate No.</th><th>Truck</th><th>Records</th><th>Total Cost</th></tr></thead>
+        <tbody>
+          <?php foreach ($topTrucksByMaintCost as $tm): ?>
+          <tr>
+            <td class="an-mono"><?= htmlspecialchars($tm['plate_number']) ?></td>
+            <td><?= htmlspecialchars($tm['brand'] . ' ' . $tm['model']) ?></td>
+            <td><?= (int)$tm['record_count'] ?></td>
+            <td class="an-money">₱<?= number_format((float)$tm['total_cost'], 2) ?></td>
+          </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+      <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($role === ROLE_ACCOUNTING): ?>
+    <div class="an-widget">
+      <div class="an-widget-header">
+        <span class="an-widget-title"><i class="bi bi-people me-2"></i>Top 5 Clients by Revenue</span>
+        <button class="an-export-btn" data-export="topClientsTable" data-filename="top-clients">
+          <i class="bi bi-download"></i> CSV
+        </button>
+      </div>
+      <?php if (empty($topClientsByRevenue)): ?>
+      <div class="an-empty"><i class="bi bi-receipt"></i><span>No billings in this period</span></div>
+      <?php else: ?>
+      <table class="table an-table" id="topClientsTable">
+        <thead><tr><th>Client</th><th>Invoices</th><th>Revenue</th></tr></thead>
+        <tbody>
+          <?php foreach ($topClientsByRevenue as $cl): ?>
+          <tr>
+            <td><?= htmlspecialchars($cl['client_label']) ?></td>
+            <td><?= (int)$cl['invoice_count'] ?></td>
+            <td class="an-money">₱<?= number_format((float)$cl['revenue'], 2) ?></td>
+          </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+      <?php endif; ?>
+    </div>
+    <?php endif; ?>
 
   </div>
 </div>

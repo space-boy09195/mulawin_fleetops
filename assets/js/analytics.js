@@ -173,6 +173,129 @@
     });
   }
 
+  // ── Dispatcher: Completed Trips volume chart ──────────────────────────────────
+  const tripVolumeCtx = document.getElementById('tripVolumeChart');
+  if (tripVolumeCtx && D.tripVolumeTrend) {
+    new Chart(tripVolumeCtx, {
+      type: 'bar',
+      data: {
+        labels: D.tripVolumeTrend.labels,
+        datasets: [{
+          label: 'Completed Trips',
+          data: D.tripVolumeTrend.data,
+          backgroundColor: 'rgba(13,110,253,0.65)',
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: tooltipBg, borderColor: tooltipBrd, borderWidth: 1,
+            titleColor: legendTextColor, bodyColor: textColor, padding: 10,
+            callbacks: { label: ctx => ` ${ctx.parsed.y} trip${ctx.parsed.y !== 1 ? 's' : ''}` },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: textColor } },
+          y: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor, stepSize: 1, precision: 0 } },
+        },
+      },
+    });
+  }
+
+  // ── Maintenance: Cost-only trend chart ────────────────────────────────────────
+  const maintCostTrendCtx = document.getElementById('maintCostTrendChart');
+  if (maintCostTrendCtx && D.maintCostTrend) {
+    new Chart(maintCostTrendCtx, {
+      type: 'bar',
+      data: {
+        labels: D.maintCostTrend.labels,
+        datasets: [{
+          label: 'Maintenance Cost',
+          data: D.maintCostTrend.data,
+          backgroundColor: 'rgba(220,53,69,0.65)',
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: tooltipBg, borderColor: tooltipBrd, borderWidth: 1,
+            titleColor: legendTextColor, bodyColor: textColor, padding: 10,
+            callbacks: { label: ctx => ` ${peso(ctx.parsed.y)}` },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: textColor } },
+          y: {
+            beginAtZero: true, grid: { color: gridColor },
+            ticks: { color: textColor, callback: v => '₱' + Number(v).toLocaleString() },
+          },
+        },
+      },
+    });
+  }
+
+  // ── Accounting: Billed vs Collected combo chart ───────────────────────────────
+  const billedCollectedCtx = document.getElementById('billedCollectedChart');
+  if (billedCollectedCtx && D.billedCollected) {
+    new Chart(billedCollectedCtx, {
+      type: 'bar',
+      data: {
+        labels: D.billedCollected.labels,
+        datasets: [
+          {
+            label: 'Billed',
+            data: D.billedCollected.revenue,
+            backgroundColor: 'rgba(13,110,253,0.55)',
+            borderRadius: 4,
+            order: 2,
+          },
+          {
+            type: 'line',
+            label: 'Collected',
+            data: D.billedCollected.collected,
+            borderColor: '#198754',
+            backgroundColor: 'rgba(25,135,84,0.08)',
+            borderWidth: 2.5,
+            pointBackgroundColor: '#198754',
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            tension: 0.3,
+            fill: false,
+            order: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top', labels: { color: legendTextColor, boxWidth: 12, padding: 14 } },
+          tooltip: {
+            backgroundColor: tooltipBg, borderColor: tooltipBrd, borderWidth: 1,
+            titleColor: legendTextColor, bodyColor: textColor, padding: 10,
+            callbacks: { label: ctx => ` ${ctx.dataset.label}: ${peso(ctx.parsed.y)}` },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: textColor } },
+          y: {
+            beginAtZero: true, grid: { color: gridColor },
+            ticks: { color: textColor, callback: v => '₱' + Number(v).toLocaleString() },
+          },
+        },
+      },
+    });
+  }
+
   // ── CSV export for leaderboard tables ────────────────────────────────────────
   function tableToCsv(table) {
     const rows = Array.from(table.querySelectorAll('tr'));

@@ -132,5 +132,56 @@
 .dd-quick-btn:hover { color:#198754; border-color:#198754; background:rgba(25,135,84,.08); }
 .dd-quick-btn:disabled { opacity:.5; cursor:default; }
 
+/* Recommended Actions panel */
+.dd-rec-panel {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
+  margin-bottom: 1.25rem;
+  overflow: hidden;
+}
+.dd-rec-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+  background: var(--bs-tertiary-bg);
+  border-bottom: 1px solid var(--bs-border-color);
+  color: var(--bs-emphasis-color);
+}
+.dd-rec-header i { color: #ffc107; }
+.dd-rec-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(13,110,253,0.12); color: #0a58ca;
+  font-size: 0.72rem; font-weight: 700; min-width: 20px; height: 20px;
+  padding: 0 5px; border-radius: 10px;
+}
+.dd-rec-list { display: flex; flex-direction: column; }
+.dd-rec-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  border-left: 3px solid transparent;
+}
+.dd-rec-card:last-child { border-bottom: none; }
+.dd-rec-high   { border-left-color: #dc3545; background: rgba(220,53,69,0.04); }
+.dd-rec-medium { border-left-color: #e67e00; background: rgba(230,126,0,0.04); }
+.dd-rec-title  { font-size: 0.85rem; font-weight: 600; color: var(--bs-emphasis-color); }
+.dd-rec-detail { font-size: 0.78rem; color: var(--bs-secondary-color); margin-top: 2px; }
+.dd-rec-action {
+  flex-shrink: 0;
+  font-size: 0.78rem; font-weight: 600;
+  color: #0d6efd; border: 1.5px solid #0d6efd;
+  padding: 4px 12px; border-radius: 6px;
+  text-decoration: none; white-space: nowrap;
+  transition: background-color .12s, color .12s;
+}
+.dd-rec-action:hover { background: #0d6efd; color: #fff; }
+
 @media(max-width:1100px) { .dd-grid { grid-template-columns:1fr; } }
 @media(max-width:768px)  { .dd-page { padding:1.25rem 1rem; } .dd-stats { grid-template-columns:repeat(2,1fr); } }

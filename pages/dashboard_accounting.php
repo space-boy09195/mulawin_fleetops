@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/recommendations.php';
 
 requireRole([ROLE_ACCOUNTING]);
 
@@ -44,13 +45,48 @@ $tripsNoDocs = $pdo->query("
 
 // ── Overdue invoices ──────────────────────────────────────────────────────────
 $overdueInvoices = $pdo->query("
-    SELECT b.billing_number, b.client_name, b.due_date, vs.balance, t.trip_number
+    SELECT b.billing_id, b.billing_number, b.client_name, b.due_date, vs.balance, t.trip_number
     FROM billings b
     JOIN v_billing_summary vs ON b.billing_id = vs.billing_id
     JOIN trips t              ON b.trip_id    = t.trip_id
     WHERE b.status != 'Paid' AND b.due_date < CURDATE()
     ORDER BY b.due_date ASC LIMIT 5
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+// ── Invoices due soon — not yet overdue, due within 7 days ────────────────────
+$dueSoonInvoices = $pdo->query("
+    SELECT b.billing_id, b.billing_number, b.client_name, b.due_date, vs.balance, t.trip_number
+    FROM billings b
+    JOIN v_billing_summary vs ON b.billing_id = vs.billing_id
+    JOIN trips t              ON b.trip_id    = t.trip_id
+    WHERE b.status != 'Paid'
+      AND b.due_date >= CURDATE()
+      AND b.due_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+    ORDER BY b.due_date ASC LIMIT 5
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// ── This week's personal activity ─────────────────────────────────────────────
+$weekStart = date('Y-m-d 00:00:00', strtotime('monday this week'));
+$currentUserId = $_SESSION['user_id'] ?? 0;
+
+$weeklyPayments = $pdo->prepare("
+    SELECT COUNT(*), COALESCE(SUM(amount_paid), 0)
+    FROM collections
+    WHERE recorded_by = ? AND created_at >= ?
+");
+$weeklyPayments->execute([$currentUserId, $weekStart]);
+[$weeklyPaymentCount, $weeklyPaymentTotal] = $weeklyPayments->fetch(PDO::FETCH_NUM);
+$weeklyPaymentCount = (int)$weeklyPaymentCount;
+$weeklyPaymentTotal = (float)$weeklyPaymentTotal;
+
+$weeklyBillings = $pdo->prepare("
+    SELECT COUNT(*) FROM billings WHERE created_by = ? AND created_at >= ?
+");
+$weeklyBillings->execute([$currentUserId, $weekStart]);
+$weeklyBillingCount = (int)$weeklyBillings->fetchColumn();
+
+// ── Recommended Actions (rule-based) ──────────────────────────────────────────
+$recommendations = getCollectionsRecommendations($pdo, 6);
 
 // ── Monthly billed vs collected — last 6 months ───────────────────────────────
 $monthlyRows = $pdo->query("
@@ -97,6 +133,35 @@ $GLOBALS['dash_data'] = json_encode([
       <i class="bi bi-receipt me-1"></i> Create Billing
     </a>
   </div>
+
+  <!-- Your activity this week -->
+  <div class="da-activity-strip">
+    <span class="da-activity-label"><i class="bi bi-calendar-week"></i> This Week</span>
+    <span class="da-activity-item"><strong><?= $weeklyBillingCount ?></strong> billings created</span>
+    <span class="da-activity-item da-activity-green"><strong><?= $weeklyPaymentCount ?></strong> payments recorded</span>
+    <span class="da-activity-item da-activity-green">₱<strong><?= number_format($weeklyPaymentTotal, 2) ?></strong> collected</span>
+  </div>
+
+  <!-- Recommended Actions -->
+  <?php if (!empty($recommendations)): ?>
+  <div class="da-rec-panel">
+    <div class="da-rec-header">
+      <i class="bi bi-lightbulb"></i> Collection Priorities
+      <span class="da-rec-count"><?= count($recommendations) ?></span>
+    </div>
+    <div class="da-rec-list">
+      <?php foreach ($recommendations as $rec): ?>
+      <div class="da-rec-card da-rec-<?= $rec['priority'] ?>">
+        <div class="da-rec-body">
+          <div class="da-rec-title"><?= htmlspecialchars($rec['title']) ?></div>
+          <div class="da-rec-detail"><?= htmlspecialchars($rec['detail']) ?></div>
+        </div>
+        <a href="<?= APP_BASE . $rec['action_url'] ?>" class="da-rec-action"><?= htmlspecialchars($rec['action_label']) ?></a>
+      </div>
+      <?php endforeach; ?>
+    </div>
+  </div>
+  <?php endif; ?>
 
   <!-- Stat cards -->
   <div class="da-stats">
@@ -166,7 +231,7 @@ $GLOBALS['dash_data'] = json_encode([
       <?php else: ?>
       <div class="da-table-wrap">
         <table class="table da-table">
-          <thead><tr><th>Invoice</th><th>Client</th><th>Date</th><th>Amount</th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Client</th><th>Date</th><th>Amount</th><th></th></tr></thead>
           <tbody>
             <?php foreach ($overdueInvoices as $ov): ?>
             <tr>
@@ -174,6 +239,43 @@ $GLOBALS['dash_data'] = json_encode([
               <td><?= $ov['client_name'] ? htmlspecialchars($ov['client_name']) : '<span class="da-muted">' . htmlspecialchars($ov['trip_number']) . '</span>' ?></td>
               <td class="da-late"><?= date('Y-m-d', strtotime($ov['due_date'])) ?></td>
               <td class="da-amount">₱<?= number_format($ov['balance'], 2) ?></td>
+              <td>
+                <a href="<?= APP_BASE ?>/pages/billing.php?quick_payment=<?= $ov['billing_id'] ?>" class="da-quick-pay-btn">
+                  <i class="bi bi-cash-coin"></i> Pay
+                </a>
+              </td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+      <?php endif; ?>
+    </div>
+
+    <!-- Invoices Due Soon -->
+    <div class="da-widget">
+      <div class="da-widget-header">
+        <span class="da-widget-title"><i class="bi bi-calendar2-week me-2"></i>Due Soon (Next 7 Days)</span>
+        <a href="<?= APP_BASE ?>/pages/billing.php" class="da-link">View All</a>
+      </div>
+      <?php if (empty($dueSoonInvoices)): ?>
+      <div class="da-empty"><i class="bi bi-calendar2-check"></i><span>Nothing due in the next 7 days</span></div>
+      <?php else: ?>
+      <div class="da-table-wrap">
+        <table class="table da-table">
+          <thead><tr><th>Invoice</th><th>Client</th><th>Due</th><th>Amount</th><th></th></tr></thead>
+          <tbody>
+            <?php foreach ($dueSoonInvoices as $ds): ?>
+            <tr>
+              <td><span class="da-ref"><?= htmlspecialchars($ds['billing_number']) ?></span></td>
+              <td><?= $ds['client_name'] ? htmlspecialchars($ds['client_name']) : '<span class="da-muted">' . htmlspecialchars($ds['trip_number']) . '</span>' ?></td>
+              <td class="da-muted"><?= date('M d', strtotime($ds['due_date'])) ?></td>
+              <td class="da-amount">₱<?= number_format($ds['balance'], 2) ?></td>
+              <td>
+                <a href="<?= APP_BASE ?>/pages/billing.php?quick_payment=<?= $ds['billing_id'] ?>" class="da-quick-pay-btn">
+                  <i class="bi bi-cash-coin"></i> Pay
+                </a>
+              </td>
             </tr>
             <?php endforeach; ?>
           </tbody>

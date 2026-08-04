@@ -56,5 +56,92 @@
 /* Charts */
 .da-chart-wrap { padding:1rem; height:240px; }
 
+/* Weekly activity strip */
+.da-activity-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.1rem;
+  background: var(--bs-tertiary-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 10px;
+  padding: 0.6rem 1rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.82rem;
+}
+.da-activity-label { display:flex; align-items:center; gap:6px; font-weight:700; color:var(--bs-secondary-color); text-transform:uppercase; font-size:.72rem; letter-spacing:.04em; }
+.da-activity-item { color: var(--bs-body-color); }
+.da-activity-item strong { font-weight:800; }
+.da-activity-green strong { color:#198754; }
+
+/* Quick-pay action (Overdue / Due Soon widgets) */
+.da-quick-pay-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #146c43;
+  background: rgba(25,135,84,0.1);
+  border: 1px solid rgba(25,135,84,0.3);
+  border-radius: 6px;
+  padding: 3px 9px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color .12s, border-color .12s;
+}
+.da-quick-pay-btn:hover { background: rgba(25,135,84,0.18); border-color:#198754; color:#0f5132; }
+
+/* Recommended Actions panel */
+.da-rec-panel {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
+  margin-bottom: 1.25rem;
+  overflow: hidden;
+}
+.da-rec-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.75rem 1rem;
+  background: var(--bs-tertiary-bg);
+  border-bottom: 1px solid var(--bs-border-color);
+  color: var(--bs-emphasis-color);
+}
+.da-rec-header i { color: #ffc107; }
+.da-rec-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(13,110,253,0.12); color: #0a58ca;
+  font-size: 0.72rem; font-weight: 700; min-width: 20px; height: 20px;
+  padding: 0 5px; border-radius: 10px;
+}
+.da-rec-list { display: flex; flex-direction: column; }
+.da-rec-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  border-left: 3px solid transparent;
+}
+.da-rec-card:last-child { border-bottom: none; }
+.da-rec-high   { border-left-color: #dc3545; background: rgba(220,53,69,0.04); }
+.da-rec-medium { border-left-color: #e67e00; background: rgba(230,126,0,0.04); }
+.da-rec-title  { font-size: 0.85rem; font-weight: 600; color: var(--bs-emphasis-color); }
+.da-rec-detail { font-size: 0.78rem; color: var(--bs-secondary-color); margin-top: 2px; }
+.da-rec-action {
+  flex-shrink: 0;
+  font-size: 0.78rem; font-weight: 600;
+  color: #198754; border: 1.5px solid #198754;
+  padding: 4px 12px; border-radius: 6px;
+  text-decoration: none; white-space: nowrap;
+  transition: background-color .12s, color .12s;
+}
+.da-rec-action:hover { background: #198754; color: #fff; }
+
 @media(max-width:1100px) { .da-grid { grid-template-columns:1fr; } .da-widget-wide { grid-column:auto; } }
 @media(max-width:768px)  { .da-page { padding:1.25rem 1rem; } .da-stats { grid-template-columns:repeat(2,1fr); } }

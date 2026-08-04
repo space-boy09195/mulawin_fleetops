@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/recommendations.php';
 
 requireRole([ROLE_DISPATCHER]);
 
@@ -72,6 +73,9 @@ $weeklyDone = $pdo->prepare("
 ");
 $weeklyDone->execute([$currentUserId, $weekStart]);
 $weeklyCompleted = (int)$weeklyDone->fetchColumn();
+
+// ── Recommended Actions (rule-based) ──────────────────────────────────────────
+$recommendations = getDispatchRecommendations($pdo, 5);
 
 // ── My pending dispatch requests ──────────────────────────────────────────────
 $stmt = $pdo->prepare(
@@ -151,6 +155,27 @@ $GLOBALS['dash_data'] = json_encode([
     <span class="dd-activity-item dd-activity-red"><strong><?= $weeklyRejected ?></strong> rejected</span>
     <span class="dd-activity-item dd-activity-blue"><strong><?= $weeklyCompleted ?></strong> trips completed</span>
   </div>
+
+  <!-- Recommended Actions -->
+  <?php if (!empty($recommendations)): ?>
+  <div class="dd-rec-panel">
+    <div class="dd-rec-header">
+      <i class="bi bi-lightbulb"></i> Worth a Look
+      <span class="dd-rec-count"><?= count($recommendations) ?></span>
+    </div>
+    <div class="dd-rec-list">
+      <?php foreach ($recommendations as $rec): ?>
+      <div class="dd-rec-card dd-rec-<?= $rec['priority'] ?>">
+        <div class="dd-rec-body">
+          <div class="dd-rec-title"><?= htmlspecialchars($rec['title']) ?></div>
+          <div class="dd-rec-detail"><?= htmlspecialchars($rec['detail']) ?></div>
+        </div>
+        <a href="<?= APP_BASE . $rec['action_url'] ?>" class="dd-rec-action"><?= htmlspecialchars($rec['action_label']) ?></a>
+      </div>
+      <?php endforeach; ?>
+    </div>
+  </div>
+  <?php endif; ?>
 
   <!-- Stat cards -->
   <div class="dd-stats">

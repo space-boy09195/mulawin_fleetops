@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/recommendations.php';
 
 requireRole([ROLE_HEAD_MANAGEMENT]);
 
@@ -9,6 +10,16 @@ $GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard_head.js';
 layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_head.css');
 
 $pdo = getDBConnection();
+
+// ── Recommended Actions — consolidated across all four rule engines ─────────
+$allRecs = array_merge(
+    array_map(fn($r) => $r + ['category' => 'Maintenance', 'icon' => 'bi-tools'],       getMaintenanceRecommendations($pdo, 3)),
+    array_map(fn($r) => $r + ['category' => 'Parts',       'icon' => 'bi-box-seam'],    getPartsReorderRecommendations($pdo, 3)),
+    array_map(fn($r) => $r + ['category' => 'Collections', 'icon' => 'bi-cash-coin'],   getCollectionsRecommendations($pdo, 3)),
+    array_map(fn($r) => $r + ['category' => 'Dispatch',    'icon' => 'bi-person-badge'], getDispatchRecommendations($pdo, 3))
+);
+usort($allRecs, fn($a, $b) => ($a['priority'] === 'high' ? 0 : 1) <=> ($b['priority'] === 'high' ? 0 : 1));
+$topRecommendations = array_slice($allRecs, 0, 8);
 
 // ── Stat cards ────────────────────────────────────────────────────────────────
 $fleetRows = $pdo->query("SELECT status, truck_count FROM v_fleet_status")->fetchAll(PDO::FETCH_ASSOC);
@@ -118,6 +129,29 @@ $GLOBALS['dash_data'] = json_encode([
       <i class="bi bi-send me-1"></i> New Dispatch
     </a>
   </div>
+
+  <!-- Recommended Actions — consolidated across all departments -->
+  <?php if (!empty($topRecommendations)): ?>
+  <div class="dh-rec-panel">
+    <div class="dh-rec-header">
+      <i class="bi bi-lightbulb"></i> Recommended Actions
+      <span class="dh-rec-count"><?= count($topRecommendations) ?></span>
+      <a href="<?= APP_BASE ?>/pages/analytics.php" class="dh-rec-viewall">Full Analytics</a>
+    </div>
+    <div class="dh-rec-list">
+      <?php foreach ($topRecommendations as $rec): ?>
+      <div class="dh-rec-card dh-rec-<?= $rec['priority'] ?>">
+        <span class="dh-rec-category"><i class="bi <?= $rec['icon'] ?>"></i> <?= htmlspecialchars($rec['category']) ?></span>
+        <div class="dh-rec-body">
+          <div class="dh-rec-title"><?= htmlspecialchars($rec['title']) ?></div>
+          <div class="dh-rec-detail"><?= htmlspecialchars($rec['detail']) ?></div>
+        </div>
+        <a href="<?= APP_BASE . $rec['action_url'] ?>" class="dh-rec-action"><?= htmlspecialchars($rec['action_label']) ?></a>
+      </div>
+      <?php endforeach; ?>
+    </div>
+  </div>
+  <?php endif; ?>
 
   <!-- Stat cards -->
   <div class="dh-stats">

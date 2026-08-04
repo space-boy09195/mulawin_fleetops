@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/recommendations.php';
 
 requireRole([ROLE_MAINTENANCE]);
 
@@ -93,6 +94,15 @@ $weeklyMovements = $pdo->prepare("
 $weeklyMovements->execute([$currentUserId, $weekStart]);
 $weeklyMovementCount = (int)$weeklyMovements->fetchColumn();
 
+// ── Recommended Actions (rule-based) ──────────────────────────────────────────
+$maintRecs  = getMaintenanceRecommendations($pdo, 4);
+$partsRecs  = getPartsReorderRecommendations($pdo, 4);
+$recommendations = array_merge($maintRecs, $partsRecs);
+usort($recommendations, fn($a, $b) =>
+    ($a['priority'] === 'high' ? 0 : 1) <=> ($b['priority'] === 'high' ? 0 : 1)
+);
+$recommendations = array_slice($recommendations, 0, 6);
+
 // ── Maintenance type distribution for donut ───────────────────────────────────
 $maintTypeRows = $pdo->query("
     SELECT maintenance_type, COUNT(*) AS cnt
@@ -144,6 +154,27 @@ $GLOBALS['dash_data'] = json_encode([
     <span class="dm-activity-item"><strong><?= $weeklyRecordCount ?></strong> records logged</span>
     <span class="dm-activity-item"><strong><?= $weeklyMovementCount ?></strong> parts movements</span>
   </div>
+
+  <!-- Recommended Actions -->
+  <?php if (!empty($recommendations)): ?>
+  <div class="dm-rec-panel">
+    <div class="dm-rec-header">
+      <i class="bi bi-lightbulb"></i> Recommended Actions
+      <span class="dm-rec-count"><?= count($recommendations) ?></span>
+    </div>
+    <div class="dm-rec-list">
+      <?php foreach ($recommendations as $rec): ?>
+      <div class="dm-rec-card dm-rec-<?= $rec['priority'] ?>">
+        <div class="dm-rec-body">
+          <div class="dm-rec-title"><?= htmlspecialchars($rec['title']) ?></div>
+          <div class="dm-rec-detail"><?= htmlspecialchars($rec['detail']) ?></div>
+        </div>
+        <a href="<?= APP_BASE . $rec['action_url'] ?>" class="dm-rec-action"><?= htmlspecialchars($rec['action_label']) ?></a>
+      </div>
+      <?php endforeach; ?>
+    </div>
+  </div>
+  <?php endif; ?>
 
   <!-- Stat cards -->
   <div class="dm-stats">

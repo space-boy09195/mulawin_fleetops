@@ -54,7 +54,10 @@ $trips = $pdo->query(
        -- Latest update note
        (SELECT location_note FROM trip_updates
          WHERE trip_id = t.trip_id
-         ORDER BY updated_at DESC LIMIT 1) AS last_location
+         ORDER BY updated_at DESC LIMIT 1) AS last_location,
+       -- Departure time = when this trip first moved to 'In Transit'
+       (SELECT MIN(updated_at) FROM trip_updates
+         WHERE trip_id = t.trip_id AND status = 'In Transit') AS departed_at
      FROM trips t
      JOIN dispatch_requests dr ON t.dispatch_id  = dr.dispatch_id
      JOIN trucks tr             ON dr.truck_id    = tr.truck_id
@@ -168,6 +171,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
           <th>Route</th>
           <th>Status</th>
           <th>ETA</th>
+          <th>Departed</th>
           <th>Last Location</th>
           <?php if (currentRoleId() === ROLE_DISPATCHER): ?>
           <th>Actions</th>
@@ -177,7 +181,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
       <tbody id="tripBody">
         <?php if (empty($trips)): ?>
         <tr>
-          <td colspan="8" class="text-center text-muted py-4">No trips found.</td>
+          <td colspan="9" class="text-center text-muted py-4">No trips found.</td>
         </tr>
         <?php else: ?>
         <?php foreach ($trips as $trip):
@@ -249,6 +253,9 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
             <?php endif; ?>
           </td>
           <td style="font-size:.82rem; color:var(--text-muted);">
+            <?= $trip['departed_at'] ? date('M j, g:i A', strtotime($trip['departed_at'])) : '—' ?>
+          </td>
+          <td style="font-size:.82rem; color:var(--text-muted);">
             <?= htmlspecialchars($trip['last_location'] ?? '—') ?>
           </td>
           <?php if (currentRoleId() === ROLE_DISPATCHER): ?>
@@ -272,7 +279,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
         <?php endforeach; ?>
         <?php endif; ?>
         <tr id="noTripResults" class="d-none">
-          <td colspan="8">
+          <td colspan="9">
             <div class="no-results">
               <i class="bi bi-search"></i>
               <span>No trips match your filters.</span>

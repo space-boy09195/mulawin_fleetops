@@ -214,6 +214,7 @@
   const movementModal    = document.getElementById('movementModal');
   const movPartId        = document.getElementById('movPartId');
   const movType          = document.getElementById('movType');
+  const movJobId         = document.getElementById('movJobId');
   const movQty           = document.getElementById('movQty');
   const movUnitCost      = document.getElementById('movUnitCost');
   const movReference     = document.getElementById('movReference');
@@ -223,11 +224,15 @@
   const movBtnSpinner    = document.getElementById('movBtnSpinner');
   const movementAlert    = document.getElementById('movementAlert');
 
-  // Show unit in qty label when part selected
+  // Show unit in qty label when part selected, and pre-fill Unit Cost from
+  // the part's current cost (still editable — prices do change over time).
   movPartId?.addEventListener('change', () => {
     const opt = movPartId.selectedOptions[0];
     if (movUnitLabel) {
       movUnitLabel.textContent = opt?.dataset.unit ? `(${opt.dataset.unit})` : '';
+    }
+    if (movUnitCost && opt?.dataset.unitCost) {
+      movUnitCost.value = opt.dataset.unitCost;
     }
   });
 
@@ -240,7 +245,7 @@
   });
 
   movementModal?.addEventListener('hidden.bs.modal', () => {
-    [movPartId, movType, movQty, movUnitCost, movReference, movNotes].forEach(el => {
+    [movPartId, movType, movJobId, movQty, movUnitCost, movReference, movNotes].forEach(el => {
       if (el) el.value = '';
     });
     if (movUnitLabel) movUnitLabel.textContent = '';
@@ -271,6 +276,7 @@
       movement_type:    type,
       quantity:         qty,
       unit_cost:        unitCost,
+      maintenance_id:   movJobId?.value ?? '',
       reference_number: reference,
       notes,
     })

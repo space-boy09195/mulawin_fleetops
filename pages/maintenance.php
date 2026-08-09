@@ -223,9 +223,12 @@ $checklistItems = [
                 </span>
               </td>
               <td class="mnt-desc-cell">
-                <span class="mnt-desc-text" title="<?= htmlspecialchars($rec['description']) ?>">
+                <button type="button" class="mnt-desc-text mnt-desc-btn"
+                        data-truck="<?= htmlspecialchars($rec['plate_number'] . ' — ' . $rec['brand'] . ' ' . $rec['model']) ?>"
+                        data-type="<?= htmlspecialchars($rec['maintenance_type']) ?>"
+                        data-description="<?= htmlspecialchars($rec['description']) ?>">
                   <?= htmlspecialchars($rec['description']) ?>
-                </span>
+                </button>
               </td>
               <td>
                 <span class="mnt-status-badge mnt-ts-<?= strtolower(str_replace(' ', '-', $rec['truck_status'])) ?>">
@@ -408,7 +411,9 @@ $checklistItems = [
                    value="<?= date('Y-m-d') ?>" required>
           </div>
           <div class="col-md-3">
-            <label class="form-label mnt-label" for="recNextDue">Next Due Date</label>
+            <label class="form-label mnt-label" for="recNextDue">
+              Next Due Date <span class="mnt-unit-hint">(sets this truck's next alert)</span>
+            </label>
             <input type="date" class="form-control mnt-input" id="recNextDue">
           </div>
           <div class="col-md-6">
@@ -509,6 +514,27 @@ $checklistItems = [
           <span id="clBtnText">Submit Checklist</span>
           <span id="clBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
         </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Description Expand Modal (Records tab) ═══════════════════════════════ -->
+<div class="modal fade" id="descModal" tabindex="-1" aria-labelledby="descModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content mnt-modal-content">
+      <div class="modal-header mnt-modal-header-primary">
+        <h5 class="modal-title" id="descModalLabel">
+          <i class="bi bi-file-text me-2"></i><span id="descModalTruck"></span>
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <span class="mnt-type-badge" id="descModalType"></span>
+        <p class="mt-3 mb-0" id="descModalText" style="white-space: pre-wrap;"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
       </div>
     </div>
   </div>

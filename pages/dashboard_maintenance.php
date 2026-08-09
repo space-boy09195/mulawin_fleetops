@@ -163,8 +163,11 @@ $GLOBALS['dash_data'] = json_encode([
       <span class="dm-rec-count"><?= count($recommendations) ?></span>
     </div>
     <div class="dm-rec-list">
-      <?php foreach ($recommendations as $rec): ?>
-      <div class="dm-rec-card dm-rec-<?= $rec['priority'] ?>">
+      <?php foreach ($recommendations as $rec):
+        $prioLabel = $rec['priority'] === 'high' ? 'High Priority' : 'Medium Priority';
+      ?>
+      <div class="dm-rec-card dm-rec-<?= $rec['priority'] ?>" title="<?= htmlspecialchars($prioLabel) ?> — <?= htmlspecialchars($rec['detail']) ?>">
+        <span class="dm-rec-priority dm-rec-priority-<?= $rec['priority'] ?>"><?= $rec['priority'] === 'high' ? 'HIGH' : 'MED' ?></span>
         <div class="dm-rec-body">
           <div class="dm-rec-title"><?= htmlspecialchars($rec['title']) ?></div>
           <div class="dm-rec-detail"><?= htmlspecialchars($rec['detail']) ?></div>

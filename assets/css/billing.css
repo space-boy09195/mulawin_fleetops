@@ -452,3 +452,25 @@ textarea.bil-input { resize: vertical; min-height: 70px; }
   .bil-table-wrap { overflow-x: auto; }
   .bil-table      { min-width: 900px; }
 }
+
+.bil-period-select {
+  font-size: 0.85rem;
+  border-radius: 8px;
+  border-color: var(--bs-border-color);
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  min-width: 160px;
+}
+
+.bil-period-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: #0a58ca;
+  background: rgba(13,110,253,0.08);
+  border: 1px solid rgba(13,110,253,0.2);
+  border-radius: 8px;
+  padding: 0.5rem 0.9rem;
+  margin: -0.75rem 0 1rem;
+}

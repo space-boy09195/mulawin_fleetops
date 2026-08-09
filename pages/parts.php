@@ -55,6 +55,16 @@ $movementsSql = "
 ";
 $movements = $pdo->query($movementsSql)->fetchAll(PDO::FETCH_ASSOC);
 
+// Recent maintenance jobs, for optionally linking a parts movement to the
+// job that consumed the part (last 90 days keeps the dropdown manageable).
+$recentJobs = $pdo->query("
+    SELECT mr.record_id, mr.maintenance_type, mr.date_performed, tr.plate_number
+    FROM maintenance_records mr
+    JOIN trucks tr ON tr.truck_id = mr.truck_id
+    WHERE mr.date_performed >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+    ORDER BY mr.date_performed DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
 // ── Categories for filter ─────────────────────────────────────────────────────
 $categories = array_unique(array_column($parts, 'category'));
 sort($categories);
@@ -461,7 +471,8 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
             <?php foreach ($parts as $part): ?>
             <option value="<?= $part['part_id'] ?>"
                     data-unit="<?= htmlspecialchars($part['unit']) ?>"
-                    data-stock="<?= $part['quantity'] ?>">
+                    data-stock="<?= $part['quantity'] ?>"
+                    data-unit-cost="<?= $part['unit_cost'] !== null ? $part['unit_cost'] : '' ?>">
               <?= htmlspecialchars($part['part_name']) ?>
               (<?= number_format($part['quantity']) ?> <?= htmlspecialchars($part['unit']) ?>)
             </option>
@@ -475,6 +486,21 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
             <option value="">— Select type —</option>
             <?php foreach ($movementTypes as $mt): ?>
             <option value="<?= $mt ?>"><?= $mt ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label pts-label" for="movJobId">
+            Linked Job <span class="pts-unit-hint">(optional — links this to the maintenance job that used it)</span>
+          </label>
+          <select class="form-select pts-input" id="movJobId">
+            <option value="">— None —</option>
+            <?php foreach ($recentJobs as $job): ?>
+            <option value="<?= $job['record_id'] ?>">
+              <?= htmlspecialchars($job['plate_number']) ?> — <?= htmlspecialchars($job['maintenance_type']) ?>
+              (<?= date('M d, Y', strtotime($job['date_performed'])) ?>)
+            </option>
             <?php endforeach; ?>
           </select>
         </div>

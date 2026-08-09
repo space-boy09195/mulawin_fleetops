@@ -11,6 +11,23 @@ layoutHead('Billing & Collections', APP_BASE . '/assets/css/billing.css');
 
 $pdo = getDBConnection();
 
+// ── Period filter (scopes the summary cards + both lists below) ──────────────
+$periods = [
+    'all' => 'All Time',
+    '1m'  => 'This Month',
+    '3m'  => 'Last 3 Months',
+    '6m'  => 'Last 6 Months',
+    '1y'  => 'Last 12 Months',
+];
+$period = $_GET['period'] ?? 'all';
+if (!isset($periods[$period])) $period = 'all';
+$periodMonths = ['1m' => 1, '3m' => 3, '6m' => 6, '1y' => 12][$period] ?? null;
+$rangeStartSql = $periodMonths !== null
+    ? (new DateTime('today'))->modify("-{$periodMonths} months")->format('Y-m-d 00:00:00')
+    : null;
+$billingDateFilter    = $rangeStartSql ? "AND b.created_at >= :rangeStart" : '';
+$collectionDateFilter = $rangeStartSql ? "AND c.payment_date >= :rangeStart" : '';
+
 // ── Billings via summary view ─────────────────────────────────────────────────
 $billingSql = "
     SELECT
@@ -30,9 +47,13 @@ $billingSql = "
     JOIN trips t ON b.trip_id   = t.trip_id
     JOIN users u ON b.created_by = u.user_id
     JOIN v_billing_summary vs ON b.billing_id = vs.billing_id
+    WHERE 1=1 $billingDateFilter
     ORDER BY b.created_at DESC
 ";
-$billings = $pdo->query($billingSql)->fetchAll(PDO::FETCH_ASSOC);
+$billingStmt = $pdo->prepare($billingSql);
+if ($rangeStartSql) $billingStmt->bindValue(':rangeStart', $rangeStartSql);
+$billingStmt->execute();
+$billings = $billingStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Collections (recent 150) ──────────────────────────────────────────────────
 $collectionsSql = "
@@ -51,10 +72,14 @@ $collectionsSql = "
     FROM collections c
     JOIN billings b ON c.billing_id  = b.billing_id
     JOIN users u    ON c.recorded_by = u.user_id
+    WHERE 1=1 $collectionDateFilter
     ORDER BY c.created_at DESC
     LIMIT 150
 ";
-$collections = $pdo->query($collectionsSql)->fetchAll(PDO::FETCH_ASSOC);
+$collectionsStmt = $pdo->prepare($collectionsSql);
+if ($rangeStartSql) $collectionsStmt->bindValue(':rangeStart', $rangeStartSql);
+$collectionsStmt->execute();
+$collections = $collectionsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Trips for new billing dropdown (completed, no billing yet) ────────────────
 $tripsSql = "
@@ -89,10 +114,25 @@ function isOverdue(string $dueDate, string $status): bool {
       <h1 class="bil-title mb-0">Billing &amp; Collections</h1>
       <p class="bil-subtitle mb-0">Manage billing statements and payment collections</p>
     </div>
-    <button class="btn btn-bil-primary" data-bs-toggle="modal" data-bs-target="#createBillingModal">
-      <i class="bi bi-plus-lg me-1"></i> Create Billing
-    </button>
+    <div class="d-flex align-items-center gap-2">
+      <form method="get" class="d-flex">
+        <select name="period" class="form-select bil-period-select" onchange="this.form.submit()">
+          <?php foreach ($periods as $key => $label): ?>
+          <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </form>
+      <button class="btn btn-bil-primary" data-bs-toggle="modal" data-bs-target="#createBillingModal">
+        <i class="bi bi-plus-lg me-1"></i> Create Billing
+      </button>
+    </div>
   </div>
+  <?php if ($period !== 'all'): ?>
+  <p class="bil-period-note">
+    <i class="bi bi-funnel"></i> Showing <?= htmlspecialchars($periods[$period]) ?> —
+    the cards and lists below are scoped to this period.
+  </p>
+  <?php endif; ?>
 
   <!-- Summary cards -->
   <div class="bil-cards mb-4">

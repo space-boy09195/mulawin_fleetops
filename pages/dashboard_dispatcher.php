@@ -164,8 +164,11 @@ $GLOBALS['dash_data'] = json_encode([
       <span class="dd-rec-count"><?= count($recommendations) ?></span>
     </div>
     <div class="dd-rec-list">
-      <?php foreach ($recommendations as $rec): ?>
-      <div class="dd-rec-card dd-rec-<?= $rec['priority'] ?>">
+      <?php foreach ($recommendations as $rec):
+        $prioLabel = $rec['priority'] === 'high' ? 'High Priority' : 'Medium Priority';
+      ?>
+      <div class="dd-rec-card dd-rec-<?= $rec['priority'] ?>" title="<?= htmlspecialchars($prioLabel) ?> — <?= htmlspecialchars($rec['detail']) ?>">
+        <span class="dd-rec-priority dd-rec-priority-<?= $rec['priority'] ?>"><?= $rec['priority'] === 'high' ? 'HIGH' : 'MED' ?></span>
         <div class="dd-rec-body">
           <div class="dd-rec-title"><?= htmlspecialchars($rec['title']) ?></div>
           <div class="dd-rec-detail"><?= htmlspecialchars($rec['detail']) ?></div>
@@ -270,10 +273,10 @@ $GLOBALS['dash_data'] = json_encode([
       <?php endif; ?>
     </div>
 
-    <!-- My Pending Requests -->
+    <!-- My Recent Requests -->
     <div class="dd-widget">
       <div class="dd-widget-header">
-        <span class="dd-widget-title"><i class="bi bi-send me-2"></i>My Pending Requests</span>
+        <span class="dd-widget-title"><i class="bi bi-send me-2"></i>My Recent Requests</span>
         <a href="<?= APP_BASE ?>/pages/dispatch.php" class="dd-link">View All</a>
       </div>
       <?php if (empty($myRequests)): ?>

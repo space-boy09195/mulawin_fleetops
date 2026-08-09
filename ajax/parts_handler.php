@@ -98,6 +98,7 @@ if ($action === 'record_movement') {
     $movType     = trim($_POST['movement_type']  ?? '');
     $qty         = (int)($_POST['quantity']      ?? 0);
     $unitCost    = $_POST['unit_cost'] !== '' ? (float)$_POST['unit_cost'] : null;
+    $maintenanceId = !empty($_POST['maintenance_id']) ? (int)$_POST['maintenance_id'] : null;
     $reference   = trim($_POST['reference_number'] ?? '') ?: null;
     $notes       = trim($_POST['notes']          ?? '') ?: null;
 
@@ -111,6 +112,15 @@ if ($action === 'record_movement') {
     if (!in_array($movType, $allowedTypes)) {
         echo json_encode(['success' => false, 'message' => 'Invalid movement type.']);
         exit;
+    }
+
+    if ($maintenanceId) {
+        $jobCheck = $pdo->prepare("SELECT record_id FROM maintenance_records WHERE record_id = ?");
+        $jobCheck->execute([$maintenanceId]);
+        if (!$jobCheck->fetch()) {
+            echo json_encode(['success' => false, 'message' => 'Linked job not found.']);
+            exit;
+        }
     }
 
     // Fetch current stock
@@ -146,9 +156,9 @@ if ($action === 'record_movement') {
 
         $pdo->prepare("
             INSERT INTO parts_movements
-                (part_id, recorded_by, movement_type, quantity, unit_cost, reference_number, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ")->execute([$partId, currentUserId(), $movType, $signedQty, $unitCost, $reference, $notes]);
+                (part_id, recorded_by, movement_type, quantity, unit_cost, maintenance_id, reference_number, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ")->execute([$partId, currentUserId(), $movType, $signedQty, $unitCost, $maintenanceId, $reference, $notes]);
 
         $movId = (int)$pdo->lastInsertId();
 

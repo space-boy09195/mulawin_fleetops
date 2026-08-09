@@ -237,4 +237,17 @@
       });
   });
 
+  // ── Description expand (Records tab) ─────────────────────────────────────────
+  const descModalEl = document.getElementById('descModal');
+  const descModal    = descModalEl ? new bootstrap.Modal(descModalEl) : null;
+
+  document.querySelectorAll('.mnt-desc-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('descModalTruck').textContent = btn.dataset.truck || '';
+      document.getElementById('descModalType').textContent  = btn.dataset.type  || '';
+      document.getElementById('descModalText').textContent  = btn.dataset.description || '';
+      descModal?.show();
+    });
+  });
+
 })();

@@ -24,6 +24,10 @@ foreach ($summaryStmt->fetchAll() as $row) {
 $totalTrucks = array_sum($summary);
 
 // ── Full truck list with active trip info ─────────────────────────────────────
+// Joined via a derived table (ROW_NUMBER per truck) rather than a plain JOIN —
+// a truck can have many historical 'Approved' dispatch_requests over its
+// lifetime, and a plain join on status alone would produce one duplicate row
+// per historical dispatch instead of just the truck's current active one.
 $trucks = $pdo->query("
     SELECT
         t.truck_id,
@@ -37,19 +41,22 @@ $trucks = $pdo->query("
         t.fuel_type,
         t.capacity_tons,
         t.status,
-        tr.trip_number,
-        e.full_name AS driver_name,
-        r.origin,
-        r.destination
+        cur.trip_number,
+        cur.driver_name,
+        cur.origin,
+        cur.destination
     FROM trucks t
-    LEFT JOIN dispatch_requests dr
-           ON dr.truck_id = t.truck_id
-          AND dr.status   = 'Approved'
-    LEFT JOIN trips tr
-           ON tr.dispatch_id = dr.dispatch_id
-          AND tr.status NOT IN ('Completed','Cancelled')
-    LEFT JOIN employees e ON dr.driver_id = e.employee_id
-    LEFT JOIN routes r    ON dr.route_id  = r.route_id
+    LEFT JOIN (
+        SELECT
+            dr.truck_id, tr.trip_number, e.full_name AS driver_name,
+            r.origin, r.destination,
+            ROW_NUMBER() OVER (PARTITION BY dr.truck_id ORDER BY tr.created_at DESC) AS rn
+        FROM dispatch_requests dr
+        JOIN trips tr      ON tr.dispatch_id = dr.dispatch_id
+                           AND tr.status NOT IN ('Completed','Cancelled')
+        LEFT JOIN employees e ON dr.driver_id = e.employee_id
+        LEFT JOIN routes r    ON dr.route_id  = r.route_id
+    ) cur ON cur.truck_id = t.truck_id AND cur.rn = 1
     ORDER BY
         FIELD(t.status,'Deployed','Available','Under Maintenance','Inactive'),
         t.plate_number

@@ -230,11 +230,21 @@
 
 .mnt-desc-text {
   display: block;
+  width: 100%;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  cursor: default;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
+.mnt-desc-text:hover { color: #0d6efd; }
 
 /* ── Date + due dates ────────────────────────── */
 .mnt-date {
@@ -452,6 +462,14 @@
   letter-spacing: 0.04em;
   margin-bottom: 4px;
   display: block;
+}
+
+.mnt-unit-hint {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--bs-secondary-color);
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .mnt-input {

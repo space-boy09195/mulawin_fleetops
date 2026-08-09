@@ -139,8 +139,11 @@ $GLOBALS['dash_data'] = json_encode([
       <a href="<?= APP_BASE ?>/pages/analytics.php" class="dh-rec-viewall">Full Analytics</a>
     </div>
     <div class="dh-rec-list">
-      <?php foreach ($topRecommendations as $rec): ?>
-      <div class="dh-rec-card dh-rec-<?= $rec['priority'] ?>">
+      <?php foreach ($topRecommendations as $rec):
+        $prioLabel = $rec['priority'] === 'high' ? 'High Priority' : 'Medium Priority';
+      ?>
+      <div class="dh-rec-card dh-rec-<?= $rec['priority'] ?>" title="<?= htmlspecialchars($prioLabel) ?> — <?= htmlspecialchars($rec['detail']) ?>">
+        <span class="dh-rec-priority dh-rec-priority-<?= $rec['priority'] ?>"><?= $rec['priority'] === 'high' ? 'HIGH' : 'MED' ?></span>
         <span class="dh-rec-category"><i class="bi <?= $rec['icon'] ?>"></i> <?= htmlspecialchars($rec['category']) ?></span>
         <div class="dh-rec-body">
           <div class="dh-rec-title"><?= htmlspecialchars($rec['title']) ?></div>

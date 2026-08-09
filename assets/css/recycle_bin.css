@@ -1,0 +1,130 @@
+/* ═══════════════════════════════════════════════
+   recycle_bin.css — Mulawin FleetOps
+   ═══════════════════════════════════════════════ */
+
+.rb-page {
+  padding: 1.75rem 2rem;
+  max-width: 1300px;
+  margin: 0 auto;
+}
+
+.rb-header {
+  border-bottom: 1px solid var(--bs-border-color);
+  padding-bottom: 1.1rem;
+  margin-bottom: 1.5rem;
+}
+
+.rb-title {
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: var(--bs-emphasis-color);
+  letter-spacing: -0.01em;
+}
+
+.rb-subtitle {
+  font-size: 0.85rem;
+  color: var(--bs-secondary-color);
+  margin-top: 2px;
+}
+
+/* ── Empty state ─────────────────────────────── */
+.rb-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  color: var(--bs-secondary-color);
+  text-align: center;
+}
+.rb-empty-icon { font-size: 2.8rem; margin-bottom: 0.75rem; opacity: 0.3; }
+.rb-empty p { font-size: 0.9rem; margin: 0; }
+
+/* ── Table ───────────────────────────────────── */
+.rb-table-wrap {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.rb-table { margin-bottom: 0; font-size: 0.85rem; }
+.rb-table thead th {
+  background: var(--bs-tertiary-bg);
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--bs-secondary-color);
+  border-bottom: 1px solid var(--bs-border-color);
+  padding: 0.75rem 1rem;
+  white-space: nowrap;
+}
+.rb-table tbody td {
+  padding: 0.8rem 1rem;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--bs-border-color);
+  color: var(--bs-body-color);
+}
+.rb-table tbody tr:last-child td { border-bottom: none; }
+.rb-table tbody tr:hover { background: var(--bs-tertiary-bg); }
+
+.rb-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  white-space: nowrap;
+}
+
+.rb-summary {
+  font-weight: 600;
+  max-width: 260px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rb-date {
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
+}
+
+/* ── Actions ─────────────────────────────────── */
+.rb-actions { display: flex; gap: 6px; }
+.rb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1.5px solid var(--bs-border-color);
+  background: transparent;
+  color: var(--bs-secondary-color);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background-color 0.12s;
+  white-space: nowrap;
+}
+.rb-btn-restore:hover { color: #198754; border-color: #198754; background: rgba(25,135,84,0.08); }
+.rb-btn-purge { padding: 4px 8px; }
+.rb-btn-purge:hover { color: #dc3545; border-color: #dc3545; background: rgba(220,53,69,0.08); }
+
+/* ── Modal ───────────────────────────────────── */
+.rb-modal-content { border: none; border-radius: 14px; overflow: hidden; }
+.rb-modal-header { background: #dc3545; color: #fff; border-bottom: none; }
+.rb-modal-header .btn-close { filter: invert(1); }
+
+@media (max-width: 768px) {
+  .rb-page { padding: 1.25rem 1rem; }
+  .rb-title { font-size: 1.2rem; }
+  .rb-table-wrap { overflow-x: auto; }
+  .rb-table { min-width: 600px; }
+}

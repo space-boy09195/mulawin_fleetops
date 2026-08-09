@@ -98,6 +98,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!tripId || !status) return;
 
+      if (status === 'Cancelled' && !confirm('Cancel this trip? This affects truck availability and any linked billing.')) {
+        return;
+      }
+
       btnText.classList.add('d-none');
       btnSpinner.classList.remove('d-none');
       confirmBtn.disabled = true;

@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/audit.php';
+require_once __DIR__ . '/../includes/soft_delete.php';
 
 header('Content-Type: application/json');
 
@@ -150,22 +151,23 @@ if ($action === 'delete') {
         exit;
     }
 
-    try {
-        $pdo->prepare("DELETE FROM documents WHERE document_id = ?")->execute([$docId]);
+    $deletedByName = $_SESSION['full_name'] ?? 'Unknown user';
 
-        // Remove physical file
-        $physicalPath = dirname(__DIR__) . '/uploads/' . $doc['stored_name'];
-        if (file_exists($physicalPath)) {
-            unlink($physicalPath);
-        }
+    $archived = archiveAndDelete($pdo, 'documents', 'document_id', $docId, currentUserId(), $deletedByName);
 
-        auditLog('DELETE_DOCUMENT', 'documents', $docId, ['file_name' => $doc['file_name']], null);
-
-        echo json_encode(['success' => true, 'message' => 'Document deleted successfully.']);
-    } catch (PDOException $e) {
-        error_log('document_handler/delete: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+    if (!$archived) {
+        echo json_encode(['success' => false, 'message' => 'Document not found or could not be deleted.']);
+        exit;
     }
+
+    // Note: the physical file on disk is intentionally NOT removed here.
+    // It stays in /uploads/ so a restore from the Recycle Bin still has a
+    // file to point to. It's only removed if the archive entry is later
+    // permanently deleted (see recycle_bin_handler.php).
+
+    auditLog('DELETE_DOCUMENT', 'documents', $docId, ['file_name' => $doc['file_name']], null);
+
+    echo json_encode(['success' => true, 'message' => 'Document deleted. It can be restored from the Recycle Bin if needed.']);
     exit;
 }
 

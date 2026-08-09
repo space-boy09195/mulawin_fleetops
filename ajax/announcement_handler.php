@@ -7,6 +7,7 @@
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/audit.php';
+require_once __DIR__ . '/../includes/soft_delete.php';
 require_once __DIR__ . '/../config/database.php';
 
 header('Content-Type: application/json');
@@ -139,11 +140,16 @@ if ($action === 'delete') {
         exit;
     }
 
-    $pdo->prepare("DELETE FROM announcements WHERE announcement_id = :id")
-        ->execute([':id' => $id]);
+    $deletedByName = $_SESSION['full_name'] ?? 'Unknown user';
+    $archived = archiveAndDelete($pdo, 'announcements', 'announcement_id', $id, currentUserId(), $deletedByName);
+
+    if (!$archived) {
+        echo json_encode(['success' => false, 'message' => 'Announcement not found or could not be deleted.']);
+        exit;
+    }
 
     auditLog('DELETE', 'announcements', $id);
-    echo json_encode(['success' => true, 'message' => 'Deleted.']);
+    echo json_encode(['success' => true, 'message' => 'Deleted. It can be restored from the Recycle Bin if needed.']);
     exit;
 }
 

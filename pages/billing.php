@@ -13,18 +13,26 @@ $pdo = getDBConnection();
 
 // ── Period filter (scopes the summary cards + both lists below) ──────────────
 $periods = [
-    'all' => 'All Time',
-    '1m'  => 'This Month',
-    '3m'  => 'Last 3 Months',
-    '6m'  => 'Last 6 Months',
-    '1y'  => 'Last 12 Months',
+    'today' => 'Today',
+    '1w'    => 'This Week',
+    '1m'    => 'This Month',
+    '3m'    => 'Last 3 Months',
+    '6m'    => 'Last 6 Months',
+    '1y'    => 'Last 12 Months',
+    'all'   => 'All Time',
 ];
 $period = $_GET['period'] ?? 'all';
 if (!isset($periods[$period])) $period = 'all';
-$periodMonths = ['1m' => 1, '3m' => 3, '6m' => 6, '1y' => 12][$period] ?? null;
-$rangeStartSql = $periodMonths !== null
-    ? (new DateTime('today'))->modify("-{$periodMonths} months")->format('Y-m-d 00:00:00')
-    : null;
+$rangeStart = match ($period) {
+    'today' => new DateTime('today'),
+    '1w'    => (new DateTime('today'))->modify('-6 days'),
+    '1m'    => (new DateTime('today'))->modify('-1 months'),
+    '3m'    => (new DateTime('today'))->modify('-3 months'),
+    '6m'    => (new DateTime('today'))->modify('-6 months'),
+    '1y'    => (new DateTime('today'))->modify('-12 months'),
+    default => null,
+};
+$rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
 $billingDateFilter    = $rangeStartSql ? "AND b.created_at >= :rangeStart" : '';
 $collectionDateFilter = $rangeStartSql ? "AND c.payment_date >= :rangeStart" : '';
 

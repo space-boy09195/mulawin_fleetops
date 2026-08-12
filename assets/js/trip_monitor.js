@@ -70,7 +70,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalTripNum   = document.getElementById('modalTripNumber');
   const modalTripId    = document.getElementById('modalTripId');
   const modalStatus    = document.getElementById('modalStatus');
-  const modalLocation  = document.getElementById('modalLocation');
   const modalNotes     = document.getElementById('modalNotes');
   const confirmBtn     = document.getElementById('confirmUpdateBtn');
   const btnText        = document.getElementById('updateBtnText');
@@ -84,7 +83,6 @@ document.addEventListener('DOMContentLoaded', () => {
     modalTripNum.textContent  = tripNumber;
     modalTripId.value         = tripId;
     modalStatus.value         = currentStatus;
-    if (modalLocation) modalLocation.value = '';
     if (modalNotes)    modalNotes.value    = '';
     bsModal.show();
   };
@@ -93,14 +91,9 @@ document.addEventListener('DOMContentLoaded', () => {
     confirmBtn.addEventListener('click', async () => {
       const tripId   = modalTripId.value;
       const status   = modalStatus.value;
-      const location = modalLocation ? modalLocation.value.trim() : '';
       const notes    = modalNotes    ? modalNotes.value.trim()    : '';
 
       if (!tripId || !status) return;
-
-      if (status === 'Cancelled' && !confirm('Cancel this trip? This affects truck availability and any linked billing.')) {
-        return;
-      }
 
       btnText.classList.add('d-none');
       btnSpinner.classList.remove('d-none');
@@ -110,7 +103,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const fd = new FormData();
         fd.append('trip_id',       tripId);
         fd.append('status',        status);
-        fd.append('location_note', location);
         fd.append('notes',         notes);
 
         const res    = await fetch(window.APP_BASE + '/ajax/update_trip_status.php', { method: 'POST', body: fd });

@@ -11,6 +11,16 @@ layoutHead('Documents', APP_BASE . '/assets/css/documents.css');
 
 $pdo = getDBConnection();
 
+// ── Period filter (scopes by upload date) ─────────────────────────────────────
+$periods = ['all' => 'All Time', '1m' => 'This Month', '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months'];
+$period = $_GET['period'] ?? 'all';
+if (!isset($periods[$period])) $period = 'all';
+$periodMonths = ['1m' => 1, '3m' => 3, '6m' => 6, '1y' => 12][$period] ?? null;
+$rangeStartSql = $periodMonths !== null
+    ? (new DateTime('today'))->modify("-{$periodMonths} months")->format('Y-m-d 00:00:00')
+    : null;
+$docDateFilter = $rangeStartSql ? "AND d.uploaded_at >= :rangeStart" : '';
+
 // ── All documents ─────────────────────────────────────────────────────────────
 $docsSql = "
     SELECT
@@ -28,9 +38,13 @@ $docsSql = "
     FROM documents d
     JOIN users u       ON d.uploaded_by = u.user_id
     LEFT JOIN trips t  ON d.trip_id     = t.trip_id
+    WHERE 1=1 $docDateFilter
     ORDER BY d.uploaded_at DESC
 ";
-$documents = $pdo->query($docsSql)->fetchAll(PDO::FETCH_ASSOC);
+$docsStmt = $pdo->prepare($docsSql);
+if ($rangeStartSql) $docsStmt->bindValue(':rangeStart', $rangeStartSql);
+$docsStmt->execute();
+$documents = $docsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Trips for optional trip link dropdown ─────────────────────────────────────
 $trips = $pdo->query("
@@ -73,9 +87,18 @@ function mimeIcon(?string $mime): string {
       <h1 class="doc-title mb-0">Documents</h1>
       <p class="doc-subtitle mb-0">Upload and manage trip and company documents</p>
     </div>
-    <button class="btn btn-doc-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
-      <i class="bi bi-upload me-1"></i> Upload Document
-    </button>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+      <form method="get" class="d-flex">
+        <select name="period" class="form-select doc-input" style="min-width:160px;font-size:.85rem;" onchange="this.form.submit()">
+          <?php foreach ($periods as $key => $label): ?>
+          <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </form>
+      <button class="btn btn-doc-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
+        <i class="bi bi-upload me-1"></i> Upload Document
+      </button>
+    </div>
   </div>
 
   <!-- Filters -->

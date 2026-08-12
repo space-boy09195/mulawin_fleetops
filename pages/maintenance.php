@@ -11,6 +11,16 @@ layoutHead('Maintenance', APP_BASE . '/assets/css/maintenance.css');
 
 $pdo = getDBConnection();
 
+// ── Period filter (scopes Maintenance Records list below) ────────────────────
+$periods = ['all' => 'All Time', '1m' => 'This Month', '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months'];
+$period = $_GET['period'] ?? 'all';
+if (!isset($periods[$period])) $period = 'all';
+$periodMonths = ['1m' => 1, '3m' => 3, '6m' => 6, '1y' => 12][$period] ?? null;
+$rangeStartSql = $periodMonths !== null
+    ? (new DateTime('today'))->modify("-{$periodMonths} months")->format('Y-m-d 00:00:00')
+    : null;
+$recDateFilter = $rangeStartSql ? "AND mr.date_performed >= :rangeStart" : '';
+
 // ── Maintenance records ───────────────────────────────────────────────────────
 $recordsSql = "
     SELECT
@@ -32,9 +42,13 @@ $recordsSql = "
     JOIN trucks tr   ON mr.truck_id     = tr.truck_id
     JOIN users u     ON mr.performed_by = u.user_id
     LEFT JOIN incidents i ON mr.incident_id = i.incident_id
+    WHERE 1=1 $recDateFilter
     ORDER BY mr.date_performed DESC, mr.created_at DESC
 ";
-$records = $pdo->query($recordsSql)->fetchAll(PDO::FETCH_ASSOC);
+$recordsStmt = $pdo->prepare($recordsSql);
+if ($rangeStartSql) $recordsStmt->bindValue(':rangeStart', $rangeStartSql);
+$recordsStmt->execute();
+$records = $recordsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Checklists ────────────────────────────────────────────────────────────────
 $checklistSql = "
@@ -137,7 +151,14 @@ $checklistItems = [
       <h1 class="mnt-title mb-0">Maintenance</h1>
       <p class="mnt-subtitle mb-0">Checklists, records, and truck status</p>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+      <form method="get" class="d-flex">
+        <select name="period" class="form-select mnt-input" style="min-width:160px;font-size:.85rem;" onchange="this.form.submit()">
+          <?php foreach ($periods as $key => $label): ?>
+          <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </form>
       <button class="btn btn-mnt-secondary" data-bs-toggle="modal" data-bs-target="#checklistModal">
         <i class="bi bi-clipboard-check me-1"></i> New Checklist
       </button>

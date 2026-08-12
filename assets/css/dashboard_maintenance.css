@@ -151,6 +151,16 @@
 .dm-rec-card:last-child { border-bottom: none; }
 .dm-rec-high   { border-left-color: #dc3545; background: rgba(220,53,69,0.04); }
 .dm-rec-medium { border-left-color: #e67e00; background: rgba(230,126,0,0.04); }
+.dm-rec-priority {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+.dm-rec-priority-high   { background: rgba(220,53,69,0.15); color: #b02a37; }
+.dm-rec-priority-medium { background: rgba(230,126,0,0.18); color: #9a5500; }
 .dm-rec-title  { font-size: 0.85rem; font-weight: 600; color: var(--bs-emphasis-color); }
 .dm-rec-detail { font-size: 0.78rem; color: var(--bs-secondary-color); margin-top: 2px; }
 .dm-rec-action {
@@ -165,3 +175,12 @@
 
 @media(max-width:1100px) { .dm-grid { grid-template-columns:1fr; } }
 @media(max-width:768px)  { .dm-page { padding:1.25rem 1rem; } .dm-stats { grid-template-columns:repeat(2,1fr); } }
+
+.dm-period-select {
+  font-size: 0.85rem;
+  border-radius: 8px;
+  border-color: var(--bs-border-color);
+  background-color: var(--bs-body-bg);
+  color: var(--bs-body-color);
+  min-width: 160px;
+}

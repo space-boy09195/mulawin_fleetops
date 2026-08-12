@@ -14,6 +14,16 @@ $GLOBALS['page_js'] = APP_BASE . '/assets/js/trip_monitor.js';
 
 $pdo = getDBConnection();
 
+// ── Period filter (scopes historical Completed/Cancelled trips only —
+// active trips always show regardless, since they need eyes on them now) ────
+$periods = ['all' => 'All Time', '1m' => 'This Month', '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months'];
+$period = $_GET['period'] ?? 'all';
+if (!isset($periods[$period])) $period = 'all';
+$periodMonths = ['1m' => 1, '3m' => 3, '6m' => 6, '1y' => 12][$period] ?? null;
+$rangeStartSql = $periodMonths !== null
+    ? (new DateTime('today'))->modify("-{$periodMonths} months")->format('Y-m-d 00:00:00')
+    : null;
+
 // ---- Auto-flag late trips before fetching -----------------
 $pdo->exec(
     "UPDATE trips
@@ -34,7 +44,7 @@ $counts = $pdo->query(
 )->fetch();
 
 // ---- Fetch trips ------------------------------------------
-$trips = $pdo->query(
+$tripStmt = $pdo->prepare(
     "SELECT
        t.trip_id,
        t.trip_number,
@@ -51,24 +61,23 @@ $trips = $pdo->query(
        e_h.full_name  AS helper_name,
        r.origin,
        r.destination,
-       -- Latest update note
-       (SELECT location_note FROM trip_updates
-         WHERE trip_id = t.trip_id
-         ORDER BY updated_at DESC LIMIT 1) AS last_location,
-       -- Departure time = when this trip first moved to 'In Transit'
-       (SELECT MIN(updated_at) FROM trip_updates
-         WHERE trip_id = t.trip_id AND status = 'In Transit') AS departed_at
+       dr.scheduled_at AS etd
      FROM trips t
      JOIN dispatch_requests dr ON t.dispatch_id  = dr.dispatch_id
      JOIN trucks tr             ON dr.truck_id    = tr.truck_id
      JOIN employees e_d         ON dr.driver_id   = e_d.employee_id
      LEFT JOIN employees e_h    ON dr.helper_id   = e_h.employee_id
      JOIN routes r              ON dr.route_id    = r.route_id
+     WHERE t.status NOT IN ('Completed','Cancelled') " .
+     ($rangeStartSql ? "OR (t.status IN ('Completed','Cancelled') AND t.created_at >= :rangeStart)" : "OR t.status IN ('Completed','Cancelled')") . "
      ORDER BY
        FIELD(t.status,'In Transit','Loading','Unloading','Completed','Cancelled'),
        t.is_late DESC,
        t.expected_arrival ASC"
-)->fetchAll();
+);
+if ($rangeStartSql) $tripStmt->bindValue(':rangeStart', $rangeStartSql);
+$tripStmt->execute();
+$trips = $tripStmt->fetchAll();
 
 layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
 ?>
@@ -78,11 +87,20 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
     <h1 class="page-title">Trip Monitoring</h1>
     <p class="page-subtitle">Track all trips in real time</p>
   </div>
-  <?php if (currentRoleId() === ROLE_DISPATCHER): ?>
-  <a href="<?= APP_BASE ?>/pages/dispatch.php" class="btn btn-primary btn-sm d-flex align-items-center gap-2">
-    <i class="bi bi-send"></i> New Dispatch
-  </a>
-  <?php endif; ?>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <form method="get" class="d-flex">
+      <select name="period" class="form-select" style="min-width:160px;font-size:.85rem;" onchange="this.form.submit()">
+        <?php foreach ($periods as $key => $label): ?>
+        <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </form>
+    <?php if (currentRoleId() === ROLE_DISPATCHER): ?>
+    <a href="<?= APP_BASE ?>/pages/dispatch.php" class="btn btn-primary btn-sm d-flex align-items-center gap-2">
+      <i class="bi bi-send"></i> New Dispatch
+    </a>
+    <?php endif; ?>
+  </div>
 </div>
 
 <!-- ---- Summary cards ------------------------------------- -->
@@ -171,8 +189,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
           <th>Route</th>
           <th>Status</th>
           <th>ETA</th>
-          <th>Departed</th>
-          <th>Last Location</th>
+          <th>ETD</th>
           <?php if (currentRoleId() === ROLE_DISPATCHER): ?>
           <th>Actions</th>
           <?php endif; ?>
@@ -181,7 +198,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
       <tbody id="tripBody">
         <?php if (empty($trips)): ?>
         <tr>
-          <td colspan="9" class="text-center text-muted py-4">No trips found.</td>
+          <td colspan="8" class="text-center text-muted py-4">No trips found.</td>
         </tr>
         <?php else: ?>
         <?php foreach ($trips as $trip):
@@ -253,10 +270,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
             <?php endif; ?>
           </td>
           <td style="font-size:.82rem; color:var(--text-muted);">
-            <?= $trip['departed_at'] ? date('M j, g:i A', strtotime($trip['departed_at'])) : '—' ?>
-          </td>
-          <td style="font-size:.82rem; color:var(--text-muted);">
-            <?= htmlspecialchars($trip['last_location'] ?? '—') ?>
+            <?= $trip['etd'] ? date('M j, g:i A', strtotime($trip['etd'])) : '—' ?>
           </td>
           <?php if (currentRoleId() === ROLE_DISPATCHER): ?>
           <td>
@@ -279,7 +293,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
         <?php endforeach; ?>
         <?php endif; ?>
         <tr id="noTripResults" class="d-none">
-          <td colspan="9">
+          <td colspan="8">
             <div class="no-results">
               <i class="bi bi-search"></i>
               <span>No trips match your filters.</span>
@@ -313,11 +327,6 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
             <option value="Completed">Completed</option>
             <option value="Cancelled">Cancelled</option>
           </select>
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-600">Current Location <span class="text-muted fw-400">(optional)</span></label>
-          <input type="text" class="form-control" id="modalLocation"
-                 placeholder="e.g. Batangas City Toll">
         </div>
         <div class="mb-1">
           <label class="form-label fw-600">Notes <span class="text-muted fw-400">(optional)</span></label>

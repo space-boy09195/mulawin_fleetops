@@ -14,13 +14,26 @@ $GLOBALS['page_js'] = APP_BASE . '/assets/js/announcements.js';
 
 $pdo = getDBConnection();
 
-$announcements = $pdo->query(
+// ── Period filter (pinned announcements always show regardless of period) ────
+$periods = ['all' => 'All Time', '1m' => 'This Month', '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months'];
+$period = $_GET['period'] ?? 'all';
+if (!isset($periods[$period])) $period = 'all';
+$periodMonths = ['1m' => 1, '3m' => 3, '6m' => 6, '1y' => 12][$period] ?? null;
+$rangeStartSql = $periodMonths !== null
+    ? (new DateTime('today'))->modify("-{$periodMonths} months")->format('Y-m-d 00:00:00')
+    : null;
+
+$annStmt = $pdo->prepare(
     "SELECT a.announcement_id, a.title, a.body, a.is_pinned, a.priority, a.created_at,
             u.full_name AS author
        FROM announcements a
        JOIN users u ON a.created_by = u.user_id
+      WHERE a.is_pinned = 1 " . ($rangeStartSql ? "OR (a.is_pinned = 0 AND a.created_at >= :rangeStart)" : "OR a.is_pinned = 0") . "
       ORDER BY a.is_pinned DESC, FIELD(a.priority, 'high', 'medium', 'low'), a.created_at DESC"
-)->fetchAll();
+);
+if ($rangeStartSql) $annStmt->bindValue(':rangeStart', $rangeStartSql);
+$annStmt->execute();
+$announcements = $annStmt->fetchAll();
 
 $isHead = currentRoleId() === ROLE_HEAD_MANAGEMENT;
 
@@ -33,6 +46,13 @@ layoutHead('Announcements', APP_BASE . '/assets/css/announcements.css');
     <p class="page-subtitle"><?= count($announcements) ?> total announcement<?= count($announcements) !== 1 ? 's' : '' ?></p>
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
+    <form method="get" class="d-flex">
+      <select name="period" class="form-select form-select-sm ann-sort-select" onchange="this.form.submit()">
+        <?php foreach ($periods as $key => $label): ?>
+        <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </form>
     <select id="annSortFilter" class="form-select form-select-sm ann-sort-select">
       <option value="default">Default (Pinned + Severity)</option>
       <option value="severity_desc">Severity: High to Low</option>

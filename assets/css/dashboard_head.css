@@ -101,6 +101,16 @@
 .dh-rec-card:last-child { border-bottom: none; }
 .dh-rec-high   { border-left-color: #dc3545; background: rgba(220,53,69,0.04); }
 .dh-rec-medium { border-left-color: #e67e00; background: rgba(230,126,0,0.04); }
+.dh-rec-priority {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+.dh-rec-priority-high   { background: rgba(220,53,69,0.15); color: #b02a37; }
+.dh-rec-priority-medium { background: rgba(230,126,0,0.18); color: #9a5500; }
 .dh-rec-category {
   flex-shrink: 0;
   width: 110px;

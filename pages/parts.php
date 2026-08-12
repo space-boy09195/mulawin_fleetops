@@ -11,6 +11,16 @@ layoutHead('Parts Inventory', APP_BASE . '/assets/css/parts.css');
 
 $pdo = getDBConnection();
 
+// ── Period filter (scopes the Movements list — Stock Levels stays live/current) ─
+$periods = ['all' => 'All Time', '1m' => 'This Month', '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months'];
+$period = $_GET['period'] ?? 'all';
+if (!isset($periods[$period])) $period = 'all';
+$periodMonths = ['1m' => 1, '3m' => 3, '6m' => 6, '1y' => 12][$period] ?? null;
+$rangeStartSql = $periodMonths !== null
+    ? (new DateTime('today'))->modify("-{$periodMonths} months")->format('Y-m-d 00:00:00')
+    : null;
+$movDateFilter = $rangeStartSql ? "AND pm.moved_at >= :rangeStart" : '';
+
 // ── Parts inventory ───────────────────────────────────────────────────────────
 $partsSql = "
     SELECT
@@ -50,10 +60,14 @@ $movementsSql = "
     JOIN parts_inventory p ON pm.part_id      = p.part_id
     JOIN users u           ON pm.recorded_by  = u.user_id
     LEFT JOIN maintenance_records mr ON pm.maintenance_id = mr.record_id
+    WHERE 1=1 $movDateFilter
     ORDER BY pm.moved_at DESC
     LIMIT 100
 ";
-$movements = $pdo->query($movementsSql)->fetchAll(PDO::FETCH_ASSOC);
+$movementsStmt = $pdo->prepare($movementsSql);
+if ($rangeStartSql) $movementsStmt->bindValue(':rangeStart', $rangeStartSql);
+$movementsStmt->execute();
+$movements = $movementsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Recent maintenance jobs, for optionally linking a parts movement to the
 // job that consumed the part (last 90 days keeps the dropdown manageable).
@@ -89,7 +103,14 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
       <h1 class="pts-title mb-0">Parts Inventory</h1>
       <p class="pts-subtitle mb-0">Stock levels, movements, and low-stock alerts</p>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+      <form method="get" class="d-flex">
+        <select name="period" class="form-select pts-input" style="min-width:160px;font-size:.85rem;" onchange="this.form.submit()">
+          <?php foreach ($periods as $key => $label): ?>
+          <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </form>
       <button class="btn btn-pts-secondary" data-bs-toggle="modal" data-bs-target="#movementModal">
         <i class="bi bi-arrow-left-right me-1"></i> Record Movement
       </button>

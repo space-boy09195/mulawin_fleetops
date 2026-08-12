@@ -11,6 +11,14 @@ layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_maintenance.css');
 
 $pdo = getDBConnection();
 
+// ── Period filter (scopes both charts below) ──────────────────────────────────
+$periods = ['all' => 'All Time', '1m' => 'This Month', '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months'];
+$period = $_GET['period'] ?? '3m';
+if (!isset($periods[$period])) $period = '3m';
+$periodMonths = ['1m' => 1, '3m' => 3, '6m' => 6, '1y' => 12][$period] ?? null;
+$rangeStart = $periodMonths !== null ? (new DateTime('today'))->modify("-{$periodMonths} months") : null;
+$rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
+
 // ── Stat cards ────────────────────────────────────────────────────────────────
 $underMaint   = (int)$pdo->query("SELECT COUNT(*) FROM trucks WHERE status='Under Maintenance'")->fetchColumn();
 $openIncidents = (int)$pdo->query("SELECT COUNT(*) FROM incidents WHERE resolved_at IS NULL")->fetchColumn();
@@ -104,12 +112,16 @@ usort($recommendations, fn($a, $b) =>
 $recommendations = array_slice($recommendations, 0, 6);
 
 // ── Maintenance type distribution for donut ───────────────────────────────────
-$maintTypeRows = $pdo->query("
+$mtDateFilter = $rangeStartSql ? "AND date_performed >= :rangeStart" : '';
+$mtStmt = $pdo->prepare("
     SELECT maintenance_type, COUNT(*) AS cnt
     FROM maintenance_records
-    WHERE date_performed >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+    WHERE 1=1 $mtDateFilter
     GROUP BY maintenance_type
-")->fetchAll(PDO::FETCH_ASSOC);
+");
+if ($rangeStartSql) $mtStmt->bindValue(':rangeStart', $rangeStartSql);
+$mtStmt->execute();
+$maintTypeRows = $mtStmt->fetchAll(PDO::FETCH_ASSOC);
 $maintTypeMap = [];
 foreach ($maintTypeRows as $r) $maintTypeMap[$r['maintenance_type']] = (int)$r['cnt'];
 $donutLabels = ['Preventive', 'Corrective', 'Inspection'];
@@ -117,15 +129,21 @@ $donutData   = array_map(fn($l) => $maintTypeMap[$l] ?? 0, $donutLabels);
 $donutColors = ['#198754', '#dc3545', '#0d6efd'];
 
 // ── Monthly maintenance cost for bar chart ────────────────────────────────────
-$costRows = $pdo->query("
+// "All Time" is clamped to 12 months back so the chart doesn't try to render
+// years of monthly bars at once.
+$costRangeStart = $rangeStart ?? (new DateTime('today'))->modify('-12 months');
+$costStmt = $pdo->prepare("
     SELECT DATE_FORMAT(date_performed,'%b') AS month,
            MONTH(date_performed) AS mnum,
            SUM(cost) AS total
     FROM maintenance_records
-    WHERE date_performed >= DATE_SUB(CURDATE(), INTERVAL 5 MONTH)
+    WHERE date_performed >= :rangeStart
     GROUP BY YEAR(date_performed), MONTH(date_performed)
     ORDER BY YEAR(date_performed), MONTH(date_performed)
-")->fetchAll(PDO::FETCH_ASSOC);
+");
+$costStmt->bindValue(':rangeStart', $costRangeStart->format('Y-m-d 00:00:00'));
+$costStmt->execute();
+$costRows = $costStmt->fetchAll(PDO::FETCH_ASSOC);
 $costLabels = array_column($costRows, 'month');
 $costData   = array_map(fn($r) => round((float)$r['total'], 2), $costRows);
 
@@ -142,9 +160,18 @@ $GLOBALS['dash_data'] = json_encode([
       <h1 class="dm-title">Dashboard</h1>
       <p class="dm-subtitle">Fleet health, checklists, and parts status</p>
     </div>
-    <a href="<?= APP_BASE ?>/pages/maintenance.php" class="btn dm-btn-primary">
-      <i class="bi bi-wrench me-1"></i> Log Record
-    </a>
+    <div class="d-flex align-items-center gap-2">
+      <form method="get" class="d-flex">
+        <select name="period" class="form-select dm-period-select" onchange="this.form.submit()">
+          <?php foreach ($periods as $key => $label): ?>
+          <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </form>
+      <a href="<?= APP_BASE ?>/pages/maintenance.php" class="btn dm-btn-primary">
+        <i class="bi bi-wrench me-1"></i> Log Record
+      </a>
+    </div>
   </div>
 
   <!-- Your activity this week -->
@@ -287,7 +314,7 @@ $GLOBALS['dash_data'] = json_encode([
     <!-- Maintenance type donut -->
     <div class="dm-widget">
       <div class="dm-widget-header">
-        <span class="dm-widget-title"><i class="bi bi-pie-chart me-2"></i>Maintenance Type (90 Days)</span>
+        <span class="dm-widget-title"><i class="bi bi-pie-chart me-2"></i>Maintenance Type (<?= htmlspecialchars($periods[$period]) ?>)</span>
       </div>
       <div class="dm-chart-wrap">
         <canvas id="maintTypeChart"></canvas>

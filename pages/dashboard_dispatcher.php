@@ -11,6 +11,15 @@ layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_dispatcher.css');
 
 $pdo = getDBConnection();
 
+// ── Period filter (scopes Trip Status chart + My Recent Requests) ────────────
+$periods = ['all' => 'All Time', '1m' => 'This Month', '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months'];
+$period = $_GET['period'] ?? '1m';
+if (!isset($periods[$period])) $period = '1m';
+$periodMonths = ['1m' => 1, '3m' => 3, '6m' => 6, '1y' => 12][$period] ?? null;
+$rangeStartSql = $periodMonths !== null
+    ? (new DateTime('today'))->modify("-{$periodMonths} months")->format('Y-m-d 00:00:00')
+    : null;
+
 // ── Stat cards ────────────────────────────────────────────────────────────────
 $activeTrips = (int)$pdo->query("SELECT COUNT(*) FROM trips WHERE status NOT IN ('Completed','Cancelled')")->fetchColumn();
 $pendingDisp = (int)$pdo->query("SELECT COUNT(*) FROM dispatch_requests WHERE status='Pending'")->fetchColumn();
@@ -78,6 +87,7 @@ $weeklyCompleted = (int)$weeklyDone->fetchColumn();
 $recommendations = getDispatchRecommendations($pdo, 5);
 
 // ── My pending dispatch requests ──────────────────────────────────────────────
+$reqDateFilter = $rangeStartSql ? "AND dr.requested_at >= :rangeStart" : '';
 $stmt = $pdo->prepare(
     "SELECT dr.dispatch_id, dr.status, dr.requested_at, dr.remarks,
            tr.plate_number, e.full_name AS driver_name,
@@ -86,10 +96,12 @@ $stmt = $pdo->prepare(
     JOIN trucks tr   ON dr.truck_id  = tr.truck_id
     JOIN employees e ON dr.driver_id = e.employee_id
     JOIN routes r    ON dr.route_id  = r.route_id
-    WHERE dr.requested_by = ? AND dr.status IN ('Pending','Approved','Rejected')
+    WHERE dr.requested_by = :uid AND dr.status IN ('Pending','Approved','Rejected') $reqDateFilter
     ORDER BY dr.requested_at DESC LIMIT 5"
 );
-$stmt->execute([$_SESSION['user_id'] ?? 0]);
+$stmt->bindValue(':uid', $_SESSION['user_id'] ?? 0);
+if ($rangeStartSql) $stmt->bindValue(':rangeStart', $rangeStartSql);
+$stmt->execute();
 $myRequests = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Fallback: show all recent if none for current user
@@ -118,12 +130,16 @@ $delayedBanner = $pdo->query("
 ")->fetch(PDO::FETCH_ASSOC);
 
 // ── Trip status breakdown for bar chart ───────────────────────────────────────
-$statusRows = $pdo->query("
+$statusDateFilter = $rangeStartSql ? "AND created_at >= :rangeStart" : '';
+$statusStmt = $pdo->prepare("
     SELECT status, COUNT(*) AS cnt
     FROM trips
-    WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+    WHERE 1=1 $statusDateFilter
     GROUP BY status
-")->fetchAll(PDO::FETCH_ASSOC);
+");
+if ($rangeStartSql) $statusStmt->bindValue(':rangeStart', $rangeStartSql);
+$statusStmt->execute();
+$statusRows = $statusStmt->fetchAll(PDO::FETCH_ASSOC);
 $statusMap = [];
 foreach ($statusRows as $r) $statusMap[$r['status']] = (int)$r['cnt'];
 $chartStatuses = ['Loading','In Transit','Unloading','Completed','Cancelled'];
@@ -142,9 +158,18 @@ $GLOBALS['dash_data'] = json_encode([
       <h1 class="dd-title">Dashboard</h1>
       <p class="dd-subtitle">Live trip monitoring and dispatch management</p>
     </div>
-    <a href="<?= APP_BASE ?>/pages/dispatch.php" class="btn dd-btn-primary">
-      <i class="bi bi-plus-lg me-1"></i> New Request
-    </a>
+    <div class="d-flex align-items-center gap-2">
+      <form method="get" class="d-flex">
+        <select name="period" class="form-select dd-period-select" onchange="this.form.submit()">
+          <?php foreach ($periods as $key => $label): ?>
+          <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </form>
+      <a href="<?= APP_BASE ?>/pages/dispatch.php" class="btn dd-btn-primary">
+        <i class="bi bi-plus-lg me-1"></i> New Request
+      </a>
+    </div>
   </div>
 
   <!-- Your activity this week -->
@@ -312,7 +337,7 @@ $GLOBALS['dash_data'] = json_encode([
     <!-- Trip Status chart -->
     <div class="dd-widget">
       <div class="dd-widget-header">
-        <span class="dd-widget-title"><i class="bi bi-bar-chart me-2"></i>Trip Status (Last 30 Days)</span>
+        <span class="dd-widget-title"><i class="bi bi-bar-chart me-2"></i>Trip Status (<?= htmlspecialchars($periods[$period]) ?>)</span>
       </div>
       <div class="dd-chart-wrap">
         <canvas id="tripStatusChart"></canvas>

@@ -16,6 +16,16 @@ $pdo = getDBConnection();
 $isHead       = currentRoleId() === ROLE_HEAD_MANAGEMENT;
 $isDispatcher = currentRoleId() === ROLE_DISPATCHER;
 
+// ── Period filter (scopes the Dispatch Requests list below) ──────────────────
+$periods = ['all' => 'All Time', '1m' => 'This Month', '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months'];
+$period = $_GET['period'] ?? 'all';
+if (!isset($periods[$period])) $period = 'all';
+$periodMonths = ['1m' => 1, '3m' => 3, '6m' => 6, '1y' => 12][$period] ?? null;
+$rangeStartSql = $periodMonths !== null
+    ? (new DateTime('today'))->modify("-{$periodMonths} months")->format('Y-m-d 00:00:00')
+    : null;
+$reqDateFilter = $rangeStartSql ? "AND dr.requested_at >= :rangeStart" : '';
+
 // ── Dropdown data ─────────────────────────────────────────────────────────────
 $availableTrucks = $pdo->query("
     SELECT truck_id, plate_number, brand, model FROM trucks
@@ -46,7 +56,9 @@ $allRoutes = $pdo->query("
 ")->fetchAll();
 
 // ── Dispatch requests ─────────────────────────────────────────────────────────
-$requests = $pdo->query("
+// Pending requests always show regardless of period (they need action now);
+// the period filter only narrows down the historical Approved/Rejected ones.
+$reqStmt = $pdo->prepare("
     SELECT
         dr.dispatch_id,
         dr.status,
@@ -71,8 +83,12 @@ $requests = $pdo->query("
     JOIN routes r           ON dr.route_id     = r.route_id
     JOIN users u_req        ON dr.requested_by = u_req.user_id
     LEFT JOIN users u_apr   ON dr.approved_by  = u_apr.user_id
+    WHERE dr.status = 'Pending' " . ($rangeStartSql ? "OR (dr.status != 'Pending' $reqDateFilter)" : "OR dr.status != 'Pending'") . "
     ORDER BY FIELD(dr.status,'Pending','Approved','Rejected'), dr.requested_at DESC
-")->fetchAll();
+");
+if ($rangeStartSql) $reqStmt->bindValue(':rangeStart', $rangeStartSql);
+$reqStmt->execute();
+$requests = $reqStmt->fetchAll();
 
 $pendingCount = count(array_filter($requests, fn($r) => $r['status'] === 'Pending'));
 $activeRoutes = count(array_filter($allRoutes, fn($r) => $r['is_active']));
@@ -87,7 +103,14 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
       <?= $pendingCount ?> pending request<?= $pendingCount !== 1 ? 's' : '' ?> awaiting review
     </p>
   </div>
-  <div class="d-flex gap-2">
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <form method="get" class="d-flex">
+      <select name="period" class="form-select disp-input" style="min-width:160px;font-size:.85rem;" onchange="this.form.submit()">
+        <?php foreach ($periods as $key => $label): ?>
+        <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+        <?php endforeach; ?>
+      </select>
+    </form>
     <?php if ($isDispatcher): ?>
     <button class="btn btn-primary btn-sm d-flex align-items-center gap-2"
             data-bs-toggle="modal" data-bs-target="#newDispatchModal">

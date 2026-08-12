@@ -11,16 +11,31 @@ layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_accounting.css');
 
 $pdo = getDBConnection();
 
-// ── Stat cards ────────────────────────────────────────────────────────────────
-$bilStats = $pdo->query("
+// ── Period filter ──────────────────────────────────────────────────────────
+$periods = ['all' => 'All Time', '1m' => 'This Month', '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months'];
+$period = $_GET['period'] ?? 'all';
+if (!isset($periods[$period])) $period = 'all';
+$periodMonths = ['1m' => 1, '3m' => 3, '6m' => 6, '1y' => 12][$period] ?? null;
+$rangeStartSql = $periodMonths !== null
+    ? (new DateTime('today'))->modify("-{$periodMonths} months")->format('Y-m-d 00:00:00')
+    : null;
+$dateFilter = $rangeStartSql ? "AND b.created_at >= :rangeStart" : '';
+
+// ── Stat cards (v_billing_summary joined back to billings for the date filter) ─
+$bilStmt = $pdo->prepare("
     SELECT
-        SUM(billed_amount)                        AS total_billed,
-        SUM(total_collected)                      AS total_collected,
-        SUM(CASE WHEN status!='Paid' THEN balance ELSE 0 END) AS pending,
-        SUM(CASE WHEN status!='Paid' AND due_date < CURDATE() THEN balance ELSE 0 END) AS overdue,
-        COUNT(CASE WHEN status!='Paid' AND due_date < CURDATE() THEN 1 END) AS overdue_count
-    FROM v_billing_summary
-")->fetch(PDO::FETCH_ASSOC);
+        SUM(vs.billed_amount)                        AS total_billed,
+        SUM(vs.total_collected)                      AS total_collected,
+        SUM(CASE WHEN vs.status!='Paid' THEN vs.balance ELSE 0 END) AS pending,
+        SUM(CASE WHEN vs.status!='Paid' AND vs.due_date < CURDATE() THEN vs.balance ELSE 0 END) AS overdue,
+        COUNT(CASE WHEN vs.status!='Paid' AND vs.due_date < CURDATE() THEN 1 END) AS overdue_count
+    FROM v_billing_summary vs
+    JOIN billings b ON b.billing_id = vs.billing_id
+    WHERE 1=1 $dateFilter
+");
+if ($rangeStartSql) $bilStmt->bindValue(':rangeStart', $rangeStartSql);
+$bilStmt->execute();
+$bilStats = $bilStmt->fetch(PDO::FETCH_ASSOC);
 
 $totalBilled    = (float)($bilStats['total_billed']    ?? 0);
 $totalCollected = (float)($bilStats['total_collected'] ?? 0);
@@ -129,9 +144,18 @@ $GLOBALS['dash_data'] = json_encode([
       <h1 class="da-title">Dashboard</h1>
       <p class="da-subtitle">Operational analytics and diagnostic alerts</p>
     </div>
-    <a href="<?= APP_BASE ?>/pages/billing.php" class="btn da-btn-primary">
-      <i class="bi bi-receipt me-1"></i> Create Billing
-    </a>
+    <div class="d-flex align-items-center gap-2">
+      <form method="get" class="d-flex">
+        <select name="period" class="form-select da-period-select" onchange="this.form.submit()">
+          <?php foreach ($periods as $key => $label): ?>
+          <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </form>
+      <a href="<?= APP_BASE ?>/pages/billing.php" class="btn da-btn-primary">
+        <i class="bi bi-receipt me-1"></i> Create Billing
+      </a>
+    </div>
   </div>
 
   <!-- Your activity this week -->

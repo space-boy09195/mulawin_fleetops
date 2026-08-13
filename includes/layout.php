@@ -168,6 +168,36 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
       if (t === 'dark') document.documentElement.setAttribute('data-theme','dark');
     })();
   </script>
+  <script>
+    // Marks <html> itself, before ANY body content parses. This is the
+    // earliest possible point in the whole page load — nothing below this
+    // depends on script execution order or element existence, which is
+    // what made the previous attempt (a script placed after the sidebar
+    // markup) still occasionally show a flash on real page loads.
+    (function(){
+      if (window.innerWidth > 768 && localStorage.getItem('mulawin_sidebar_collapsed') === '1') {
+        document.documentElement.classList.add('sidebar-precollapsed');
+      }
+    })();
+  </script>
+  <style>
+    /* Mirrors the real .sidebar.collapsed / .app-shell.sidebar-collapsed
+       rules from layout.css exactly, just scoped under the <html> class
+       set above. Pure CSS — applies the instant these elements exist in
+       the DOM, with no dependency on any script running "in time." This
+       is what actually eliminates the flash; the <html> class alone does
+       nothing without these. If the real collapsed-state rules in
+       layout.css ever change, these need to be updated to match. */
+    html.sidebar-precollapsed #appSidebar { width: var(--sidebar-collapsed); }
+    html.sidebar-precollapsed #appSidebar .nav-section-label,
+    html.sidebar-precollapsed #appSidebar .nav-section-chevron { opacity: 0; width: 0; overflow: hidden; }
+    html.sidebar-precollapsed #appSidebar .nav-label { opacity: 0; width: 0; }
+    html.sidebar-precollapsed #appSidebar .nav-link { padding: 10px 0; justify-content: center; }
+    html.sidebar-precollapsed #appSidebar .theme-toggle-label { opacity: 0; width: 0; }
+    html.sidebar-precollapsed #appSidebar .sidebar-user-info { opacity: 0; width: 0; }
+    html.sidebar-precollapsed #appShell .main-wrapper { margin-left: var(--sidebar-collapsed); }
+    html.sidebar-precollapsed #appSidebar .sidebar-home-icon-btn { display: none; }
+  </style>
 </head>
 <body>
 
@@ -217,23 +247,6 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     </div>
 
   </aside>
-
-  <script>
-    // Applies the saved collapsed state immediately — before the browser has
-    // painted anything below this point — using the exact same classes
-    // setSidebarCollapsed() in layout.js would apply. Without this, the
-    // sidebar was only being collapsed inside DOMContentLoaded, which runs
-    // *after* first paint, so on every single page load it would flash open
-    // at full width for a moment before snapping closed. Doing it here,
-    // synchronously and this early in the HTML, means there's nothing to
-    // "snap" — it's already correct by the time it's visible.
-    (function(){
-      if (window.innerWidth > 768 && localStorage.getItem('mulawin_sidebar_collapsed') === '1') {
-        document.getElementById('appSidebar')?.classList.add('collapsed');
-        document.getElementById('appShell')?.classList.add('sidebar-collapsed');
-      }
-    })();
-  </script>
 
   <!-- ======================================================
        MAIN WRAPPER

@@ -218,6 +218,23 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
 
   </aside>
 
+  <script>
+    // Applies the saved collapsed state immediately — before the browser has
+    // painted anything below this point — using the exact same classes
+    // setSidebarCollapsed() in layout.js would apply. Without this, the
+    // sidebar was only being collapsed inside DOMContentLoaded, which runs
+    // *after* first paint, so on every single page load it would flash open
+    // at full width for a moment before snapping closed. Doing it here,
+    // synchronously and this early in the HTML, means there's nothing to
+    // "snap" — it's already correct by the time it's visible.
+    (function(){
+      if (window.innerWidth > 768 && localStorage.getItem('mulawin_sidebar_collapsed') === '1') {
+        document.getElementById('appSidebar')?.classList.add('collapsed');
+        document.getElementById('appShell')?.classList.add('sidebar-collapsed');
+      }
+    })();
+  </script>
+
   <!-- ======================================================
        MAIN WRAPPER
        ====================================================== -->

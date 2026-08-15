@@ -102,6 +102,17 @@
       setSidebarCollapsed(wasCollapsed);
     }
 
+    // The <html>.sidebar-precollapsed class + matching CSS in layout.php is
+    // only a temporary bridge to prevent a flash before this script runs —
+    // setSidebarCollapsed() above has now applied the real classes on
+    // #appSidebar/#appShell, which is what toggleSidebar() actually reads
+    // and updates from here on. Without removing the bridge class, it would
+    // stay on <html> for the rest of the page's life (nothing else ever
+    // clears it), permanently forcing the collapsed CSS regardless of what
+    // the real classes say — which is exactly why the toggle stopped being
+    // able to re-expand the sidebar. The bridge's job ends here.
+    document.documentElement.classList.remove('sidebar-precollapsed');
+
     // Toggle sidebar button
     if (toggleBtn) {
       toggleBtn.addEventListener('click', toggleSidebar);

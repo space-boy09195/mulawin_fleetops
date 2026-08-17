@@ -16,7 +16,7 @@
   white-space: nowrap;
 }
 .filter-btn:hover  { border-color: var(--accent); color: var(--accent); }
-.filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.filter-btn.active { background: var(--accent); border-color: var(--accent); color: var(--text-inverse); font-weight: 600; }
 
 /* ── Hidden rows ─────────────────────────────────────────────── */
 tr.hidden-row { display: none; }
@@ -94,21 +94,21 @@ tr.hidden-row { display: none; }
 }
 
 .disp-modal-header-blue {
-  background: #0d6efd;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--text-inverse);
   border-bottom: none;
   padding: 0.9rem 1.25rem;
 }
 
 .disp-modal-header-green {
-  background: #198754;
-  color: #fff;
+  background: var(--color-success);
+  color: var(--text-inverse);
   border-bottom: none;
   padding: 0.9rem 1.25rem;
 }
 
 .disp-modal-header-red {
-  background: #dc3545;
+  background: var(--color-danger);
   color: #fff;
   border-bottom: none;
   padding: 0.9rem 1.25rem;

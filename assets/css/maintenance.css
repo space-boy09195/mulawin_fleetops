@@ -30,9 +30,9 @@
 
 /* ── Buttons ─────────────────────────────────── */
 .btn-mnt-primary {
-  background: #0d6efd;
+  background: var(--color-primary);
   border: none;
-  color: #fff;
+  color: var(--text-inverse);
   font-weight: 600;
   font-size: 0.875rem;
   padding: 0.5rem 1.1rem;
@@ -42,13 +42,13 @@
 
 .btn-mnt-primary:hover,
 .btn-mnt-primary:focus {
-  background: #0b5ed7;
-  color: #fff;
+  background: var(--color-primary-hover);
+  color: var(--text-inverse);
   box-shadow: 0 2px 8px rgba(13, 110, 253, 0.35);
 }
 
 .btn-mnt-secondary {
-  background: #6c757d;
+  background: var(--text-muted);
   border: none;
   color: #fff;
   font-weight: 600;
@@ -60,7 +60,7 @@
 
 .btn-mnt-secondary:hover,
 .btn-mnt-secondary:focus {
-  background: #5c636a;
+  background: var(--text-secondary);
   color: #fff;
 }
 
@@ -108,8 +108,8 @@
 }
 
 .mnt-tab.active {
-  color: #0d6efd;
-  border-bottom-color: #0d6efd;
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
 }
 
 .mnt-tab-count {
@@ -128,7 +128,7 @@
 
 .mnt-tab.active .mnt-tab-count {
   background: rgba(13, 110, 253, 0.12);
-  color: #0d6efd;
+  color: var(--color-primary);
 }
 
 /* ── Filters ─────────────────────────────────── */
@@ -244,7 +244,7 @@
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
-.mnt-desc-text:hover { color: #0d6efd; }
+.mnt-desc-text:hover { color: var(--color-primary); }
 
 /* ── Date + due dates ────────────────────────── */
 .mnt-date {
@@ -254,12 +254,12 @@
 }
 
 .mnt-due-soon {
-  color: #e67e00;
+  color: var(--color-secondary-hover);
   font-weight: 600;
 }
 
 .mnt-due-urgent {
-  color: #dc3545;
+  color: var(--color-danger);
   font-weight: 700;
 }
 
@@ -282,17 +282,17 @@
 
 .mnt-type-preventive {
   background: rgba(25, 135, 84, 0.1);
-  color: #146c43;
+  color: var(--color-success-hover);
 }
 
 .mnt-type-corrective {
   background: rgba(220, 53, 69, 0.1);
-  color: #b02a37;
+  color: var(--color-danger-hover);
 }
 
 .mnt-type-inspection {
   background: rgba(13, 110, 253, 0.1);
-  color: #0a58ca;
+  color: var(--color-primary-hover);
 }
 
 /* ── Truck status badges ─────────────────────── */
@@ -307,17 +307,17 @@
 
 .mnt-ts-operational {
   background: rgba(25, 135, 84, 0.1);
-  color: #146c43;
+  color: var(--color-success-hover);
 }
 
 .mnt-ts-scheduled-maintenance {
   background: rgba(255, 193, 7, 0.15);
-  color: #856404;
+  color: var(--color-warning-text);
 }
 
 .mnt-ts-under-repair {
   background: rgba(220, 53, 69, 0.1);
-  color: #b02a37;
+  color: var(--color-danger-hover);
 }
 
 /* ── Checklist result badges ─────────────────── */
@@ -334,12 +334,12 @@
 
 .mnt-result-passed {
   background: rgba(25, 135, 84, 0.1);
-  color: #146c43;
+  color: var(--color-success-hover);
 }
 
 .mnt-result-failed {
   background: rgba(220, 53, 69, 0.1);
-  color: #b02a37;
+  color: var(--color-danger-hover);
 }
 
 /* ── Inline checklist items in table ─────────── */
@@ -361,12 +361,12 @@
 
 .mnt-check-ok {
   background: rgba(25, 135, 84, 0.08);
-  color: #198754;
+  color: var(--color-success);
 }
 
 .mnt-check-fail {
   background: rgba(220, 53, 69, 0.08);
-  color: #dc3545;
+  color: var(--color-danger);
 }
 
 /* ── Incident link ───────────────────────────── */
@@ -422,14 +422,14 @@
 }
 
 .mnt-modal-header-primary {
-  background: #0d6efd;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--text-inverse);
   border-bottom: none;
   padding: 1rem 1.25rem;
 }
 
 .mnt-modal-header-secondary {
-  background: #6c757d;
+  background: var(--text-muted);
   color: #fff;
   border-bottom: none;
   padding: 1rem 1.25rem;
@@ -481,7 +481,7 @@
 }
 
 .mnt-input:focus {
-  border-color: #0d6efd;
+  border-color: var(--color-primary);
   box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15);
 }
 
@@ -512,7 +512,7 @@ textarea.mnt-input {
 }
 
 .mnt-check-toggle:hover {
-  border-color: #0d6efd;
+  border-color: var(--color-primary);
   background: rgba(13, 110, 253, 0.04);
 }
 
@@ -535,13 +535,13 @@ textarea.mnt-input {
 }
 
 .mnt-check-cb:checked + .mnt-check-toggle-inner {
-  background: #198754;
-  border-color: #198754;
-  color: #fff;
+  background: var(--color-success);
+  border-color: var(--color-success);
+  color: var(--text-inverse);
 }
 
 .mnt-check-toggle:has(.mnt-check-cb:checked) {
-  border-color: #198754;
+  border-color: var(--color-success);
   background: rgba(25, 135, 84, 0.05);
 }
 
@@ -562,13 +562,13 @@ textarea.mnt-input {
 
 .mnt-banner-pass {
   background: rgba(25, 135, 84, 0.1);
-  color: #146c43;
+  color: var(--color-success-hover);
   border: 1px solid rgba(25, 135, 84, 0.25);
 }
 
 .mnt-banner-fail {
   background: rgba(220, 53, 69, 0.08);
-  color: #b02a37;
+  color: var(--color-danger-hover);
   border: 1px solid rgba(220, 53, 69, 0.2);
 }
 

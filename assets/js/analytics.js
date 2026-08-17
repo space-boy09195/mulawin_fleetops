@@ -8,12 +8,12 @@
   const D = window.ANALYTICS_DATA;
   if (!D) return;
 
-  const isDark    = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+  const isDark    = document.documentElement.getAttribute('data-theme') === 'dark';
   const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
-  const textColor = isDark ? '#a0aec0' : '#6c757d';
-  const tooltipBg = isDark ? '#1e2d3d' : '#fff';
-  const tooltipBrd = isDark ? '#2d4058' : '#dee2e6';
-  const legendTextColor = isDark ? '#e2e8f0' : '#212529';
+  const textColor = isDark ? '#7F9487' : '#5F6D64';
+  const tooltipBg = isDark ? '#0D2112' : '#FFFFFF';
+  const tooltipBrd = isDark ? 'rgba(0,255,133,0.18)' : '#D6DED7';
+  const legendTextColor = isDark ? '#F1FFF6' : '#172019';
 
   Chart.defaults.font.family = "'Inter','Segoe UI',system-ui,sans-serif";
   Chart.defaults.font.size   = 12;
@@ -42,10 +42,10 @@
             type: 'line',
             label: 'Maintenance Cost',
             data: D.revCostTrend.cost,
-            borderColor: '#dc3545',
+            borderColor: (isDark ? '#FF1E27' : '#B72A32'),
             backgroundColor: 'rgba(220,53,69,0.08)',
             borderWidth: 2.5,
-            pointBackgroundColor: '#dc3545',
+            pointBackgroundColor: (isDark ? '#FF1E27' : '#B72A32'),
             pointRadius: 4,
             pointHoverRadius: 6,
             tension: 0.3,
@@ -88,7 +88,7 @@
         datasets: [{
           data: D.tripStatus.data,
           backgroundColor: D.tripStatus.colors,
-          borderColor: isDark ? '#152236' : '#fff',
+          borderColor: isDark ? '#0A1B0E' : '#FFFFFF',
           borderWidth: 3,
           hoverOffset: 6,
         }],
@@ -119,7 +119,7 @@
         datasets: [{
           data: D.maintType.data,
           backgroundColor: D.maintType.colors,
-          borderColor: isDark ? '#152236' : '#fff',
+          borderColor: isDark ? '#0A1B0E' : '#FFFFFF',
           borderWidth: 3,
           hoverOffset: 6,
         }],
@@ -261,10 +261,10 @@
             type: 'line',
             label: 'Collected',
             data: D.billedCollected.collected,
-            borderColor: '#198754',
+            borderColor: (isDark ? '#00FF85' : '#197A46'),
             backgroundColor: 'rgba(25,135,84,0.08)',
             borderWidth: 2.5,
-            pointBackgroundColor: '#198754',
+            pointBackgroundColor: (isDark ? '#00FF85' : '#197A46'),
             pointRadius: 4,
             pointHoverRadius: 6,
             tension: 0.3,

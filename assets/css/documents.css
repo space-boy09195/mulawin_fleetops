@@ -30,9 +30,9 @@
 
 /* ── Buttons ─────────────────────────────────── */
 .btn-doc-primary {
-  background: #0d6efd;
+  background: var(--color-primary);
   border: none;
-  color: #fff;
+  color: var(--text-inverse);
   font-weight: 600;
   font-size: 0.875rem;
   padding: 0.5rem 1.1rem;
@@ -42,8 +42,8 @@
 
 .btn-doc-primary:hover,
 .btn-doc-primary:focus {
-  background: #0b5ed7;
-  color: #fff;
+  background: var(--color-primary-hover);
+  color: var(--text-inverse);
   box-shadow: 0 2px 8px rgba(13,110,253,0.35);
 }
 
@@ -64,7 +64,7 @@
 }
 
 .btn-doc-danger {
-  background: #dc3545;
+  background: var(--color-danger);
   border: none;
   color: #fff;
   font-weight: 600;
@@ -76,7 +76,7 @@
 
 .btn-doc-danger:hover,
 .btn-doc-danger:focus {
-  background: #b02a37;
+  background: var(--color-danger-hover);
   color: #fff;
 }
 
@@ -114,7 +114,7 @@
 
 .doc-card:hover {
   box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-  border-color: #0d6efd40;
+  border-color: var(--color-primary)40;
 }
 
 .doc-card.doc-card-hidden {
@@ -124,15 +124,15 @@
 /* ── Card icon ───────────────────────────────── */
 .doc-card-icon {
   font-size: 2rem;
-  color: #0d6efd;
+  color: var(--color-primary);
   line-height: 1;
   margin-bottom: 2px;
 }
 
-.doc-card-icon .bi-file-earmark-pdf   { color: #dc3545; }
+.doc-card-icon .bi-file-earmark-pdf   { color: var(--color-danger); }
 .doc-card-icon .bi-file-earmark-image { color: #6f42c1; }
-.doc-card-icon .bi-file-earmark-word  { color: #0d6efd; }
-.doc-card-icon .bi-file-earmark-excel { color: #198754; }
+.doc-card-icon .bi-file-earmark-word  { color: var(--color-primary); }
+.doc-card-icon .bi-file-earmark-excel { color: var(--color-success); }
 
 /* ── Type badge ──────────────────────────────── */
 .doc-type-badge {
@@ -147,11 +147,11 @@
   color: var(--bs-secondary-color);
 }
 
-.doc-type-or-cr              { background: rgba(25,135,84,0.1);  color: #146c43; }
-.doc-type-delivery-receipt   { background: rgba(13,110,253,0.1); color: #0a58ca; }
+.doc-type-or-cr              { background: rgba(25,135,84,0.1);  color: var(--color-success-hover); }
+.doc-type-delivery-receipt   { background: rgba(13,110,253,0.1); color: var(--color-primary-hover); }
 .doc-type-waybill            { background: rgba(111,66,193,0.1); color: #5a2d8b; }
-.doc-type-maintenance-record { background: rgba(255,145,0,0.1);  color: #9a5500; }
-.doc-type-billing-record     { background: rgba(220,53,69,0.1);  color: #b02a37; }
+.doc-type-maintenance-record { background: rgba(255,145,0,0.1);  color: var(--color-secondary-hover); }
+.doc-type-billing-record     { background: rgba(220,53,69,0.1);  color: var(--color-danger-hover); }
 .doc-type-company-document   { background: rgba(32,201,151,0.1); color: #0f6848; }
 .doc-type-other              { background: var(--bs-secondary-bg); color: var(--bs-secondary-color); }
 
@@ -223,8 +223,8 @@
 
 .btn-doc-delete:hover {
   background: rgba(220,53,69,0.1);
-  border-color: #dc3545;
-  color: #dc3545;
+  border-color: var(--color-danger);
+  color: var(--color-danger);
 }
 
 /* ── Empty state ─────────────────────────────── */
@@ -269,14 +269,14 @@
 }
 
 .doc-modal-header {
-  background: #0d6efd;
-  color: #fff;
+  background: var(--color-primary);
+  color: var(--text-inverse);
   border-bottom: none;
   padding: 1rem 1.25rem;
 }
 
 .doc-modal-header-danger {
-  background: #dc3545;
+  background: var(--color-danger);
   color: #fff;
   border-bottom: none;
   padding: 1rem 1.25rem;
@@ -320,7 +320,7 @@
 }
 
 .doc-input:focus {
-  border-color: #0d6efd;
+  border-color: var(--color-primary);
   box-shadow: 0 0 0 3px rgba(13,110,253,0.15);
 }
 
@@ -337,13 +337,13 @@
 
 .doc-dropzone:hover,
 .doc-dropzone-active {
-  border-color: #0d6efd;
+  border-color: var(--color-primary);
   background: rgba(13,110,253,0.04);
 }
 
 .doc-dropzone-icon {
   font-size: 2.2rem;
-  color: #0d6efd;
+  color: var(--color-primary);
   display: block;
   margin-bottom: 0.5rem;
   opacity: 0.7;
@@ -356,7 +356,7 @@
 }
 
 .doc-dropzone-link {
-  color: #0d6efd;
+  color: var(--color-primary);
   font-weight: 600;
   cursor: pointer;
   text-decoration: underline;
@@ -385,7 +385,7 @@
 
 .doc-preview-icon {
   font-size: 1.5rem;
-  color: #0d6efd;
+  color: var(--color-primary);
   flex-shrink: 0;
 }
 
@@ -424,7 +424,7 @@
 
 .doc-progress-bar {
   height: 100%;
-  background: #0d6efd;
+  background: var(--color-primary);
   border-radius: 3px;
   width: 0%;
   transition: width 0.2s;

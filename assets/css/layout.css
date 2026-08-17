@@ -4,103 +4,14 @@
    Dark/light mode via [data-theme] on <html>
    ============================================================ */
 
-/* ---- CSS Variables: Light Mode (default) ----------------- */
-:root {
-  /* Sidebar — stays dark regardless of mode, it's a fixed brand element */
-  --sidebar-bg:        #1a2e4a;
-  --sidebar-text:      #b8cfe0;
-  --sidebar-text-muted:#5a7a96;
-  --sidebar-hover-bg:  rgba(244, 166, 28, 0.10);
-  --sidebar-active-bg: rgba(244, 166, 28, 0.15);
-  --sidebar-active-txt:#f4a61c;
-  --sidebar-stripe:    #f4a61c;
-  --sidebar-border:    rgba(255,255,255,0.07);
-  --sidebar-width:     260px;
-  --sidebar-collapsed: 68px;
-
-  /* Topnav */
-  --topnav-bg:         #ffffff;
-  --topnav-border:     #e2e8f0;
-  --topnav-text:       #1e293b;
-  --topnav-height:     60px;
-
-  /* Content area — warm off-white, not stark white */
-  --content-bg:        #f1f5f9;
-  --card-bg:           #ffffff;
-  --card-border:       #e2e8f0;
-  --card-shadow:       0 1px 3px rgba(15,33,55,0.06), 0 2px 8px rgba(15,33,55,0.04);
-
-  /* Text — strong hierarchy */
-  --text-primary:      #0f172a;
-  --text-secondary:    #334155;
-  --text-muted:        #94a3b8;
-
-  /* Brand accent */
-  --accent:            #f4a61c;
-  --accent-dark:       #d4880e;
-  --primary:           #1a2e4a;
-
-  /* Input / form surfaces */
-  --input-bg:          #ffffff;
-  --input-border:      #cbd5e1;
-  --input-focus:       rgba(244,166,28,0.25);
-
-  /* Status badges — light mode */
-  --badge-available:   #dcfce7;
-  --badge-available-t: #15803d;
-  --badge-deployed:    #dbeafe;
-  --badge-deployed-t:  #1d4ed8;
-  --badge-maintenance: #fef3c7;
-  --badge-maintenance-t:#92400e;
-  --badge-inactive:    #f1f5f9;
-  --badge-inactive-t:  #64748b;
-
-  /* Misc */
-  --radius:            10px;
-  --transition:        0.18s ease;
-}
-
-/* ---- CSS Variables: Dark Mode ---------------------------- */
-[data-theme="dark"] {
-  /* Sidebar — slightly lighter than content so it reads as a distinct panel */
-  --sidebar-bg:        #0d1f35;
-  --sidebar-text:      #8faec8;
-  --sidebar-text-muted:#3d5a74;
-  --sidebar-hover-bg:  rgba(244, 166, 28, 0.08);
-  --sidebar-active-bg: rgba(244, 166, 28, 0.12);
-  --sidebar-border:    rgba(255,255,255,0.05);
-
-  /* Topnav — one step lighter than content bg */
-  --topnav-bg:         #152236;
-  --topnav-border:     #1e3550;
-  --topnav-text:       #cbd5e1;
-
-  /* Content area — soft navy-slate, easy on the eyes */
-  --content-bg:        #0e1e30;
-  --card-bg:           #152236;
-  --card-border:       #1e3550;
-  --card-shadow:       0 1px 4px rgba(0,0,0,0.3), 0 2px 12px rgba(0,0,0,0.2);
-
-  /* Text */
-  --text-primary:      #e2e8f0;
-  --text-secondary:    #94a3b8;
-  --text-muted:        #3d5a74;
-
-  /* Input / form surfaces */
-  --input-bg:          #1a2e46;
-  --input-border:      #1e3550;
-  --input-focus:       rgba(244,166,28,0.20);
-
-  /* Status badges — dark mode: keep readable contrast */
-  --badge-available:   #052e16;
-  --badge-available-t: #4ade80;
-  --badge-deployed:    #0c1a40;
-  --badge-deployed-t:  #60a5fa;
-  --badge-maintenance: #2d1a00;
-  --badge-maintenance-t:#fbbf24;
-  --badge-inactive:    #1e293b;
-  --badge-inactive-t:  #64748b;
-}
+/* ---- CSS Variables ----------------------------------------
+   All color, spacing, shadow and glow tokens now live in the
+   centralized assets/css/theme-tokens.css (RPM Identity Mode /
+   RPM Grid Mode). This file consumes those tokens only — see
+   theme-tokens.css for [data-theme="light"] / [data-theme="dark"]
+   definitions and the legacy variable bridge (--sidebar-bg,
+   --card-bg, --accent, etc.) that the rules below rely on.
+   ------------------------------------------------------------ */
 
 /* ---- Reset & Base ---------------------------------------- */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -187,6 +98,7 @@ body {
   width: var(--sidebar-width);
   min-height: 100vh;
   background-color: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
   display: flex;
   flex-direction: column;
   position: fixed;
@@ -195,6 +107,14 @@ body {
   z-index: 1000;
   transition: width var(--transition), background-color var(--transition);
   overflow: hidden;
+}
+
+[data-theme="dark"] .sidebar {
+  box-shadow: 1px 0 0 rgba(0, 255, 133, 0.08), var(--shadow-panel);
+}
+
+[data-theme="light"] .sidebar {
+  box-shadow: var(--shadow-sm);
 }
 
 /* Collapsed state — icon-only */
@@ -216,13 +136,13 @@ body {
 .sidebar-brand-icon {
   width: 36px;
   height: 36px;
-  background: var(--accent);
+  background: var(--color-primary);
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: var(--primary);
+  color: var(--text-inverse);
   font-size: 1.1rem;
 }
 
@@ -234,7 +154,7 @@ body {
 .sidebar-brand-text .brand-title {
   font-size: 0.95rem;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-primary);
   line-height: 1.2;
 }
 
@@ -259,14 +179,14 @@ body {
   background: transparent;
 }
 .sidebar-nav::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.1);
+  background: var(--border-strong);
   border-radius: 4px;
 }
 /* Firefox only — intentionally not cross-browser */
 @supports (scrollbar-width: thin) {
   .sidebar-nav {
     scrollbar-width: thin;
-    scrollbar-color: rgba(255,255,255,0.1) transparent;
+    scrollbar-color: var(--border-strong) transparent;
   }
 }
 
@@ -354,15 +274,23 @@ body {
 
 .nav-link:hover {
   background-color: var(--sidebar-hover-bg);
-  color: #ffffff;
+  color: var(--text-primary);
 }
 
-/* Active — the amber road-stripe signature */
+/* Active — the RPM signature stripe */
 .nav-link.active {
   background-color: var(--sidebar-active-bg);
   color: var(--sidebar-active-txt);
   border-left-color: var(--sidebar-stripe);
   font-weight: 600;
+}
+
+[data-theme="dark"] .nav-link.active {
+  box-shadow: inset 0 0 0 1px rgba(0, 255, 133, 0.12);
+}
+
+[data-theme="dark"] .nav-link.active .nav-icon {
+  text-shadow: 0 0 6px rgba(0, 255, 133, 0.55);
 }
 
 .nav-icon {
@@ -413,7 +341,7 @@ body {
 }
 
 .theme-toggle-btn:hover {
-  background: rgba(244,166,28,0.12);
+  background: var(--color-secondary-soft);
   color: var(--accent);
 }
 
@@ -451,7 +379,7 @@ body {
   justify-content: center;
   font-size: 0.8rem;
   font-weight: 700;
-  color: var(--primary);
+  color: var(--text-inverse);
   flex-shrink: 0;
 }
 
@@ -468,7 +396,7 @@ body {
 .sidebar-user-name {
   font-size: 0.825rem;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -503,6 +431,7 @@ body {
   height: var(--topnav-height);
   background-color: var(--topnav-bg);
   border-bottom: 1px solid var(--topnav-border);
+  transition: background-color var(--transition), border-color var(--transition);
   display: flex;
   align-items: center;
   padding: 0 24px;
@@ -581,7 +510,7 @@ body {
   right: 4px;
   width: 8px;
   height: 8px;
-  background: #ef4444;
+  background: var(--color-danger);
   border-radius: 50%;
   border: 2px solid var(--topnav-bg);
 }
@@ -603,15 +532,9 @@ body {
 }
 
 .logout-btn:hover {
-  background-color: #fee2e2;
-  border-color: #fca5a5;
-  color: #dc2626;
-}
-
-[data-theme="dark"] .logout-btn:hover {
-  background-color: rgba(220, 38, 38, 0.15);
-  border-color: rgba(220, 38, 38, 0.4);
-  color: #f87171;
+  background-color: var(--color-danger-soft);
+  border-color: var(--border-danger);
+  color: var(--color-danger);
 }
 
 /* ============================================================
@@ -642,12 +565,17 @@ body {
 /* ============================================================
    CARDS
    ============================================================ */
-.card {
+.card,
+.dashboard-panel {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: var(--radius);
   box-shadow: var(--card-shadow);
-  transition: background-color var(--transition), border-color var(--transition);
+  transition: background-color var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+
+[data-theme="dark"] .topnav {
+  box-shadow: 0 1px 0 rgba(0, 255, 133, 0.10);
 }
 
 .card-header-custom {
@@ -696,11 +624,11 @@ body {
   flex-shrink: 0;
 }
 
-.stat-icon.amber  { background: rgba(244,166,28,0.12); color: var(--accent); }
-.stat-icon.blue   { background: rgba(59,130,246,0.12); color: #3b82f6; }
-.stat-icon.green  { background: rgba(34,197,94,0.12);  color: #22c55e; }
-.stat-icon.red    { background: rgba(239,68,68,0.12);  color: #ef4444; }
-.stat-icon.purple { background: rgba(168,85,247,0.12); color: #a855f7; }
+.stat-icon.amber  { background: var(--color-secondary-soft); color: var(--color-secondary); }
+.stat-icon.blue   { background: var(--color-info-soft); color: var(--color-info); }
+.stat-icon.green  { background: var(--color-success-soft);  color: var(--color-success); }
+.stat-icon.red    { background: var(--color-danger-soft);  color: var(--color-danger); }
+.stat-icon.purple { background: var(--color-secondary-soft); color: var(--color-secondary-hover); }
 
 .stat-info .stat-value {
   font-size: 1.6rem;
@@ -733,7 +661,7 @@ body {
 .status-badge.deployed    { background: var(--badge-deployed);    color: var(--badge-deployed-t); }
 .status-badge.maintenance { background: var(--badge-maintenance); color: var(--badge-maintenance-t); }
 .status-badge.inactive    { background: var(--badge-inactive);    color: var(--badge-inactive-t); }
-.status-badge.late        { background: #fee2e2; color: #dc2626; }
+.status-badge.late        { background: var(--color-danger-soft); color: var(--color-danger); }
 .status-badge.on-time     { background: var(--badge-available);   color: var(--badge-available-t); }
 
 /* ============================================================
@@ -860,7 +788,7 @@ body {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  background: #ef4444;
+  background: var(--color-danger);
   border-radius: 8px;
   border: 2px solid var(--topnav-bg);
   font-size: 0.6rem;
@@ -936,8 +864,8 @@ body {
 }
 
 .ann-delete-btn:hover {
-  color: #dc2626;
-  background: rgba(220, 38, 38, 0.08);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
 }
 
 .ann-view-all {

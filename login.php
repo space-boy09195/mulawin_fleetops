@@ -35,30 +35,14 @@ $reasonMsg  = $messages['reason'][$_GET['reason'] ?? ''] ?? '';
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mulawin FleetOps — Login</title>
 
-  <!-- RPM Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
   <!-- Bootstrap 5 CDN -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <!-- Bootstrap Icons -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
-  <!-- Centralized RPM design tokens -->
-  <link rel="stylesheet" href="assets/css/theme-tokens.css">
   <!-- Custom Login CSS (separate file as required) -->
   <link rel="stylesheet" href="assets/css/login.css">
-  <script>
-    (function(){
-      var t = localStorage.getItem('mulawin_theme');
-      document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
-    })();
-  </script>
 </head>
 <body>
-
-<button type="button" id="loginThemeToggle" class="login-theme-toggle" title="Toggle RPM Identity / Grid Mode">
-  <i class="bi bi-moon-fill" id="loginThemeIcon"></i>
-</button>
 
 <div class="login-wrapper">
   <div class="login-card">
@@ -139,24 +123,6 @@ $reasonMsg  = $messages['reason'][$_GET['reason'] ?? ''] ?? '';
       </button>
 
     </form>
-
-    <script>
-      (function () {
-        var btn = document.getElementById('loginThemeToggle');
-        var icon = document.getElementById('loginThemeIcon');
-        function reflect(theme) {
-          icon.className = theme === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
-        }
-        reflect(document.documentElement.getAttribute('data-theme') || 'light');
-        btn.addEventListener('click', function () {
-          var current = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-          var next = current === 'dark' ? 'light' : 'dark';
-          document.documentElement.setAttribute('data-theme', next);
-          localStorage.setItem('mulawin_theme', next);
-          reflect(next);
-        });
-      })();
-    </script>
 
     <p class="login-footer-text">
       Mulawin FleetOps &copy; <?= date('Y') ?>

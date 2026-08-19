@@ -8,17 +8,17 @@
   align-items: center;
   gap: 10px;
   padding: 12px 18px;
-  background: var(--color-danger-soft);
-  border: 1px solid var(--border-danger);
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
   border-radius: var(--radius);
-  color: var(--color-danger);
+  color: #991b1b;
   font-size: 0.875rem;
 }
 
 [data-theme="dark"] .alert-banner {
   background: rgba(239, 68, 68, 0.12);
   border-color: rgba(239, 68, 68, 0.3);
-  color: var(--border-danger);
+  color: #fca5a5;
 }
 
 /* ---- Late row highlight ---------------------------------- */
@@ -43,7 +43,7 @@ tr.row-late td {
   display: inline-block;
   margin-left: 6px;
   padding: 1px 7px;
-  background: var(--color-danger);
+  background: #dc2626;
   color: #fff;
   border-radius: 10px;
   font-size: 0.65rem;
@@ -54,14 +54,14 @@ tr.row-late td {
 
 /* ---- Late filter button ---------------------------------- */
 .filter-btn.late-filter {
-  border-color: var(--border-danger);
-  color: var(--color-danger);
+  border-color: #fca5a5;
+  color: #dc2626;
 }
 
 .filter-btn.late-filter:hover,
 .filter-btn.late-filter.active {
-  background: var(--color-danger);
-  border-color: var(--color-danger);
+  background: #dc2626;
+  border-color: #dc2626;
   color: #fff;
 }
 
@@ -93,7 +93,7 @@ tr.hidden-row { display: none; }
 }
 
 .filter-btn:hover  { border-color: var(--accent); color: var(--accent); }
-.filter-btn.active { background: var(--accent); border-color: var(--accent); color: var(--text-inverse); font-weight: 600; }
+.filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 
 /* ── No filtered results ──────────────────────── */
 .no-results {

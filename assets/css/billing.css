@@ -30,9 +30,9 @@
 
 /* ── Buttons ─────────────────────────────────── */
 .btn-bil-primary {
-  background: var(--color-primary);
+  background: #0d6efd;
   border: none;
-  color: var(--text-inverse);
+  color: #fff;
   font-weight: 600;
   font-size: 0.875rem;
   padding: 0.5rem 1.1rem;
@@ -42,15 +42,15 @@
 
 .btn-bil-primary:hover,
 .btn-bil-primary:focus {
-  background: var(--color-primary-hover);
-  color: var(--text-inverse);
+  background: #0b5ed7;
+  color: #fff;
   box-shadow: 0 2px 8px rgba(13,110,253,0.35);
 }
 
 .btn-bil-success {
-  background: var(--color-success);
+  background: #198754;
   border: none;
-  color: var(--text-inverse);
+  color: #fff;
   font-weight: 600;
   font-size: 0.875rem;
   padding: 0.45rem 1.1rem;
@@ -60,8 +60,8 @@
 
 .btn-bil-success:hover,
 .btn-bil-success:focus {
-  background: var(--color-success-hover);
-  color: var(--text-inverse);
+  background: #146c43;
+  color: #fff;
 }
 
 .btn-bil-cancel {
@@ -82,8 +82,8 @@
 
 .btn-bil-collect {
   background: transparent;
-  border: 1.5px solid var(--color-success);
-  color: var(--color-success);
+  border: 1.5px solid #198754;
+  color: #198754;
   font-size: 0.78rem;
   font-weight: 600;
   padding: 3px 10px;
@@ -94,8 +94,8 @@
 
 .btn-bil-collect:hover,
 .btn-bil-collect:focus {
-  background: var(--color-success);
-  color: var(--text-inverse);
+  background: #198754;
+  color: #fff;
 }
 
 /* ── Summary cards ───────────────────────────── */
@@ -114,17 +114,17 @@
 }
 
 .bil-card-success {
-  border-color: var(--color-success)40;
+  border-color: #19875440;
   background: rgba(25,135,84,0.03);
 }
 
 .bil-card-alert {
-  border-color: var(--color-danger)40;
+  border-color: #dc354540;
   background: rgba(220,53,69,0.03);
 }
 
 .bil-card-warn {
-  border-color: var(--color-warning)40;
+  border-color: #ffc10740;
   background: rgba(255,193,7,0.04);
 }
 
@@ -138,9 +138,9 @@
   word-break: break-all;
 }
 
-.bil-card-success .bil-card-value { color: var(--color-success); }
-.bil-card-alert   .bil-card-value { color: var(--color-danger); }
-.bil-card-warn    .bil-card-value { color: var(--color-warning-text); }
+.bil-card-success .bil-card-value { color: #198754; }
+.bil-card-alert   .bil-card-value { color: #dc3545; }
+.bil-card-warn    .bil-card-value { color: #856404; }
 
 .bil-card-label {
   font-size: 0.78rem;
@@ -176,8 +176,8 @@
 .bil-tab:hover { color: var(--bs-body-color); }
 
 .bil-tab.active {
-  color: var(--color-primary);
-  border-bottom-color: var(--color-primary);
+  color: #0d6efd;
+  border-bottom-color: #0d6efd;
 }
 
 .bil-tab-count {
@@ -196,7 +196,7 @@
 
 .bil-tab.active .bil-tab-count {
   background: rgba(13,110,253,0.12);
-  color: var(--color-primary);
+  color: #0d6efd;
 }
 
 /* ── Filters ─────────────────────────────────── */
@@ -278,22 +278,22 @@
 }
 
 .bil-balance-due {
-  color: var(--color-danger);
+  color: #dc3545;
   font-weight: 700;
 }
 
-.bil-paid-amount { color: var(--color-success); font-weight: 700; }
+.bil-paid-amount { color: #198754; font-weight: 700; }
 
 .bil-date { white-space: nowrap; font-size: 0.8rem; color: var(--bs-secondary-color); }
 
-.bil-overdue { color: var(--color-danger) !important; font-weight: 600; }
+.bil-overdue { color: #dc3545 !important; font-weight: 600; }
 
 .bil-overdue-badge {
   display: inline-block;
   font-size: 0.68rem;
   font-weight: 700;
   background: rgba(220,53,69,0.12);
-  color: var(--color-danger-hover);
+  color: #b02a37;
   padding: 1px 6px;
   border-radius: 4px;
   margin-left: 4px;
@@ -326,9 +326,9 @@
   white-space: nowrap;
 }
 
-.bil-status-unpaid  { background: rgba(220,53,69,0.1);  color: var(--color-danger-hover); }
-.bil-status-partial { background: rgba(255,193,7,0.15); color: var(--color-warning-text); }
-.bil-status-paid    { background: rgba(25,135,84,0.1);  color: var(--color-success-hover); }
+.bil-status-unpaid  { background: rgba(220,53,69,0.1);  color: #b02a37; }
+.bil-status-partial { background: rgba(255,193,7,0.15); color: #856404; }
+.bil-status-paid    { background: rgba(25,135,84,0.1);  color: #146c43; }
 
 /* ── Payment mode badge ──────────────────────── */
 .bil-mode-badge {
@@ -379,15 +379,15 @@
 }
 
 .bil-modal-header-primary {
-  background: var(--color-primary);
-  color: var(--text-inverse);
+  background: #0d6efd;
+  color: #fff;
   border-bottom: none;
   padding: 1rem 1.25rem;
 }
 
 .bil-modal-header-success {
-  background: var(--color-success);
-  color: var(--text-inverse);
+  background: #198754;
+  color: #fff;
   border-bottom: none;
   padding: 1rem 1.25rem;
 }
@@ -430,7 +430,7 @@
 }
 
 .bil-input:focus {
-  border-color: var(--color-primary);
+  border-color: #0d6efd;
   box-shadow: 0 0 0 3px rgba(13,110,253,0.15);
 }
 
@@ -467,7 +467,7 @@ textarea.bil-input { resize: vertical; min-height: 70px; }
   align-items: center;
   gap: 6px;
   font-size: 0.8rem;
-  color: var(--color-primary-hover);
+  color: #0a58ca;
   background: rgba(13,110,253,0.08);
   border: 1px solid rgba(13,110,253,0.2);
   border-radius: 8px;

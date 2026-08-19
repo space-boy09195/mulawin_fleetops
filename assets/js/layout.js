@@ -24,10 +24,10 @@
     if (themeIcon && themeLabel) {
       if (theme === THEMES.dark) {
         themeIcon.className  = 'bi bi-sun-fill toggle-icon';
-        themeLabel.textContent = 'RPM Identity Mode';
+        themeLabel.textContent = 'Light Mode';
       } else {
         themeIcon.className  = 'bi bi-moon-fill toggle-icon';
-        themeLabel.textContent = 'RPM Grid Mode';
+        themeLabel.textContent = 'Dark Mode';
       }
     }
   }
@@ -137,7 +137,9 @@
 
   // Prevent flash of wrong theme — run immediately before DOM ready
   const savedThemeEarly = localStorage.getItem(THEME_KEY);
-  document.documentElement.setAttribute('data-theme', savedThemeEarly === 'dark' ? 'dark' : 'light');
+  if (savedThemeEarly === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  }
 
 })();
 

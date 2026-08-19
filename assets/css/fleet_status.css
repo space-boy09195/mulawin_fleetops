@@ -24,7 +24,7 @@
 .filter-btn.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--text-inverse);
+  color: #ffffff;
   font-weight: 600;
 }
 
@@ -47,21 +47,21 @@
 }
 
 .fleet-modal-header-add {
-  background: var(--color-success);
-  color: var(--text-inverse);
+  background: #198754;
+  color: #fff;
   border-bottom: none;
   padding: .9rem 1.25rem;
 }
 
 .fleet-modal-header-edit {
-  background: var(--color-primary);
-  color: var(--text-inverse);
+  background: #0d6efd;
+  color: #fff;
   border-bottom: none;
   padding: .9rem 1.25rem;
 }
 
 .fleet-modal-header-status {
-  background: var(--text-muted);
+  background: #6c757d;
   color: #fff;
   border-bottom: none;
   padding: .9rem 1.25rem;

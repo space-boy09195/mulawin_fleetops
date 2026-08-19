@@ -27,17 +27,17 @@
 }
 
 .ann-severity-high {
-  color: var(--color-danger-hover);
+  color: #b02a37;
   background: rgba(220,53,69,0.12);
 }
 
 .ann-severity-medium {
-  color: var(--color-secondary-hover);
+  color: #9a5500;
   background: rgba(230,126,0,0.14);
 }
 
 .ann-severity-low {
-  color: var(--color-success-hover);
+  color: #146c43;
   background: rgba(25,135,84,0.12);
 }
 
@@ -67,23 +67,23 @@
 
 .ann-severity-option-high:has(input:checked),
 .ann-severity-option-high.ann-severity-option-selected {
-  border-color: var(--color-danger);
+  border-color: #dc3545;
   background: rgba(220,53,69,0.1);
-  color: var(--color-danger-hover);
+  color: #b02a37;
 }
 
 .ann-severity-option-medium:has(input:checked),
 .ann-severity-option-medium.ann-severity-option-selected {
-  border-color: var(--color-secondary-hover);
+  border-color: #e67e00;
   background: rgba(230,126,0,0.12);
-  color: var(--color-secondary-hover);
+  color: #9a5500;
 }
 
 .ann-severity-option-low:has(input:checked),
 .ann-severity-option-low.ann-severity-option-selected {
-  border-color: var(--color-success);
+  border-color: #198754;
   background: rgba(25,135,84,0.1);
-  color: var(--color-success-hover);
+  color: #146c43;
 }
 
 .ann-full-title {
@@ -118,9 +118,9 @@
 }
 
 .ann-delete-btn:hover {
-  color: var(--color-danger);
+  color: #dc2626;
   background: rgba(220,38,38,0.08);
-  border-color: var(--border-danger);
+  border-color: #fca5a5;
 }
 
 .ann-edit-btn {

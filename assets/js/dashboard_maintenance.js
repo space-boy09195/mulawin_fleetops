@@ -3,11 +3,11 @@
   const D = window.DASH_DATA;
   if (!D) return;
 
-  const isDark    = document.documentElement.getAttribute('data-theme') === 'dark';
+  const isDark    = document.documentElement.getAttribute('data-bs-theme') === 'dark';
   const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
-  const textColor = isDark ? '#7F9487' : '#5F6D64';
-  const tooltipBg = isDark ? '#0D2112' : '#FFFFFF';
-  const tooltipBrd = isDark ? 'rgba(0,255,133,0.18)' : '#D6DED7';
+  const textColor = isDark ? '#a0aec0' : '#6c757d';
+  const tooltipBg = isDark ? '#1e2d3d' : '#fff';
+  const tooltipBrd = isDark ? '#2d4058' : '#dee2e6';
 
   Chart.defaults.font.family = "'Inter','Segoe UI',system-ui,sans-serif";
 
@@ -21,7 +21,7 @@
         datasets: [{
           data: D.donut.data,
           backgroundColor: D.donut.colors,
-          borderColor: isDark ? '#0A1B0E' : '#FFFFFF',
+          borderColor: isDark ? '#152236' : '#fff',
           borderWidth: 3,
           hoverOffset: 6,
         }]
@@ -38,7 +38,7 @@
           },
           tooltip: {
             backgroundColor: tooltipBg, borderColor: tooltipBrd, borderWidth: 1,
-            titleColor: isDark ? '#F1FFF6' : '#172019', bodyColor: textColor, padding: 10,
+            titleColor: isDark ? '#e2e8f0' : '#212529', bodyColor: textColor, padding: 10,
           }
         }
       }
@@ -56,7 +56,7 @@
           label: 'Cost (₱)',
           data: D.cost.data,
           backgroundColor: 'rgba(253,126,20,0.75)',
-          borderColor: (isDark ? '#FFB800' : '#A87916'),
+          borderColor: '#fd7e14',
           borderWidth: 1.5,
           borderRadius: 6,
           borderSkipped: false,
@@ -69,7 +69,7 @@
           legend: { display: false },
           tooltip: {
             backgroundColor: tooltipBg, borderColor: tooltipBrd, borderWidth: 1,
-            titleColor: isDark ? '#F1FFF6' : '#172019', bodyColor: textColor, padding: 10,
+            titleColor: isDark ? '#e2e8f0' : '#212529', bodyColor: textColor, padding: 10,
             callbacks: { label: ctx => ` ₱${ctx.parsed.y.toLocaleString()}` }
           }
         },

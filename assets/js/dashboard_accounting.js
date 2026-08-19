@@ -3,11 +3,11 @@
   const D = window.DASH_DATA;
   if (!D) return;
 
-  const isDark    = document.documentElement.getAttribute('data-theme') === 'dark';
+  const isDark    = document.documentElement.getAttribute('data-bs-theme') === 'dark';
   const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
-  const textColor = isDark ? '#7F9487' : '#5F6D64';
-  const tooltipBg = isDark ? '#0D2112' : '#FFFFFF';
-  const tooltipBrd = isDark ? 'rgba(0,255,133,0.18)' : '#D6DED7';
+  const textColor = isDark ? '#a0aec0' : '#6c757d';
+  const tooltipBg = isDark ? '#1e2d3d' : '#fff';
+  const tooltipBrd = isDark ? '#2d4058' : '#dee2e6';
 
   Chart.defaults.font.family = "'Inter','Segoe UI',system-ui,sans-serif";
 
@@ -23,7 +23,7 @@
             label: 'Billed',
             data: D.monthly.billed.map(v => +(v / 1000).toFixed(2)),
             backgroundColor: 'rgba(13,110,253,0.75)',
-            borderColor: (isDark ? '#00D9FF' : '#276B62'),
+            borderColor: '#0d6efd',
             borderWidth: 1.5,
             borderRadius: 5,
             borderSkipped: false,
@@ -32,7 +32,7 @@
             label: 'Collected',
             data: D.monthly.collected.map(v => +(v / 1000).toFixed(2)),
             backgroundColor: 'rgba(25,135,84,0.75)',
-            borderColor: (isDark ? '#00FF85' : '#197A46'),
+            borderColor: '#198754',
             borderWidth: 1.5,
             borderRadius: 5,
             borderSkipped: false,
@@ -50,7 +50,7 @@
           },
           tooltip: {
             backgroundColor: tooltipBg, borderColor: tooltipBrd, borderWidth: 1,
-            titleColor: isDark ? '#F1FFF6' : '#172019', bodyColor: textColor, padding: 10,
+            titleColor: isDark ? '#e2e8f0' : '#212529', bodyColor: textColor, padding: 10,
             callbacks: { label: ctx => ` ${ctx.dataset.label}: ₱${ctx.parsed.y}K` }
           }
         },
@@ -75,10 +75,10 @@
         datasets: [{
           label: 'Collection Rate',
           data: D.rate.data,
-          borderColor: (isDark ? '#00FF85' : '#197A46'),
+          borderColor: '#198754',
           backgroundColor: 'rgba(25,135,84,0.08)',
           borderWidth: 2.5,
-          pointBackgroundColor: (isDark ? '#00FF85' : '#197A46'),
+          pointBackgroundColor: '#198754',
           pointRadius: 5,
           pointHoverRadius: 7,
           tension: 0.3,
@@ -93,7 +93,7 @@
           legend: { display: false },
           tooltip: {
             backgroundColor: tooltipBg, borderColor: tooltipBrd, borderWidth: 1,
-            titleColor: isDark ? '#F1FFF6' : '#172019', bodyColor: textColor, padding: 10,
+            titleColor: isDark ? '#e2e8f0' : '#212529', bodyColor: textColor, padding: 10,
             callbacks: { label: ctx => ` ${ctx.parsed.y}%` }
           }
         },

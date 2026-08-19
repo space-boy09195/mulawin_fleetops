@@ -34,8 +34,18 @@
 #fleetTable td:first-child { font-size: 0.9rem; }
 
 /* ---- No results / row count ------------------------------ */
-#noResults { display:none; padding:32px; text-align:center; color:var(--text-muted); font-size:.9rem; }
-#rowCount  { font-size:.78rem; color:var(--text-muted); }
+#noResults { 
+  display:none; 
+  padding:32px; 
+  text-align:center; 
+  color:var(--text-muted); 
+  font-size:.9rem; 
+}
+
+#rowCount  { 
+  font-size:.78rem; 
+  color:var(--text-muted); 
+}
 
 /* ---- Modals ---------------------------------------------- */
 .fleet-modal {

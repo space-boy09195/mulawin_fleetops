@@ -92,8 +92,16 @@ tr.hidden-row { display: none; }
   white-space: nowrap;
 }
 
-.filter-btn:hover  { border-color: var(--accent); color: var(--accent); }
-.filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.filter-btn:hover  { 
+  border-color: var(--accent); 
+  color: var(--accent); 
+}
+
+.filter-btn.active { 
+  background: var(--accent); 
+  border-color: var(--accent); 
+  color: #fff; font-weight: 600;
+}
 
 /* ── No filtered results ──────────────────────── */
 .no-results {

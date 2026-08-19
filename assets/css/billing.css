@@ -282,11 +282,21 @@
   font-weight: 700;
 }
 
-.bil-paid-amount { color: #198754; font-weight: 700; }
+.bil-paid-amount { 
+  color: #198754; 
+  font-weight: 700; 
+}
 
-.bil-date { white-space: nowrap; font-size: 0.8rem; color: var(--bs-secondary-color); }
+.bil-date { 
+  white-space: nowrap; 
+  font-size: 0.8rem; 
+  color: var(--bs-secondary-color); 
+}
 
-.bil-overdue { color: #dc3545 !important; font-weight: 600; }
+.bil-overdue { 
+  color: #dc3545 !important; 
+  font-weight: 600; 
+}
 
 .bil-overdue-badge {
   display: inline-block;
@@ -300,7 +310,11 @@
   text-transform: uppercase;
 }
 
-.bil-ref { font-family: 'Courier New', monospace; font-size: 0.8rem; color: var(--bs-secondary-color); }
+.bil-ref { 
+  font-family: 'Courier New', monospace; 
+  font-size: 0.8rem; 
+  color: var(--bs-secondary-color); 
+}
 
 .bil-desc-cell { max-width: 200px; }
 .bil-desc-text {

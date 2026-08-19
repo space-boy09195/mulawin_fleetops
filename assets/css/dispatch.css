@@ -15,8 +15,17 @@
   transition: all 0.15s ease;
   white-space: nowrap;
 }
-.filter-btn:hover  { border-color: var(--accent); color: var(--accent); }
-.filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.filter-btn:hover  { 
+  border-color: var(--accent); 
+  color: var(--accent); 
+}
+
+.filter-btn.active { 
+  background: var(--accent); 
+  border-color: var(--accent); 
+  color: #fff; 
+  font-weight: 600; 
+}
 
 /* ── Hidden rows ─────────────────────────────────────────────── */
 tr.hidden-row { display: none; }
@@ -151,9 +160,19 @@ tr.hidden-row { display: none; }
 }
 
 /* ── Dark mode fixes ─────────────────────────────────────────── */
-[data-theme="dark"] .btn-close      { filter: invert(1); }
-[data-theme="dark"] .disp-input     { background-color: var(--card-bg); color: var(--text-primary); border-color: var(--card-border); }
-[data-theme="dark"] .disp-input:focus { background-color: var(--card-bg); }
+[data-theme="dark"] .btn-close      { 
+  filter: invert(1); 
+}
+
+[data-theme="dark"] .disp-input     { 
+  background-color: var(--card-bg); 
+  color: var(--text-primary); 
+  border-color: var(--card-border); 
+}
+
+[data-theme="dark"] .disp-input:focus { 
+  background-color: var(--card-bg); 
+}
 
 /* ── Route table helper ──────────────────────────────────────── */
 #routesTable .fw-600 { font-weight: 600; }

@@ -4,11 +4,14 @@
 // Database connection using PDO (safer than mysqli)
 // ============================================================
 
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'mulawin_fleetops');
-define('DB_USER', 'root');       // Change to your XAMPP MySQL username
-define('DB_PASS', '');           // Change to your XAMPP MySQL password
-define('DB_CHARSET', 'utf8mb4');
+require_once __DIR__ . '/../includes/env.php';
+loadEnv();
+
+define('DB_HOST', env('DB_HOST', 'localhost'));
+define('DB_NAME', env('DB_NAME', 'mulawin_fleetops'));
+define('DB_USER', env('DB_USER', 'root'));
+define('DB_PASS', env('DB_PASS', ''));
+define('DB_CHARSET', env('DB_CHARSET', 'utf8mb4'));
 
 function getDBConnection(): PDO {
     static $pdo = null;

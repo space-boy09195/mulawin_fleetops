@@ -6,15 +6,17 @@
 
 /* ---- CSS Variables: Light Mode (default) ----------------- */
 :root {
-  /* Sidebar — stays dark regardless of mode, it's a fixed brand element */
-  --sidebar-bg:        #1a2e4a;
-  --sidebar-text:      #b8cfe0;
-  --sidebar-text-muted:#5a7a96;
-  --sidebar-hover-bg:  rgba(244, 166, 28, 0.10);
-  --sidebar-active-bg: rgba(244, 166, 28, 0.15);
-  --sidebar-active-txt:#f4a61c;
-  --sidebar-stripe:    #f4a61c;
-  --sidebar-border:    rgba(255,255,255,0.07);
+  /* Sidebar — premium forest-green treatment to match the login page */
+  --sidebar-bg:        linear-gradient(180deg, #0d341f 0%, #0c2f1a 100%);
+  --sidebar-panel:     rgba(255,255,255,0.04);
+  --sidebar-text:      #eef5ef;
+  --sidebar-text-muted:#afc4b1;
+  --sidebar-hover-bg:  rgba(217, 155, 0, 0.12);
+  --sidebar-active-bg: rgba(217, 155, 0, 0.18);
+  --sidebar-active-txt:#f9d267;
+  --sidebar-stripe:    #D99B00;
+  --sidebar-border:    rgba(255,255,255,0.09);
+  --sidebar-shadow:    10px 0 30px rgba(9, 25, 17, 0.18);
   --sidebar-width:     260px;
   --sidebar-collapsed: 68px;
 
@@ -36,14 +38,14 @@
   --text-muted:        #94a3b8;
 
   /* Brand accent */
-  --accent:            #f4a61c;
-  --accent-dark:       #d4880e;
-  --primary:           #1a2e4a;
+  --accent:            #D99B00;
+  --accent-dark:       #b77f00;
+  --primary:           #0C3B1E;
 
   /* Input / form surfaces */
   --input-bg:          #ffffff;
   --input-border:      #cbd5e1;
-  --input-focus:       rgba(244,166,28,0.25);
+  --input-focus:       rgba(217,155,0,0.25);
 
   /* Status badges — light mode */
   --badge-available:   #dcfce7;
@@ -62,13 +64,14 @@
 
 /* ---- CSS Variables: Dark Mode ---------------------------- */
 [data-theme="dark"] {
-  /* Sidebar — slightly lighter than content so it reads as a distinct panel */
-  --sidebar-bg:        #0d1f35;
-  --sidebar-text:      #8faec8;
-  --sidebar-text-muted:#3d5a74;
-  --sidebar-hover-bg:  rgba(244, 166, 28, 0.08);
-  --sidebar-active-bg: rgba(244, 166, 28, 0.12);
-  --sidebar-border:    rgba(255,255,255,0.05);
+  /* Sidebar — stays dark, but uses the same green/gold identity */
+  --sidebar-bg:        linear-gradient(180deg, #081f12 0%, #0d2d1c 100%);
+  --sidebar-panel:     rgba(255,255,255,0.04);
+  --sidebar-text:      #edf7ee;
+  --sidebar-text-muted:#b1c8b5;
+  --sidebar-hover-bg:  rgba(217, 155, 0, 0.12);
+  --sidebar-active-bg: rgba(217, 155, 0, 0.18);
+  --sidebar-border:    rgba(255,255,255,0.06);
 
   /* Topnav — one step lighter than content bg */
   --topnav-bg:         #152236;
@@ -89,7 +92,7 @@
   /* Input / form surfaces */
   --input-bg:          #1a2e46;
   --input-border:      #1e3550;
-  --input-focus:       rgba(244,166,28,0.20);
+  --input-focus:       rgba(217,155,0,0.20);
 
   /* Status badges — dark mode: keep readable contrast */
   --badge-available:   #052e16;
@@ -186,7 +189,7 @@ body {
 .sidebar {
   width: var(--sidebar-width);
   min-height: 100vh;
-  background-color: var(--sidebar-bg);
+  background: var(--sidebar-bg);
   display: flex;
   flex-direction: column;
   position: fixed;
@@ -195,6 +198,8 @@ body {
   z-index: 1000;
   transition: width var(--transition), background-color var(--transition);
   overflow: hidden;
+  box-shadow: var(--sidebar-shadow);
+  border-right: 1px solid var(--sidebar-border);
 }
 
 /* Collapsed state — icon-only */
@@ -211,19 +216,21 @@ body {
   border-bottom: 1px solid var(--sidebar-border);
   min-height: var(--topnav-height);
   overflow: hidden;
+  background: rgba(255,255,255,0.02);
 }
 
 .sidebar-brand-icon {
-  width: 36px;
-  height: 36px;
-  background: var(--accent);
-  border-radius: 8px;
+  width: 38px;
+  height: 38px;
+  background: linear-gradient(135deg, var(--accent), #f0be50);
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   color: var(--primary);
-  font-size: 1.1rem;
+  font-size: 1.15rem;
+  box-shadow: 0 10px 20px rgba(217, 155, 0, 0.26);
 }
 
 .sidebar-brand-text {
@@ -236,6 +243,7 @@ body {
   font-weight: 700;
   color: #ffffff;
   line-height: 1.2;
+  letter-spacing: 0.02em;
 }
 
 .sidebar-brand-text .brand-sub {
@@ -246,11 +254,11 @@ body {
 /* ---- Sidebar Nav ----------------------------------------- */
 .sidebar-nav {
   flex: 1;
-  padding: 12px 0;
+  padding: 16px 12px 12px;
   overflow-y: auto;
   overflow-x: hidden;
 }
- 
+  
 /* Webkit scrollbar (Chrome, Edge, Safari, Samsung Internet) */
 .sidebar-nav::-webkit-scrollbar {
   width: 4px;
@@ -259,14 +267,14 @@ body {
   background: transparent;
 }
 .sidebar-nav::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.12);
   border-radius: 4px;
 }
 /* Firefox only — intentionally not cross-browser */
 @supports (scrollbar-width: thin) {
   .sidebar-nav {
     scrollbar-width: thin;
-    scrollbar-color: rgba(255,255,255,0.1) transparent;
+    scrollbar-color: rgba(255,255,255,0.12) transparent;
   }
 }
 
@@ -275,7 +283,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 18px 4px;
+  padding: 10px 14px 6px;
   cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
@@ -337,36 +345,40 @@ body {
 .nav-item {
   position: relative;
   list-style: none;
+  margin-bottom: 4px;
 }
 
 .nav-link {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 18px;
+  padding: 11px 12px;
   color: var(--sidebar-text);
   text-decoration: none;
   white-space: nowrap;
   border-left: 3px solid transparent;
-  transition: background-color var(--transition), color var(--transition), border-color var(--transition);
+  border-radius: 12px;
+  transition: background-color var(--transition), color var(--transition), border-color var(--transition), transform var(--transition);
   cursor: pointer;
 }
 
 .nav-link:hover {
-  background-color: var(--sidebar-hover-bg);
+  background: rgba(255,255,255,0.04);
   color: #ffffff;
+  transform: translateX(2px);
 }
 
 /* Active — the amber road-stripe signature */
 .nav-link.active {
-  background-color: var(--sidebar-active-bg);
+  background: linear-gradient(90deg, rgba(217, 155, 0, 0.2), rgba(217, 155, 0, 0.08));
   color: var(--sidebar-active-txt);
   border-left-color: var(--sidebar-stripe);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
   font-weight: 600;
 }
 
 .nav-icon {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   flex-shrink: 0;
   width: 20px;
   text-align: center;
@@ -392,7 +404,8 @@ body {
 /* ---- Sidebar Footer (theme toggle + user info) ----------- */
 .sidebar-footer {
   border-top: 1px solid var(--sidebar-border);
-  padding: 12px 16px;
+  padding: 12px 16px 14px;
+  background: rgba(255,255,255,0.02);
 }
 
 .theme-toggle-btn {
@@ -401,19 +414,20 @@ body {
   gap: 10px;
   width: 100%;
   padding: 8px 10px;
-  background: var(--sidebar-hover-bg);
+  background: rgba(255,255,255,0.03);
   border: 1px solid var(--sidebar-border);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--sidebar-text);
   font-size: 0.825rem;
   cursor: pointer;
-  transition: background-color var(--transition), color var(--transition);
+  transition: background-color var(--transition), color var(--transition), border-color var(--transition);
   white-space: nowrap;
   overflow: hidden;
 }
 
 .theme-toggle-btn:hover {
-  background: rgba(244,166,28,0.12);
+  background: rgba(217, 155, 0, 0.12);
+  border-color: rgba(217, 155, 0, 0.2);
   color: var(--accent);
 }
 
@@ -444,7 +458,7 @@ body {
 .sidebar-avatar {
   width: 32px;
   height: 32px;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), #f2c35d);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -453,6 +467,7 @@ body {
   font-weight: 700;
   color: var(--primary);
   flex-shrink: 0;
+  box-shadow: 0 8px 18px rgba(217, 155, 0, 0.22);
 }
 
 .sidebar-user-info {

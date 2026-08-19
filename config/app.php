@@ -4,18 +4,18 @@
 // App-wide constants — session, security, RBAC role IDs
 // ============================================================
 
+require_once __DIR__ . '/../includes/env.php';
+loadEnv();
+
 // ---- Base path ---------------------------------------------
-// The subfolder name your project lives in under htdocs.
-// If your folder is htdocs/mulawin_fleetops/ this stays as-is.
-// If you rename the folder, change only this one line.
-define('APP_BASE', '/mulawin_fleetops');
+define('APP_BASE', env('APP_BASE', '/mulawin_fleetops'));
 
 // ---- Session -----------------------------------------------
-define('SESSION_NAME',    'mulawin_session');
-define('SESSION_TIMEOUT', 1800);   // 30 minutes idle timeout (seconds)
+define('SESSION_NAME',    env('SESSION_NAME', 'mulawin_session'));
+define('SESSION_TIMEOUT', (int) env('SESSION_TIMEOUT', 1800));
 
 // ---- CSRF --------------------------------------------------
-define('CSRF_TOKEN_NAME', 'csrf_token');
+define('CSRF_TOKEN_NAME', env('CSRF_TOKEN_NAME', 'csrf_token'));
 
 // ---- Role IDs (must match roles table in DB) ---------------
 define('ROLE_HEAD_MANAGEMENT', 1);

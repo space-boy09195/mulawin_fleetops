@@ -4,6 +4,7 @@
 // ============================================================
 require_once __DIR__ . '/includes/session.php';
 require_once __DIR__ . '/includes/csrf.php';
+require_once __DIR__ . '/includes/env.php';
 
 // Already logged in? Send to dashboard
 if (isLoggedIn()) {
@@ -27,6 +28,57 @@ $messages = [
 
 $errorMsg   = $messages['error'][$_GET['error'] ?? ''] ?? '';
 $reasonMsg  = $messages['reason'][$_GET['reason'] ?? ''] ?? '';
+
+// ---- Dynamic employee access data with safe DB fallback --------
+$systemStatus = [
+    'state' => 'ready',
+    'label' => 'Secure Access',
+    'title' => 'Employee sign-in portal',
+    'message' => 'Use your work credentials to access the Mulawin FleetOps system with secure account protection.',
+    'stats' => [
+        ['label' => 'Active departments', 'value' => 3],
+        ['label' => 'Employees logged in', 'value' => 24],
+        ['label' => 'Access roles', 'value' => 4],
+    ],
+];
+
+try {
+    loadEnv();
+
+    $dbHost = env('DB_HOST', 'localhost');
+    $dbName = env('DB_NAME', 'mulawin_fleetops');
+    $dbUser = env('DB_USER', 'root');
+    $dbPass = env('DB_PASS', '');
+    $dbCharset = env('DB_CHARSET', 'utf8mb4');
+
+    $dsn = "mysql:host={$dbHost};dbname={$dbName};charset={$dbCharset}";
+    $pdo = new PDO($dsn, $dbUser, $dbPass, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+
+    $activeRoles = (int)$pdo->query("SELECT COUNT(*) FROM roles WHERE role_name <> 'Head Management'")->fetchColumn();
+    $activeUsers = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE is_active = 1 AND role_id <> (SELECT role_id FROM roles WHERE role_name = 'Head Management')")->fetchColumn();
+    $rolesCount = (int)$pdo->query("SELECT COUNT(*) FROM roles")->fetchColumn();
+
+    $systemStatus['stats'] = [
+        ['label' => 'Active departments', 'value' => $activeRoles],
+        ['label' => 'Employees logged in', 'value' => max(1, $activeUsers)],
+        ['label' => 'Access roles', 'value' => $rolesCount],
+    ];
+
+    if ($activeUsers === 0) {
+        $systemStatus['state'] = 'warning';
+        $systemStatus['label'] = 'Review Access';
+        $systemStatus['title'] = 'Access review required';
+        $systemStatus['message'] = 'No active department staff accounts are available right now. Please review access credentials before continuing.';
+    }
+} catch (Throwable $e) {
+    error_log('Login employee status fallback used: ' . $e->getMessage());
+}
+
+$statusClass = 'status-pill--' . $systemStatus['state'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -44,19 +96,50 @@ $reasonMsg  = $messages['reason'][$_GET['reason'] ?? ''] ?? '';
 </head>
 <body>
 
-<div class="login-wrapper">
-  <div class="login-card">
+<div class="login-shell">
+  <aside class="login-visual" aria-label="Fleet operations overview">
+    <div class="visual-topbar">
+      <span class="status-pill <?= htmlspecialchars($statusClass) ?>"><?= htmlspecialchars($systemStatus['label']) ?></span>
+    </div>
 
-    <!-- Logo / Brand -->
-    <div class="login-brand">
+    <div class="visual-brand">
       <div class="brand-icon">
         <i class="bi bi-truck-front-fill"></i>
       </div>
-      <h1 class="brand-name">Mulawin FleetOps</h1>
-      <p class="brand-sub">RP Mulawin Trucking Services</p>
+      <div>
+        <p class="eyebrow">Employee access</p>
+        <h2>Mulawin FleetOps</h2>
+      </div>
     </div>
 
-    <!-- Status Messages -->
+    <div class="visual-copy">
+      <div class="visual-message-card">
+        <span class="message-label">System status</span>
+        <h3><?= htmlspecialchars($systemStatus['title']) ?></h3>
+        <p><?= htmlspecialchars($systemStatus['message']) ?></p>
+      </div>
+    </div>
+
+    <div class="visual-stats" aria-label="Fleet metrics">
+      <?php foreach ($systemStatus['stats'] as $stat): ?>
+        <div class="stat-card">
+          <span class="stat-label"><?= htmlspecialchars($stat['label']) ?></span>
+          <strong><?= htmlspecialchars($stat['value']) ?></strong>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  </aside>
+
+  <div class="login-card">
+
+    <div class="login-brand">
+      <div class="brand-icon brand-icon--compact">
+        <i class="bi bi-truck-front-fill"></i>
+      </div>
+      <h1 class="brand-name">Welcome back</h1>
+      <p class="brand-sub">Sign in to your dashboard</p>
+    </div>
+
     <?php if ($errorMsg): ?>
       <div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
         <i class="bi bi-exclamation-triangle-fill"></i>
@@ -71,11 +154,7 @@ $reasonMsg  = $messages['reason'][$_GET['reason'] ?? ''] ?? '';
       </div>
     <?php endif; ?>
 
-    <!-- Login Form -->
-    <!-- Action points to auth/login_handler.php — NOT this file -->
     <form method="POST" action="auth/login_handler.php" id="loginForm" novalidate>
-
-      <!-- CSRF hidden token — always include in every form -->
       <?= csrfInput() ?>
 
       <div class="mb-3">
@@ -108,8 +187,7 @@ $reasonMsg  = $messages['reason'][$_GET['reason'] ?? ''] ?? '';
             autocomplete="current-password"
             required
           >
-          <!-- Toggle password visibility — handled in login.js -->
-          <button class="btn btn-outline-secondary" type="button" id="togglePassword" tabindex="-1">
+          <button class="btn btn-outline-secondary" type="button" id="togglePassword" tabindex="-1" aria-label="Show or hide password">
             <i class="bi bi-eye-slash" id="toggleIcon"></i>
           </button>
         </div>
@@ -121,13 +199,11 @@ $reasonMsg  = $messages['reason'][$_GET['reason'] ?? ''] ?? '';
           <span class="spinner-border spinner-border-sm me-1" role="status"></span> Signing in...
         </span>
       </button>
-
     </form>
 
     <p class="login-footer-text">
       Mulawin FleetOps &copy; <?= date('Y') ?>
     </p>
-
   </div>
 </div>
 

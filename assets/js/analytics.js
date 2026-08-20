@@ -8,15 +8,52 @@
   const D = window.ANALYTICS_DATA;
   if (!D) return;
 
-  const isDark    = document.documentElement.getAttribute('data-bs-theme') === 'dark';
-  const gridColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
-  const textColor = isDark ? '#a0aec0' : '#6c757d';
-  const tooltipBg = isDark ? '#1e2d3d' : '#fff';
-  const tooltipBrd = isDark ? '#2d4058' : '#dee2e6';
-  const legendTextColor = isDark ? '#e2e8f0' : '#212529';
+  const isDark    = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor = isDark ? 'rgba(225,245,225,0.24)' : 'rgba(23,35,27,0.18)';
+  const textColor = isDark ? '#e4f0df' : '#24382a';
+  const tooltipBg = isDark ? '#123b26' : '#fffdf7';
+  const tooltipBrd = isDark ? '#e0b83f' : '#9a6800';
+  const legendTextColor = isDark ? '#f3f5e9' : '#17231b';
+
+  function refreshChartTheme() {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const grid = dark ? 'rgba(225,245,225,0.24)' : 'rgba(23,35,27,0.18)';
+    const text = dark ? '#e4f0df' : '#24382a';
+    const tooltip = dark ? '#123b26' : '#fffdf7';
+    const border = dark ? '#39734f' : '#9a6800';
+    const legend = dark ? '#f3f5e9' : '#17231b';
+    Chart.defaults.color = text;
+    Chart.defaults.borderColor = grid;
+
+    Object.values(Chart.instances).forEach((chart) => {
+      const scales = chart.options.scales || {};
+      Object.values(scales).forEach((scale) => {
+        if (scale.ticks) {
+          scale.ticks.color = text;
+          scale.ticks.font = { weight: '600' };
+        }
+        if (scale.grid) scale.grid.color = grid;
+      });
+      if (chart.options.plugins?.legend?.labels) {
+        chart.options.plugins.legend.labels.color = legend;
+      }
+      if (chart.options.plugins?.tooltip) {
+        chart.options.plugins.tooltip.backgroundColor = tooltip;
+        chart.options.plugins.tooltip.borderColor = border;
+        chart.options.plugins.tooltip.titleColor = legend;
+        chart.options.plugins.tooltip.bodyColor = text;
+      }
+      if (chart.config.type === 'doughnut') {
+        chart.data.datasets[0].borderColor = dark ? '#0d2a1b' : '#fffdf7';
+      }
+      chart.update('none');
+    });
+  }
 
   Chart.defaults.font.family = "'Inter','Segoe UI',system-ui,sans-serif";
-  Chart.defaults.font.size   = 12;
+  Chart.defaults.font.size   = 13;
+  Chart.defaults.color       = textColor;
+  Chart.defaults.borderColor = gridColor;
 
   function peso(value) {
     return '₱' + Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -34,7 +71,9 @@
             type: 'bar',
             label: 'Revenue',
             data: D.revCostTrend.revenue,
-            backgroundColor: 'rgba(25,135,84,0.65)',
+            backgroundColor: isDark ? 'rgba(86,210,126,0.82)' : 'rgba(25,135,84,0.78)',
+            borderColor: isDark ? '#8af0a4' : '#126b3d',
+            borderWidth: 1,
             borderRadius: 4,
             order: 2,
           },
@@ -42,10 +81,12 @@
             type: 'line',
             label: 'Maintenance Cost',
             data: D.revCostTrend.cost,
-            borderColor: '#dc3545',
-            backgroundColor: 'rgba(220,53,69,0.08)',
-            borderWidth: 2.5,
-            pointBackgroundColor: '#dc3545',
+            borderColor: isDark ? '#ff7b7b' : '#a3262a',
+            backgroundColor: 'rgba(163,38,42,0.12)',
+            borderWidth: 3,
+            pointBackgroundColor: isDark ? '#ff9b9b' : '#a3262a',
+            pointBorderColor: isDark ? '#fff1e6' : '#fffdf7',
+            pointBorderWidth: 2,
             pointRadius: 4,
             pointHoverRadius: 6,
             tension: 0.3,
@@ -67,11 +108,11 @@
           },
         },
         scales: {
-          x: { grid: { display: false }, ticks: { color: textColor } },
+          x: { grid: { display: false }, ticks: { color: textColor, font: { weight: '600' } } },
           y: {
             beginAtZero: true,
             grid: { color: gridColor },
-            ticks: { color: textColor, callback: v => '₱' + Number(v).toLocaleString() },
+            ticks: { color: textColor, font: { weight: '600' }, callback: v => '₱' + Number(v).toLocaleString() },
           },
         },
       },
@@ -88,8 +129,8 @@
         datasets: [{
           data: D.tripStatus.data,
           backgroundColor: D.tripStatus.colors,
-          borderColor: isDark ? '#152236' : '#fff',
-          borderWidth: 3,
+          borderColor: isDark ? '#0d2a1b' : '#fffdf7',
+          borderWidth: 4,
           hoverOffset: 6,
         }],
       },
@@ -119,8 +160,8 @@
         datasets: [{
           data: D.maintType.data,
           backgroundColor: D.maintType.colors,
-          borderColor: isDark ? '#152236' : '#fff',
-          borderWidth: 3,
+          borderColor: isDark ? '#0d2a1b' : '#fffdf7',
+          borderWidth: 4,
           hoverOffset: 6,
         }],
       },
@@ -150,7 +191,9 @@
         datasets: [{
           label: 'Incidents',
           data: D.incTrend.data,
-          backgroundColor: 'rgba(255,145,0,0.65)',
+          backgroundColor: isDark ? 'rgba(255,196,76,0.86)' : 'rgba(180,122,0,0.82)',
+          borderColor: isDark ? '#ffe39a' : '#825700',
+          borderWidth: 1,
           borderRadius: 4,
         }],
       },
@@ -183,7 +226,9 @@
         datasets: [{
           label: 'Completed Trips',
           data: D.tripVolumeTrend.data,
-          backgroundColor: 'rgba(13,110,253,0.65)',
+          backgroundColor: isDark ? 'rgba(116,170,255,0.86)' : 'rgba(32,91,157,0.82)',
+          borderColor: isDark ? '#b7d5ff' : '#173f70',
+          borderWidth: 1,
           borderRadius: 4,
         }],
       },
@@ -216,7 +261,9 @@
         datasets: [{
           label: 'Maintenance Cost',
           data: D.maintCostTrend.data,
-          backgroundColor: 'rgba(220,53,69,0.65)',
+          backgroundColor: isDark ? 'rgba(255,123,123,0.86)' : 'rgba(163,38,42,0.82)',
+          borderColor: isDark ? '#ffbaba' : '#7e1d21',
+          borderWidth: 1,
           borderRadius: 4,
         }],
       },
@@ -253,7 +300,9 @@
           {
             label: 'Billed',
             data: D.billedCollected.revenue,
-            backgroundColor: 'rgba(13,110,253,0.55)',
+            backgroundColor: isDark ? 'rgba(116,170,255,0.86)' : 'rgba(32,91,157,0.82)',
+            borderColor: isDark ? '#b7d5ff' : '#173f70',
+            borderWidth: 1,
             borderRadius: 4,
             order: 2,
           },
@@ -261,10 +310,12 @@
             type: 'line',
             label: 'Collected',
             data: D.billedCollected.collected,
-            borderColor: '#198754',
-            backgroundColor: 'rgba(25,135,84,0.08)',
-            borderWidth: 2.5,
-            pointBackgroundColor: '#198754',
+            borderColor: isDark ? '#8af0a4' : '#126b3d',
+            backgroundColor: 'rgba(25,135,84,0.12)',
+            borderWidth: 3,
+            pointBackgroundColor: isDark ? '#8af0a4' : '#126b3d',
+            pointBorderColor: isDark ? '#fff1e6' : '#fffdf7',
+            pointBorderWidth: 2,
             pointRadius: 4,
             pointHoverRadius: 6,
             tension: 0.3,
@@ -286,10 +337,10 @@
           },
         },
         scales: {
-          x: { grid: { display: false }, ticks: { color: textColor } },
+          x: { grid: { display: false }, ticks: { color: textColor, font: { weight: '600' } } },
           y: {
             beginAtZero: true, grid: { color: gridColor },
-            ticks: { color: textColor, callback: v => '₱' + Number(v).toLocaleString() },
+            ticks: { color: textColor, font: { weight: '600' }, callback: v => '₱' + Number(v).toLocaleString() },
           },
         },
       },
@@ -308,6 +359,8 @@
         .join(',')
     ).join('\r\n');
   }
+
+  window.addEventListener('mulawin:themechange', refreshChartTheme);
 
   document.querySelectorAll('.an-export-btn').forEach(btn => {
     btn.addEventListener('click', () => {

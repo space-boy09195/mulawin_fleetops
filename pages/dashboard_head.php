@@ -107,7 +107,7 @@ for ($i = 13; $i >= 0; $i--) {
 $donutData = [
     'labels' => ['Deployed', 'Available', 'Maintenance', 'Inactive'],
     'data'   => [$deployed, $available, $underMaint, $inactive],
-    'colors' => ['#0d6efd', '#198754', '#ffc107', '#6c757d'],
+    'colors' => ['#d7a62a', '#2f9e5b', '#d95757', '#8fa596'],
 ];
 $totalFleet = array_sum($donutData['data']);
 

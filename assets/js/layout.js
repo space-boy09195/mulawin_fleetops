@@ -19,6 +19,9 @@
   function applyTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem(THEME_KEY, theme);
+    window.dispatchEvent(new CustomEvent('mulawin:themechange', {
+      detail: { theme: theme }
+    }));
 
     // Update toggle button icon + label
     if (themeIcon && themeLabel) {

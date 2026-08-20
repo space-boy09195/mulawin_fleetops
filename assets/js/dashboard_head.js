@@ -3,14 +3,43 @@
   const D = window.DASH_DATA;
   if (!D) return;
 
-  const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
-  const gridColor  = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
-  const textColor  = isDark ? '#a0aec0' : '#6c757d';
-  const tooltipBg  = isDark ? '#1e2d3d' : '#fff';
-  const tooltipBrd = isDark ? '#2d4058' : '#dee2e6';
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor  = isDark ? 'rgba(225,245,225,0.24)' : 'rgba(23,35,27,0.18)';
+  const textColor  = isDark ? '#e4f0df' : '#24382a';
+  const tooltipBg  = isDark ? '#123b26' : '#fffdf7';
+  const tooltipBrd = isDark ? '#39734f' : '#b47a00';
+
+  function refreshChartTheme() {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const grid = dark ? 'rgba(225,245,225,0.24)' : 'rgba(23,35,27,0.18)';
+    const text = dark ? '#e4f0df' : '#24382a';
+    const tooltip = dark ? '#123b26' : '#fffdf7';
+    const border = dark ? '#39734f' : '#9a6800';
+    Chart.defaults.color = text;
+    Chart.defaults.borderColor = grid;
+
+    Object.values(Chart.instances).forEach((chart) => {
+      chart.options.scales?.x && (chart.options.scales.x.ticks.color = text);
+      chart.options.scales?.y && (chart.options.scales.y.ticks.color = text);
+      chart.options.scales?.x && (chart.options.scales.x.grid.color = grid);
+      chart.options.scales?.y && (chart.options.scales.y.grid.color = grid);
+      if (chart.options.plugins?.tooltip) {
+        chart.options.plugins.tooltip.backgroundColor = tooltip;
+        chart.options.plugins.tooltip.borderColor = border;
+        chart.options.plugins.tooltip.titleColor = dark ? '#f3f5e9' : '#17231b';
+        chart.options.plugins.tooltip.bodyColor = text;
+      }
+      if (chart.config.type === 'doughnut') {
+        chart.data.datasets[0].borderColor = dark ? '#0d2a1b' : '#fffdf7';
+      }
+      chart.update('none');
+    });
+  }
 
   Chart.defaults.font.family = "'Inter','Segoe UI',system-ui,sans-serif";
-  Chart.defaults.font.size   = 12;
+  Chart.defaults.font.size   = 13;
+  Chart.defaults.color       = textColor;
+  Chart.defaults.borderColor = gridColor;
 
   // ── Trip Trends line chart ──────────────────────────────────────────────────
   const trendCtx = document.getElementById('tripTrendChart');
@@ -22,10 +51,12 @@
         datasets: [{
           label: 'Trips Created',
           data: D.trend.data,
-          borderColor: '#0d6efd',
-          backgroundColor: 'rgba(13,110,253,0.08)',
-          borderWidth: 2.5,
-          pointBackgroundColor: '#0d6efd',
+          borderColor: '#b47a00',
+          backgroundColor: 'rgba(180,122,0,0.14)',
+          borderWidth: 3,
+          pointBackgroundColor: '#b47a00',
+          pointBorderColor: isDark ? '#fff1e6' : '#fffdf7',
+          pointBorderWidth: 2,
           pointRadius: 4,
           pointHoverRadius: 6,
           tension: 0.3,
@@ -42,7 +73,7 @@
             backgroundColor: tooltipBg,
             borderColor: tooltipBrd,
             borderWidth: 1,
-            titleColor: isDark ? '#e2e8f0' : '#212529',
+            titleColor: isDark ? '#f3f5e9' : '#17231b',
             bodyColor: textColor,
             padding: 10,
             callbacks: {
@@ -53,12 +84,12 @@
         scales: {
           x: {
             grid: { color: gridColor },
-            ticks: { color: textColor, maxRotation: 0 },
+            ticks: { color: textColor, font: { weight: '600' }, maxRotation: 0 },
           },
           y: {
             beginAtZero: true,
             grid: { color: gridColor },
-            ticks: { color: textColor, stepSize: 1, precision: 0 },
+            ticks: { color: textColor, font: { weight: '600' }, stepSize: 1, precision: 0 },
           }
         }
       }
@@ -75,8 +106,8 @@
         datasets: [{
           data: D.donut.data,
           backgroundColor: D.donut.colors,
-          borderColor: isDark ? '#152236' : '#fff',
-          borderWidth: 3,
+          borderColor: isDark ? '#0d2a1b' : '#fffdf7',
+          borderWidth: 4,
           hoverOffset: 6,
         }]
       },
@@ -90,7 +121,7 @@
             backgroundColor: tooltipBg,
             borderColor: tooltipBrd,
             borderWidth: 1,
-            titleColor: isDark ? '#e2e8f0' : '#212529',
+            titleColor: isDark ? '#f3f5e9' : '#17231b',
             bodyColor: textColor,
             padding: 10,
             callbacks: {
@@ -104,4 +135,5 @@
 
   // ── Auto-refresh every 2 min ──────────────────────────────────────────────
   setTimeout(() => window.location.reload(), 120000);
+  window.addEventListener('mulawin:themechange', refreshChartTheme);
 })();

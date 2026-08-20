@@ -110,6 +110,7 @@ CREATE TABLE trucks (
                    'Electric'
                  )             NOT NULL DEFAULT 'Diesel',
   capacity_tons  DECIMAL(6,2)  NULL COMMENT 'Maximum load in metric tons',
+  fuel_efficiency_km_per_liter DECIMAL(6,2) NOT NULL DEFAULT 4.00 COMMENT 'Expected distance per liter',
   status         ENUM(
                    'Available',
                    'Deployed',
@@ -195,6 +196,7 @@ CREATE TABLE trips (
                      'Cancelled'
                    )             NOT NULL DEFAULT 'Loading',
   cargo_description TEXT         NULL     COMMENT 'What is being hauled',
+  cargo_weight_tons DECIMAL(6,2) NULL COMMENT 'Actual cargo weight for fuel analysis',
   expected_arrival DATETIME      NULL,
   actual_arrival   DATETIME      NULL,
   is_late          TINYINT(1)    NOT NULL DEFAULT 0,
@@ -331,6 +333,36 @@ CREATE TABLE maintenance_records (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
+-- TABLE 12: vehicle_inspections
+-- Part-level findings from an interactive vehicle inspection.
+-- ============================================================
+CREATE TABLE vehicle_inspections (
+  inspection_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  truck_id      INT UNSIGNED NOT NULL,
+  inspected_by  INT UNSIGNED NOT NULL,
+  inspection_date DATE NOT NULL,
+  notes         TEXT NULL,
+  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (inspection_id),
+  INDEX idx_vehicle_inspections_truck (truck_id),
+  INDEX idx_vehicle_inspections_date (inspection_date),
+  CONSTRAINT fk_vehicle_inspections_truck FOREIGN KEY (truck_id) REFERENCES trucks (truck_id),
+  CONSTRAINT fk_vehicle_inspections_user FOREIGN KEY (inspected_by) REFERENCES users (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE vehicle_inspection_findings (
+  finding_id    INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  inspection_id INT UNSIGNED NOT NULL,
+  view_name     ENUM('Front','Side','Rear','Top') NOT NULL,
+  part_name     VARCHAR(80) NOT NULL,
+  condition     ENUM('Good','Needs Attention','Damaged','Missing','Leaking','Worn','Not Checked') NOT NULL DEFAULT 'Not Checked',
+  notes         VARCHAR(255) NULL,
+  PRIMARY KEY (finding_id),
+  UNIQUE KEY uq_inspection_part (inspection_id, view_name, part_name),
+  CONSTRAINT fk_inspection_findings_inspection FOREIGN KEY (inspection_id) REFERENCES vehicle_inspections (inspection_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
 -- TABLE 12: parts_inventory
 -- Spare parts stock. `created_at` added so you can see when
 -- a part was first entered. Movements tracked in parts_movements.
@@ -449,7 +481,30 @@ CREATE TABLE billings (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
--- TABLE 16: billing_documents
+-- TABLE 16: trip_expenses
+-- Operating expenses recorded against a completed or active trip.
+-- Fuel rows use quantity as liters for anomaly detection.
+-- ============================================================
+CREATE TABLE trip_expenses (
+  expense_id    INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  trip_id       INT UNSIGNED NOT NULL,
+  recorded_by   INT UNSIGNED NOT NULL,
+  expense_type  ENUM('Fuel','Toll','Driver Allowance','Other') NOT NULL,
+  amount        DECIMAL(14,2) NOT NULL,
+  quantity      DECIMAL(10,2) NULL COMMENT 'Fuel quantity in liters when expense_type is Fuel',
+  expense_date  DATE NOT NULL,
+  notes         VARCHAR(255) NULL,
+  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (expense_id),
+  INDEX idx_trip_expenses_trip (trip_id),
+  INDEX idx_trip_expenses_type (expense_type),
+  INDEX idx_trip_expenses_date (expense_date),
+  CONSTRAINT fk_trip_expenses_trip FOREIGN KEY (trip_id) REFERENCES trips (trip_id) ON DELETE CASCADE,
+  CONSTRAINT fk_trip_expenses_recorder FOREIGN KEY (recorded_by) REFERENCES users (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- TABLE 17: billing_documents
 -- Junction table: one billing can reference many documents
 -- (e.g. 3 Delivery Receipts + 1 Waybill for one billing).
 -- ============================================================
@@ -462,7 +517,7 @@ CREATE TABLE billing_documents (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
--- TABLE 17: collections
+-- TABLE 18: collections
 -- Payment records per billing. Supports partial payments.
 -- ============================================================
 CREATE TABLE collections (

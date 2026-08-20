@@ -270,6 +270,41 @@
   font-size: 0.85rem;
 }
 
+/* ── Interactive vehicle inspection ─────────────────────────────────────── */
+.inspection-diagram {
+  position: relative;
+  min-height: 245px;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
+  background: var(--bs-tertiary-bg);
+  overflow: hidden;
+  padding: .5rem;
+}
+.inspection-diagram svg { display: block; width: 100%; height: 250px; }
+.inspection-custom-image { display: block; width: 100%; height: 250px; object-fit: contain; }
+.vector-ground { fill: var(--bs-tertiary-bg); }
+.vector-road { stroke: var(--bs-border-color); stroke-width: 8; stroke-dasharray: 22 16; }
+.vector-cab, .vector-cargo, .vector-deck { fill: #1d2226; stroke: #090b0d; stroke-width: 5; }
+.vector-cargo { fill: #111416; }
+.vector-reefer { fill: #252b2f; }
+.vector-deck { fill: #24292d; }
+.vector-rail { stroke: #747b80; stroke-width: 7; }
+.vector-glass { fill: #f3f5f6; stroke: #090b0d; stroke-width: 4; }
+.vector-lamp { fill: #f3f5f6; stroke: #090b0d; stroke-width: 4; }
+.vector-bumper { fill: #090b0d; }
+.vector-door { fill: #171b1e; stroke: #aeb5b9; stroke-width: 3; }
+.vector-wheel { fill: #090b0d; stroke: #f3f5f6; stroke-width: 8; }
+.vector-hub { fill: #727a7f; }
+.vector-top-body, .vector-top-cab { fill: #111416; stroke: #090b0d; stroke-width: 5; }
+.vector-top-cab { fill: #252b2f; }
+.vector-top-lines { stroke: #aeb5b9; stroke-width: 4; }
+.vector-top-detail { fill: #f3f5f6; }
+.inspection-parts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+.inspection-part-card { border: 1px solid var(--bs-border-color); border-radius: 8px; padding: .45rem; background: var(--bs-body-bg); }
+.inspection-part-card.selected { border-color: #0d6efd; box-shadow: 0 0 0 2px rgba(13,110,253,.12); }
+.inspection-part-btn { border: 0; background: transparent; color: var(--bs-body-color); font-size: .8rem; font-weight: 600; padding: 0 0 .3rem; }
+@media (max-width: 700px) { .inspection-parts { grid-template-columns: 1fr; } }
+
 /* ── Maintenance type badges ─────────────────── */
 .mnt-type-badge {
   display: inline-block;

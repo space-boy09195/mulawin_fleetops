@@ -122,14 +122,62 @@ if ($action === 'log_record') {
     exit;
 }
 
+if ($action === 'save_inspection') {
+        $truckId = (int)($_POST['truck_id'] ?? 0);
+        $date = trim($_POST['inspection_date'] ?? '');
+        $notes = trim($_POST['notes'] ?? '') ?: null;
+        $findings = json_decode($_POST['findings'] ?? '[]', true);
+        $allowedViews = ['Front', 'Side', 'Rear', 'Top'];
+        $allowedConditions = ['Good', 'Needs Attention', 'Damaged', 'Missing', 'Leaking', 'Worn', 'Not Checked'];
+
+        if (!$truckId || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !is_array($findings)) {
+            echo json_encode(['success' => false, 'message' => 'Vehicle, date, and valid inspection findings are required.']);
+        exit;
+}
+
 // ── Submit pre-trip checklist ─────────────────────────────────────────────────
 if ($action === 'submit_checklist') {
 
-    $dispatchId = (int)($_POST['dispatch_id'] ?? 0);
-    $notes      = trim($_POST['notes']        ?? '') ?: null;
+        $dispatchId = (int)($_POST['dispatch_id'] ?? 0);
+        $notes      = trim($_POST['notes']        ?? '') ?: null;
 
-    if (!$dispatchId) {
-        echo json_encode(['success' => false, 'message' => 'Please select a dispatch.']);
+        if (!$dispatchId) {
+            echo json_encode(['success' => false, 'message' => 'Please select a dispatch.']);
+            exit;
+        }
+        $truckCheck = $pdo->prepare("SELECT truck_id FROM trucks WHERE truck_id = ?");
+        $truckCheck->execute([$truckId]);
+        if (!$truckCheck->fetchColumn()) {
+            echo json_encode(['success' => false, 'message' => 'Truck not found.']);
+            exit;
+        }
+
+        try {
+            $pdo->beginTransaction();
+            $pdo->prepare("INSERT INTO vehicle_inspections (truck_id, inspected_by, inspection_date, notes) VALUES (?, ?, ?, ?)")
+                ->execute([$truckId, currentUserId(), $date, $notes]);
+            $inspectionId = (int)$pdo->lastInsertId();
+            $findingStmt = $pdo->prepare("
+                INSERT INTO vehicle_inspection_findings (inspection_id, view_name, part_name, condition, notes)
+                VALUES (?, ?, ?, ?, ?)
+            ");
+            foreach ($findings as $finding) {
+                $view = $finding['view'] ?? '';
+                $part = trim($finding['part'] ?? '');
+                $condition = $finding['condition'] ?? 'Not Checked';
+                if (!in_array($view, $allowedViews, true) || !$part || !in_array($condition, $allowedConditions, true)) {
+                    throw new InvalidArgumentException('Invalid inspection finding.');
+                }
+                $findingStmt->execute([$inspectionId, $view, $part, $condition, trim($finding['notes'] ?? '') ?: null]);
+            }
+            $pdo->commit();
+            auditLog('SAVE_VEHICLE_INSPECTION', 'vehicle_inspections', $inspectionId, null, ['truck_id' => $truckId]);
+            echo json_encode(['success' => true, 'message' => 'Vehicle inspection saved.']);
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('maintenance_handler/save_inspection: ' . $e->getMessage());
+            echo json_encode(['success' => false, 'message' => 'Could not save vehicle inspection.']);
+        }
         exit;
     }
 

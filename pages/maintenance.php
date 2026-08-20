@@ -5,9 +5,10 @@ require_once __DIR__ . '/../config/database.php';
 
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]);
 
-$GLOBALS['page_js'] = APP_BASE . '/assets/js/maintenance.js';
+$pageBase = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
+$GLOBALS['page_js'] = $pageBase . '/assets/js/maintenance.js';
 
-layoutHead('Maintenance', APP_BASE . '/assets/css/maintenance.css');
+layoutHead('Maintenance', $pageBase . '/assets/css/maintenance.css');
 
 $pdo = getDBConnection();
 
@@ -91,11 +92,60 @@ $checklists = $pdo->query($checklistSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Dropdowns for forms ───────────────────────────────────────────────────────
 $trucks = $pdo->query("
-    SELECT truck_id, plate_number, brand, model
+    SELECT truck_id, plate_number, brand, model, COALESCE(body_type, 'Closed Van') AS body_type
     FROM trucks
     WHERE status != 'Inactive'
     ORDER BY plate_number
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+$inspectionImageDir = __DIR__ . '/../assets/images/inspection';
+$inspectionImageUrl = $pageBase . '/assets/images/inspection';
+// Edit this set when replacing vehicle artwork. Each view accepts a local
+// filename from assets/images/inspection or a complete image URL.
+$inspectionImageSets = [
+    'Closed Van' => [
+        'Front' => 'closed-van-front.png',
+        'Side'  => 'closed-van-side.png',
+        'Rear'  => 'closed-van-rear.png',
+        'Top'   => 'closed-van-top.png',
+    ],
+    'Flatbed' => [
+        'Front' => 'flatbed-front.png',
+        'Side'  => 'flatbed-side.png',
+        'Rear'  => 'flatbed-rear.png',
+        'Top'   => 'flatbed-top.png',
+    ],
+    'Reefer' => [
+        'Front' => 'reefer-front.png',
+        'Side'  => 'reefer-side.png',
+        'Rear'  => 'reefer-rear.png',
+        'Top'   => 'reefer-top.png',
+    ],
+    'Wing Van' => [
+        'Front' => 'wing-van-front.png',
+        'Side'  => 'wing-van-side.png',
+        'Rear'  => 'wing-van-rear.png',
+        'Top'   => 'wing-van-top.png',
+    ],
+    'Carrier' => [
+        'Front' => 'carrier-front.png',
+        'Side'  => 'carrier-side.png',
+        'Rear'  => 'carrier-rear.png',
+        'Top'   => 'carrier-top.png',
+    ],
+];
+
+$inspectionImages = [];
+foreach ($inspectionImageSets as $bodyType => $views) {
+    foreach ($views as $viewName => $image) {
+        $isUrl = (bool)preg_match('/^https?:\/\//i', $image);
+        if ($isUrl || is_file($inspectionImageDir . '/' . $image)) {
+            $inspectionImages[$bodyType][$viewName] = $isUrl
+                ? $image
+                : $inspectionImageUrl . '/' . rawurlencode($image);
+        }
+    }
+}
 
 // Approved dispatches without a checklist yet
 $pendingDispatchesSql = "
@@ -171,9 +221,64 @@ $checklistItems = [
       <button class="btn btn-mnt-secondary" data-bs-toggle="modal" data-bs-target="#checklistModal">
         <i class="bi bi-clipboard-check me-1"></i> New Checklist
       </button>
+      <button class="btn btn-mnt-primary" data-bs-toggle="modal" data-bs-target="#inspectionModal">
+        <i class="bi bi-bounding-box-circles me-1"></i> Inspect Vehicle
+      </button>
       <button class="btn btn-mnt-primary" data-bs-toggle="modal" data-bs-target="#recordModal">
         <i class="bi bi-wrench me-1"></i> Log Record
       </button>
+    </div>
+
+    <!-- Interactive vehicle inspection -->
+    <div class="modal fade" id="inspectionModal" tabindex="-1" aria-labelledby="inspectionModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content mnt-modal-content">
+          <div class="modal-header mnt-modal-header-primary">
+            <h5 class="modal-title" id="inspectionModalLabel"><i class="bi bi-bounding-box-circles me-2"></i>Interactive Vehicle Inspection</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <div id="inspectionFormAlert" class="alert d-none" role="alert"></div>
+            <div class="row g-3">
+              <div class="col-lg-4">
+                <label class="form-label mnt-label" for="inspectionTruck">Vehicle</label>
+                <select id="inspectionTruck" class="form-select mnt-input" required>
+                  <option value="">— Select vehicle —</option>
+                  <?php foreach ($trucks as $truck): ?>
+                  <option value="<?= $truck['truck_id'] ?>" data-body="<?= htmlspecialchars($truck['body_type']) ?>">
+                    <?= htmlspecialchars($truck['plate_number'] . ' — ' . $truck['brand'] . ' ' . $truck['model']) ?>
+                  </option>
+                  <?php endforeach; ?>
+                </select>
+                <label class="form-label mnt-label mt-3" for="inspectionDate">Inspection date</label>
+                <input type="date" id="inspectionDate" class="form-control mnt-input" value="<?= date('Y-m-d') ?>">
+                <label class="form-label mnt-label mt-3" for="inspectionNotes">Overall notes</label>
+                <textarea id="inspectionNotes" class="form-control mnt-input" rows="4" placeholder="Optional findings or recommendations"></textarea>
+                <div class="small text-muted mt-3"><i class="bi bi-info-circle me-1"></i>Choose a view, then click a part on the diagram to record its condition.</div>
+              </div>
+              <div class="col-lg-8">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <div class="btn-group" role="group" aria-label="Vehicle view">
+                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view active" data-view="Front">Front</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Side">Side</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Rear">Rear</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Top">Top</button>
+                  </div>
+                  <span class="small text-muted" id="inspectionBodyLabel">Closed Van</span>
+                </div>
+                <div class="inspection-diagram" id="inspectionDiagram"
+                     data-view="Front"
+                     data-image-map="<?= htmlspecialchars(json_encode($inspectionImages), ENT_QUOTES, 'UTF-8') ?>"></div>
+                <div id="inspectionParts" class="inspection-parts mt-3"></div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer mnt-modal-footer">
+            <button type="button" class="btn btn-mnt-cancel" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-mnt-primary" id="submitInspectionBtn">Save Inspection</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

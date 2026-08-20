@@ -45,6 +45,10 @@ if ($action === 'log_record') {
         echo json_encode(['success' => false, 'message' => 'Invalid date format.']);
         exit;
     }
+    if ($datePerformed > date('Y-m-d')) {
+        echo json_encode(['success' => false, 'message' => 'Date performed cannot be in the future.']);
+        exit;
+    }
 
     // Verify truck exists
     $truckCheck = $pdo->prepare("SELECT truck_id FROM trucks WHERE truck_id = ?");
@@ -132,6 +136,10 @@ if ($action === 'save_inspection') {
 
         if (!$truckId || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !is_array($findings)) {
             echo json_encode(['success' => false, 'message' => 'Vehicle, date, and valid inspection findings are required.']);
+        exit;
+}
+if ($date > date('Y-m-d')) {
+        echo json_encode(['success' => false, 'message' => 'Inspection date cannot be in the future.']);
         exit;
 }
 

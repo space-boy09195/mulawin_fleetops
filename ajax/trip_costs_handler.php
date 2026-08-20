@@ -32,6 +32,10 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
     echo json_encode(['success' => false, 'message' => 'Invalid expense date.']);
     exit;
 }
+if ($date > date('Y-m-d')) {
+    echo json_encode(['success' => false, 'message' => 'Expense date cannot be in the future.']);
+    exit;
+}
 
 $pdo = getDBConnection();
 $tripStmt = $pdo->prepare("SELECT trip_id FROM trips WHERE trip_id = ?");

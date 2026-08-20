@@ -300,6 +300,18 @@
 .vector-top-lines { stroke: #aeb5b9; stroke-width: 4; }
 .vector-top-detail { fill: #f3f5f6; }
 .inspection-parts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+.inspection-view {
+  width: 4.25rem;
+  height: 2.75rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px !important;
+  font-size: .78rem;
+  font-weight: 600;
+}
+.inspection-view + .inspection-view { margin-left: .35rem; }
 .inspection-part-card { border: 1px solid var(--bs-border-color); border-radius: 8px; padding: .45rem; background: var(--bs-body-bg); }
 .inspection-part-card.selected { border-color: #0d6efd; box-shadow: 0 0 0 2px rgba(13,110,253,.12); }
 .inspection-part-btn { border: 0; background: transparent; color: var(--bs-body-color); font-size: .8rem; font-weight: 600; padding: 0 0 .3rem; }

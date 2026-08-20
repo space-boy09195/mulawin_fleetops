@@ -250,4 +250,139 @@
     });
   });
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // INTERACTIVE VEHICLE INSPECTION
+  // ══════════════════════════════════════════════════════════════════════════
+  const inspectionTruck = document.getElementById('inspectionTruck');
+  const inspectionDate = document.getElementById('inspectionDate');
+  const inspectionNotes = document.getElementById('inspectionNotes');
+  const inspectionDiagram = document.getElementById('inspectionDiagram');
+  const inspectionParts = document.getElementById('inspectionParts');
+  const inspectionAlert = document.getElementById('inspectionFormAlert');
+  const inspectionBodyLabel = document.getElementById('inspectionBodyLabel');
+  const inspectionImageMap = JSON.parse(inspectionDiagram?.dataset.imageMap || '{}');
+  const inspectionState = new Map();
+  const inspectionConditions = ['Not Checked', 'Good', 'Needs Attention', 'Damaged', 'Missing', 'Leaking', 'Worn'];
+  const inspectionPartsByView = {
+    Front: ['Windshield', 'Left Headlight', 'Right Headlight', 'Front Bumper', 'Left Front Tire', 'Right Front Tire'],
+    Side: ['Left Mirror', 'Driver Door', 'Cargo Body', 'Fuel Tank', 'Left Rear Tire', 'Exhaust'],
+    Rear: ['Rear Doors', 'Left Tail Light', 'Right Tail Light', 'Rear Bumper', 'Left Rear Tire', 'Right Rear Tire'],
+    Top: ['Cab Roof', 'Cargo Roof', 'Left Side Panel', 'Right Side Panel', 'Fuel Tank', 'Rear Undercarriage'],
+  };
+  const bodyParts = {
+    'Closed Van': { Front: 'cab-front', Side: 'van-side', Rear: 'van-rear', Top: 'van-top' },
+    'Flatbed': { Front: 'cab-front', Side: 'flatbed-side', Rear: 'flatbed-rear', Top: 'flatbed-top' },
+    'Reefer': { Front: 'cab-front reefer-front', Side: 'reefer-side', Rear: 'reefer-rear', Top: 'reefer-top' },
+    'Wing Van': { Front: 'cab-front', Side: 'van-side wing-van-side', Rear: 'van-rear', Top: 'van-top' },
+    'Carrier': { Front: 'cab-front', Side: 'flatbed-side carrier-side', Rear: 'flatbed-rear', Top: 'flatbed-top' },
+  };
+
+  function inspectionKey(view, part) { return `${view}:${part}`; }
+  function vehicleIllustration(view, body) {
+    const cargo = body === 'Flatbed'
+      ? '<rect x="360" y="145" width="300" height="82" rx="8" class="vector-deck"/><path d="M370 145h280" class="vector-rail"/>'
+      : `<rect x="360" y="90" width="300" height="137" rx="12" class="vector-cargo ${body === 'Reefer' ? 'vector-reefer' : ''}"/>`;
+    if (view === 'Front') {
+      return `<svg viewBox="0 0 900 300" role="img" aria-label="${body} front view">
+        <rect width="900" height="300" class="vector-ground"/>
+        <rect x="330" y="50" width="240" height="190" rx="28" class="vector-cab"/>
+        <rect x="375" y="75" width="150" height="58" rx="10" class="vector-glass"/>
+        <circle cx="365" cy="180" r="22" class="vector-lamp"/><circle cx="535" cy="180" r="22" class="vector-lamp"/>
+        <rect x="355" y="215" width="190" height="20" rx="8" class="vector-bumper"/>
+      </svg>`;
+    }
+    if (view === 'Rear') {
+      return `<svg viewBox="0 0 900 300" role="img" aria-label="${body} rear view">
+        <rect width="900" height="300" class="vector-ground"/>
+        <rect x="260" y="55" width="380" height="175" rx="16" class="vector-cargo ${body === 'Reefer' ? 'vector-reefer' : ''}"/>
+        <rect x="295" y="82" width="145" height="120" class="vector-door"/><rect x="460" y="82" width="145" height="120" class="vector-door"/>
+        <circle cx="290" cy="190" r="18" class="vector-lamp"/><circle cx="610" cy="190" r="18" class="vector-lamp"/>
+        <rect x="285" y="215" width="330" height="18" rx="8" class="vector-bumper"/>
+      </svg>`;
+    }
+    if (view === 'Top') {
+      return `<svg viewBox="0 0 900 300" role="img" aria-label="${body} top view">
+        <rect width="900" height="300" class="vector-ground"/>
+        <path d="M235 45h130l35 35h280c18 0 30 14 30 32v76c0 18-12 32-30 32H400l-35 35H235c-16 0-28-12-28-28V73c0-16 12-28 28-28z" class="vector-top-body"/>
+        <path d="M255 70h95v160h-95z" class="vector-top-cab"/>
+        <path d="M390 90h265M390 125h265M390 160h265M390 195h265" class="vector-top-lines"/>
+        <circle cx="230" cy="85" r="9" class="vector-top-detail"/><circle cx="230" cy="215" r="9" class="vector-top-detail"/>
+      </svg>`;
+    }
+    return `<svg viewBox="0 0 900 300" role="img" aria-label="${body} side view">
+      <rect width="900" height="300" class="vector-ground"/>
+      <path d="M150 220h600" class="vector-road"/>
+      <path d="M190 220V145l55-50h130v125z" class="vector-cab"/>
+      <rect x="255" y="116" width="86" height="45" rx="8" class="vector-glass"/>
+      ${cargo}
+      <circle cx="270" cy="220" r="30" class="vector-wheel"/><circle cx="270" cy="220" r="12" class="vector-hub"/>
+      <circle cx="565" cy="220" r="30" class="vector-wheel"/><circle cx="565" cy="220" r="12" class="vector-hub"/>
+      <circle cx="640" cy="220" r="30" class="vector-wheel"/><circle cx="640" cy="220" r="12" class="vector-hub"/>
+    </svg>`;
+  }
+  function renderInspection() {
+    if (!inspectionDiagram || !inspectionParts) return;
+    const view = document.querySelector('.inspection-view.active')?.dataset.view || 'Front';
+    const body = inspectionTruck?.selectedOptions[0]?.dataset.body || 'Closed Van';
+    const configuredBody = bodyParts[body] ? body : 'Closed Van';
+    const shape = bodyParts[configuredBody];
+    inspectionBodyLabel.textContent = body;
+    inspectionDiagram.className = `inspection-diagram ${shape[view] || ''}`;
+    const imageUrl = inspectionImageMap[body]?.[view] || '';
+    inspectionDiagram.innerHTML = imageUrl
+      ? `<img class="inspection-custom-image" src="${imageUrl}" alt="${body} ${view} view">`
+      : vehicleIllustration(view, body);
+    inspectionParts.innerHTML = inspectionPartsByView[view].map(part => {
+      const state = inspectionState.get(inspectionKey(view, part)) || { condition: 'Not Checked', notes: '' };
+      return `<div class="inspection-part-card" data-part="${part}">
+        <button type="button" class="inspection-part-btn"><i class="bi bi-geo-alt me-1"></i>${part}</button>
+        <select class="form-select form-select-sm inspection-condition">
+          ${inspectionConditions.map(value => `<option ${value === state.condition ? 'selected' : ''}>${value}</option>`).join('')}
+        </select>
+        <input class="form-control form-control-sm inspection-part-notes" value="${state.notes.replace(/"/g, '&quot;')}" placeholder="Optional note">
+      </div>`;
+    }).join('');
+    inspectionParts.querySelectorAll('.inspection-part-card').forEach(card => {
+      const part = card.dataset.part;
+      const key = inspectionKey(view, part);
+      const save = () => inspectionState.set(key, {
+        condition: card.querySelector('.inspection-condition').value,
+        notes: card.querySelector('.inspection-part-notes').value.trim(),
+      });
+      card.querySelector('.inspection-part-btn').addEventListener('click', () => card.classList.toggle('selected'));
+      card.querySelector('.inspection-condition').addEventListener('change', save);
+      card.querySelector('.inspection-part-notes').addEventListener('input', save);
+    });
+  }
+  inspectionTruck?.addEventListener('change', renderInspection);
+  document.querySelectorAll('.inspection-view').forEach(button => button.addEventListener('click', () => {
+    document.querySelectorAll('.inspection-view').forEach(item => item.classList.remove('active'));
+    button.classList.add('active');
+    renderInspection();
+  }));
+  document.getElementById('inspectionModal')?.addEventListener('show.bs.modal', renderInspection);
+  document.getElementById('submitInspectionBtn')?.addEventListener('click', () => {
+    hideAlert(inspectionAlert);
+    if (!inspectionTruck?.value) {
+      showAlert(inspectionAlert, 'Please select a vehicle.');
+      return;
+    }
+    const findings = [];
+    inspectionState.forEach((finding, key) => {
+      const separator = key.indexOf(':');
+      findings.push({ view: key.slice(0, separator), part: key.slice(separator + 1), ...finding });
+    });
+    postAjax({
+      action: 'save_inspection',
+      truck_id: inspectionTruck.value,
+      inspection_date: inspectionDate.value,
+      notes: inspectionNotes.value.trim(),
+      findings: JSON.stringify(findings),
+    }).then(res => {
+      if (res.success) window.location.reload();
+      else showAlert(inspectionAlert, res.message || 'Could not save inspection.');
+    }).catch(() => showAlert(inspectionAlert, 'Network error. Please try again.'));
+  });
+  renderInspection();
+
 })();

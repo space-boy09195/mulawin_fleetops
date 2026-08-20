@@ -73,6 +73,7 @@ body::before {
   border: 1px solid rgba(224, 232, 225, 0.95);
   box-shadow: 0 30px 90px rgba(9, 34, 22, 0.10), 0 14px 34px rgba(9, 34, 22, 0.05);
   overflow: hidden;
+  -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
 }
 

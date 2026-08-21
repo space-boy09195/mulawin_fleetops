@@ -270,7 +270,7 @@ $checklistItems = [
                   <?php endforeach; ?>
                 </select>
                 <label class="form-label mnt-label mt-3" for="inspectionDate">Inspection date</label>
-                <input type="date" id="inspectionDate" class="form-control mnt-input" value="<?= date('Y-m-d') ?>">
+                <input type="date" id="inspectionDate" class="form-control mnt-input" value="<?= date('Y-m-d') ?>" min="<?= date('Y-m-d') ?>">
                 <label class="form-label mnt-label mt-3" for="inspectionNotes">Overall notes</label>
                 <textarea id="inspectionNotes" class="form-control mnt-input" rows="4" placeholder="Optional findings or recommendations"></textarea>
                 <div class="small text-muted mt-3"><i class="bi bi-info-circle me-1"></i>Choose a view, then click a part on the diagram to record its condition.</div>
@@ -588,13 +588,13 @@ $checklistItems = [
           <div class="col-md-3">
             <label class="form-label mnt-label" for="recDatePerformed">Date Performed</label>
             <input type="date" class="form-control mnt-input" id="recDatePerformed"
-                   value="<?= date('Y-m-d') ?>" required>
+                   value="<?= date('Y-m-d') ?>" min="<?= date('Y-m-d') ?>" required>
           </div>
           <div class="col-md-3">
             <label class="form-label mnt-label" for="recNextDue">
               Next Due Date <span class="mnt-unit-hint">(sets this truck's next alert)</span>
             </label>
-            <input type="date" class="form-control mnt-input" id="recNextDue">
+            <input type="date" class="form-control mnt-input" id="recNextDue" min="<?= date('Y-m-d') ?>">
           </div>
           <div class="col-md-6">
             <label class="form-label mnt-label" for="recCost">Cost (₱)</label>

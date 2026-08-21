@@ -42,8 +42,16 @@ if ($action === 'log_record') {
     }
 
     // Validate date
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $datePerformed)) {
+    if (!isValidDate($datePerformed)) {
         echo json_encode(['success' => false, 'message' => 'Invalid date format.']);
+        exit;
+    }
+    if (isPassedDate($datePerformed)) {
+        echo json_encode(['success' => false, 'message' => 'New maintenance records cannot use a passed date.']);
+        exit;
+    }
+    if ($nextDue !== null && (!isValidDate($nextDue) || isPassedDate($nextDue))) {
+        echo json_encode(['success' => false, 'message' => 'Next due date cannot be a passed date.']);
         exit;
     }
 
@@ -141,8 +149,12 @@ if ($action === 'save_inspection') {
         $allowedViews = ['Front', 'Side', 'Rear', 'Top'];
         $allowedConditions = ['Good', 'Needs Attention', 'Damaged', 'Missing', 'Leaking', 'Worn', 'Not Checked'];
 
-        if (!$truckId || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !is_array($findings)) {
+        if (!$truckId || !isValidDate($date) || !is_array($findings)) {
             echo json_encode(['success' => false, 'message' => 'Vehicle, date, and valid inspection findings are required.']);
+            exit;
+        }
+        if (isPassedDate($date)) {
+            echo json_encode(['success' => false, 'message' => 'New inspections cannot use a passed date.']);
             exit;
         }
 

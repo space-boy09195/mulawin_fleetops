@@ -223,7 +223,7 @@ function extractEmpFields(): array {
     ];
 }
 
-function validateEmpFields(array $f): ?string {
+function validateEmpFields(array $f, bool $allowPassedDates = false): ?string {
     if (!$f['employee_code']) return 'Employee code is required.';
     if (!$f['full_name'])     return 'Full name is required.';
     if (!$f['position'])      return 'Position is required.';
@@ -251,6 +251,10 @@ function validateEmpFields(array $f): ?string {
         return 'Invalid license expiry date.';
     if ($f['date_hired'] && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f['date_hired']))
         return 'Invalid date hired.';
+    if (!$allowPassedDates && $f['license_expiry'] && isPassedDate($f['license_expiry']))
+        return 'New employees cannot use a passed license expiry date.';
+    if (!$allowPassedDates && $f['date_hired'] && isPassedDate($f['date_hired']))
+        return 'New employees cannot use a passed hire date.';
     return null;
 }
 
@@ -258,7 +262,7 @@ function validateEmpFields(array $f): ?string {
 if ($action === 'add_employee') {
 
     $f = extractEmpFields();
-    if ($err = validateEmpFields($f)) {
+    if ($err = validateEmpFields($f, false)) {
         echo json_encode(['success' => false, 'message' => $err]);
         exit;
     }
@@ -310,7 +314,7 @@ if ($action === 'edit_employee') {
         exit;
     }
 
-    if ($err = validateEmpFields($f)) {
+    if ($err = validateEmpFields($f, true)) {
         echo json_encode(['success' => false, 'message' => $err]);
         exit;
     }

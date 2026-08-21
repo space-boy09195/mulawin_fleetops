@@ -448,6 +448,50 @@
   box-shadow: 0 0 0 3px rgba(13,110,253,0.15);
 }
 
+.expense-receipt-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+  gap: 1.5rem;
+}
+
+.expense-receipt {
+  align-self: stretch;
+  padding: 1.25rem;
+  background: #fffdf5;
+  border: 1px dashed #b8a36a;
+  border-radius: 8px;
+  color: #34302a;
+  font-family: 'Courier New', monospace;
+}
+
+.receipt-heading,
+.receipt-total,
+.receipt-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.receipt-heading {
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px dashed #b8a36a;
+  font-weight: 700;
+}
+
+.receipt-heading small { font-weight: 400; }
+.receipt-items { min-height: 110px; }
+.receipt-line { padding: 0.35rem 0; }
+.receipt-total {
+  padding-top: 0.75rem;
+  margin-top: 0.75rem;
+  border-top: 2px solid #34302a;
+}
+
+@media (max-width: 768px) {
+  .expense-receipt-layout { grid-template-columns: 1fr; }
+}
+
 textarea.bil-input { resize: vertical; min-height: 70px; }
 
 /* ── Responsive ──────────────────────────────── */

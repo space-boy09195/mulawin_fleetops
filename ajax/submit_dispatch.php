@@ -35,6 +35,10 @@ if (!strtotime($scheduledAt)) {
     echo json_encode(['success' => false, 'message' => 'Invalid scheduled date.']);
     exit;
 }
+if (strtotime($scheduledAt) < time()) {
+    echo json_encode(['success' => false, 'message' => 'New dispatches cannot use a passed date or time.']);
+    exit;
+}
 
 $pdo = getDBConnection();
 

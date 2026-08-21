@@ -30,8 +30,12 @@ if ($action === 'create_billing') {
         exit;
     }
 
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate)) {
+    if (!isValidDate($dueDate)) {
         echo json_encode(['success' => false, 'message' => 'Invalid due date format.']);
+        exit;
+    }
+    if (isPassedDate($dueDate)) {
+        echo json_encode(['success' => false, 'message' => 'New billings cannot use a passed due date.']);
         exit;
     }
 
@@ -109,8 +113,12 @@ if ($action === 'record_payment') {
         exit;
     }
 
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $payDate)) {
+    if (!isValidDate($payDate)) {
         echo json_encode(['success' => false, 'message' => 'Invalid payment date format.']);
+        exit;
+    }
+    if (isPassedDate($payDate)) {
+        echo json_encode(['success' => false, 'message' => 'New payments cannot use a passed date.']);
         exit;
     }
 

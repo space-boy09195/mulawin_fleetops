@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS trip_expenses (
   expense_type  ENUM('Fuel','Toll','Driver Allowance','Other') NOT NULL,
   amount        DECIMAL(14,2) NOT NULL,
   quantity      DECIMAL(10,2) NULL COMMENT 'Fuel quantity in liters when expense_type is Fuel',
+  other_description VARCHAR(255) NULL COMMENT 'Description when expense_type is Other',
   expense_date  DATE NOT NULL,
   notes         VARCHAR(255) NULL,
   created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -26,3 +27,7 @@ CREATE TABLE IF NOT EXISTS trip_expenses (
   CONSTRAINT fk_trip_expenses_trip FOREIGN KEY (trip_id) REFERENCES trips (trip_id) ON DELETE CASCADE,
   CONSTRAINT fk_trip_expenses_recorder FOREIGN KEY (recorded_by) REFERENCES users (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE trip_expenses
+  ADD COLUMN IF NOT EXISTS other_description VARCHAR(255) NULL
+  COMMENT 'Description when expense_type is Other';

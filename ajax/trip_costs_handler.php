@@ -7,20 +7,27 @@ header('Content-Type: application/json');
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]);
 
 $action = $_POST['action'] ?? '';
-if ($action !== 'create_expense') {
-    echo json_encode(['success' => false, 'message' => 'Unknown action.']);
-    exit;
-}
 
 $tripId = (int)($_POST['trip_id'] ?? 0);
 $type = trim($_POST['expense_type'] ?? '');
 $amount = (float)($_POST['amount'] ?? 0);
 $quantity = ($_POST['quantity'] ?? '') !== '' ? (float)$_POST['quantity'] : null;
 $date = trim($_POST['expense_date'] ?? '');
+$otherDescription = trim($_POST['other_description'] ?? '') ?: null;
 $notes = trim($_POST['notes'] ?? '') ?: null;
 $allowedTypes = ['Fuel', 'Toll', 'Driver Allowance', 'Other'];
 
-if (!$tripId || !in_array($type, $allowedTypes, true) || $amount <= 0 || !$date) {
+if (!in_array($action, ['create_expense', 'update_expense'], true)) {
+    echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+    exit;
+}
+if ($action === 'update_expense' && currentRoleId() !== ROLE_HEAD_MANAGEMENT) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'Only Head Management can edit expenses.']);
+    exit;
+}
+$expenseId = (int)($_POST['expense_id'] ?? 0);
+if (!$tripId || !in_array($type, $allowedTypes, true) || $amount <= 0 || !$date || ($type === 'Other' && !$otherDescription)) {
     echo json_encode(['success' => false, 'message' => 'Trip, expense type, amount, and date are required.']);
     exit;
 }
@@ -28,8 +35,16 @@ if ($type === 'Fuel' && ($quantity === null || $quantity <= 0)) {
     echo json_encode(['success' => false, 'message' => 'Fuel quantity in liters is required for fuel expenses.']);
     exit;
 }
-if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+if (!isValidDate($date)) {
     echo json_encode(['success' => false, 'message' => 'Invalid expense date.']);
+    exit;
+}
+if ($action === 'create_expense' && isPassedDate($date)) {
+    echo json_encode(['success' => false, 'message' => 'New expenses cannot use a passed date.']);
+    exit;
+}
+if ($action === 'update_expense' && !$expenseId) {
+    echo json_encode(['success' => false, 'message' => 'Expense not found.']);
     exit;
 }
 
@@ -42,17 +57,37 @@ if (!$tripStmt->fetchColumn()) {
 }
 
 try {
-    $stmt = $pdo->prepare("
-        INSERT INTO trip_expenses
-            (trip_id, recorded_by, expense_type, amount, quantity, expense_date, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ");
-    $stmt->execute([$tripId, currentUserId(), $type, $amount, $quantity, $date, $notes]);
-    $id = (int)$pdo->lastInsertId();
-    auditLog('CREATE_TRIP_EXPENSE', 'trip_expenses', $id, null, [
+    if ($action === 'create_expense') {
+        $stmt = $pdo->prepare("
+            INSERT INTO trip_expenses
+                (trip_id, recorded_by, expense_type, amount, quantity, other_description, expense_date, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->execute([$tripId, currentUserId(), $type, $amount, $quantity, $otherDescription, $date, $notes]);
+        $id = (int)$pdo->lastInsertId();
+        $message = 'Trip expense recorded.';
+        $auditAction = 'CREATE_TRIP_EXPENSE';
+    } else {
+        $exists = $pdo->prepare("SELECT expense_id FROM trip_expenses WHERE expense_id = ?");
+        $exists->execute([$expenseId]);
+        if (!$exists->fetchColumn()) {
+            echo json_encode(['success' => false, 'message' => 'Expense not found.']);
+            exit;
+        }
+        $stmt = $pdo->prepare("
+            UPDATE trip_expenses
+            SET trip_id = ?, expense_type = ?, amount = ?, quantity = ?, other_description = ?, expense_date = ?, notes = ?
+            WHERE expense_id = ?
+        ");
+        $stmt->execute([$tripId, $type, $amount, $quantity, $otherDescription, $date, $notes, $expenseId]);
+        $id = $expenseId;
+        $message = 'Trip expense updated.';
+        $auditAction = 'UPDATE_TRIP_EXPENSE';
+    }
+    auditLog($auditAction, 'trip_expenses', $id, null, [
         'trip_id' => $tripId, 'expense_type' => $type, 'amount' => $amount,
     ]);
-    echo json_encode(['success' => true, 'message' => 'Trip expense recorded.']);
+    echo json_encode(['success' => true, 'message' => $message]);
 } catch (PDOException $e) {
     error_log('trip_costs_handler/create: ' . $e->getMessage());
     echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);

@@ -584,7 +584,7 @@ $alertCount  = count($alerts);
             <label class="form-label usr-label" for="aeLicenseExpiry">
               License Expiry <span class="text-danger d-none" id="aeLicExpiryReq">*</span>
             </label>
-            <input type="date" class="form-control usr-input" id="aeLicenseExpiry">
+            <input type="date" class="form-control usr-input" id="aeLicenseExpiry" min="<?= date('Y-m-d') ?>">
           </div>
           <div class="col-md-4">
             <label class="form-label usr-label" for="aeLicenseType">
@@ -597,7 +597,7 @@ $alertCount  = count($alerts);
             <label class="form-label usr-label" for="aeDateHired">
               Date Hired <span class="text-danger d-none" id="aeDateHiredReq">*</span>
             </label>
-            <input type="date" class="form-control usr-input" id="aeDateHired">
+            <input type="date" class="form-control usr-input" id="aeDateHired" min="<?= date('Y-m-d') ?>">
           </div>
         </div>
       </div>

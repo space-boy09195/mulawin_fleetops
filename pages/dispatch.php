@@ -460,7 +460,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
           </div>
           <div class="col-md-6">
             <label class="disp-label">Scheduled Departure <span class="text-danger">*</span></label>
-            <input type="datetime-local" class="form-control disp-input" id="d_scheduled">
+            <input type="datetime-local" class="form-control disp-input" id="d_scheduled" min="<?= date('Y-m-d\TH:i') ?>">
           </div>
           <div class="col-12">
             <label class="disp-label">Remarks <span class="text-muted" style="font-weight:400;">(optional)</span></label>

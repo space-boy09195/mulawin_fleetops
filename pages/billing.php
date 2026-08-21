@@ -393,7 +393,7 @@ function isOverdue(string $dueDate, string $status): bool {
           </div>
           <div class="col-md-4">
             <label class="form-label bil-label" for="bilDueDate">Due Date</label>
-            <input type="date" class="form-control bil-input" id="bilDueDate" required>
+            <input type="date" class="form-control bil-input" id="bilDueDate" min="<?= date('Y-m-d') ?>" required>
           </div>
           <div class="col-md-4">
             <label class="form-label bil-label" for="bilBillingNumber">Billing No.</label>
@@ -443,7 +443,7 @@ function isOverdue(string $dueDate, string $status): bool {
           <div class="col-md-6">
             <label class="form-label bil-label" for="payDate">Payment Date</label>
             <input type="date" class="form-control bil-input" id="payDate"
-                   value="<?= date('Y-m-d') ?>" required>
+                   value="<?= date('Y-m-d') ?>" min="<?= date('Y-m-d') ?>" required>
           </div>
           <div class="col-md-6">
             <label class="form-label bil-label" for="payMode">Payment Mode</label>

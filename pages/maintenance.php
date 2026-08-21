@@ -70,7 +70,7 @@ $inspectionRows = $pdo->query("
     ORDER BY vi.inspection_date DESC, vi.created_at DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 $findingRows = $pdo->query("
-    SELECT inspection_id, view_name, part_name, condition, notes
+    SELECT inspection_id, view_name, part_name, `condition`, notes
     FROM vehicle_inspection_findings
     ORDER BY view_name, part_name
 ")->fetchAll(PDO::FETCH_ASSOC);

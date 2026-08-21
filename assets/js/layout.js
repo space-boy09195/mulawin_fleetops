@@ -42,6 +42,7 @@
 
   // ---- Sidebar Collapse ------------------------------------
   const COLLAPSED_KEY = 'mulawin_sidebar_collapsed';
+  const SCROLL_KEY = 'mulawin_sidebar_scroll_top';
 
   function setSidebarCollapsed(collapsed) {
     if (!sidebar || !appShell) return;
@@ -119,6 +120,11 @@
     // Restore the appropriate state for the current viewport.
     syncSidebarViewport();
 
+    const savedScrollTop = Number.parseInt(localStorage.getItem(SCROLL_KEY) || '0', 10);
+    if (Number.isFinite(savedScrollTop) && savedScrollTop > 0) {
+      sidebar.querySelector('.sidebar-nav')?.scrollTo(0, savedScrollTop);
+    }
+
     // The <html>.sidebar-precollapsed class + matching CSS in layout.php is
     // only a temporary bridge to prevent a flash before this script runs —
     // setSidebarCollapsed() above has now applied the real classes on
@@ -144,6 +150,11 @@
     }
 
     window.addEventListener('resize', syncSidebarViewport);
+
+    const sidebarNav = sidebar.querySelector('.sidebar-nav');
+    sidebarNav?.addEventListener('scroll', () => {
+      localStorage.setItem(SCROLL_KEY, String(sidebarNav.scrollTop));
+    }, { passive: true });
 
     // Theme toggle button
     if (themeToggleBtn) {

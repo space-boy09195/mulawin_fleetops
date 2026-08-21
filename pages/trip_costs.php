@@ -174,3 +174,4 @@ document.querySelectorAll('.expense-breakdown-btn').forEach((button) => {
   });
 });
 </script>
+<?php layoutFoot(); ?>

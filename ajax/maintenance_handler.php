@@ -21,6 +21,7 @@ if ($action === 'log_record') {
     $nextDue      = trim($_POST['next_due_date']  ?? '') ?: null;
     $cost         = $_POST['cost'] !== '' ? (float)$_POST['cost'] : null;
     $incidentId   = (int)($_POST['incident_id']   ?? 0) ?: null;
+    $inspectionId = (int)($_POST['inspection_id'] ?? 0) ?: null;
 
     $allowedTypes    = ['Preventive', 'Corrective', 'Inspection'];
     $allowedStatuses = ['Operational', 'Scheduled Maintenance', 'Under Repair'];
@@ -67,6 +68,15 @@ if ($action === 'log_record') {
             echo json_encode(['success' => false, 'message' => 'Incident does not belong to the selected truck.']);
             exit;
         }
+
+        if ($inspectionId) {
+            $inspectionCheck = $pdo->prepare("SELECT inspection_id FROM vehicle_inspections WHERE inspection_id = ? AND truck_id = ?");
+            $inspectionCheck->execute([$inspectionId, $truckId]);
+            if (!$inspectionCheck->fetch()) {
+                echo json_encode(['success' => false, 'message' => 'Inspection does not belong to the selected truck.']);
+                exit;
+            }
+        }
     }
 
     try {
@@ -74,12 +84,12 @@ if ($action === 'log_record') {
 
         $stmt = $pdo->prepare("
             INSERT INTO maintenance_records
-                (truck_id, performed_by, incident_id, maintenance_type, truck_status,
+                (truck_id, performed_by, incident_id, inspection_id, maintenance_type, truck_status,
                  description, cost, date_performed, next_due_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
         $stmt->execute([
-            $truckId, currentUserId(), $incidentId,
+            $truckId, currentUserId(), $incidentId, $inspectionId,
             $type, $truckStatus, $description,
             $cost, $datePerformed, $nextDue,
         ]);
@@ -111,6 +121,7 @@ if ($action === 'log_record') {
             'date_performed'   => $datePerformed,
             'cost'             => $cost,
             'incident_id'      => $incidentId,
+            'inspection_id'    => $inspectionId,
         ]);
 
         echo json_encode(['success' => true, 'message' => 'Maintenance record saved.', 'id' => $newId]);
@@ -132,19 +143,9 @@ if ($action === 'save_inspection') {
 
         if (!$truckId || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !is_array($findings)) {
             echo json_encode(['success' => false, 'message' => 'Vehicle, date, and valid inspection findings are required.']);
-        exit;
-}
-
-// ── Submit pre-trip checklist ─────────────────────────────────────────────────
-if ($action === 'submit_checklist') {
-
-        $dispatchId = (int)($_POST['dispatch_id'] ?? 0);
-        $notes      = trim($_POST['notes']        ?? '') ?: null;
-
-        if (!$dispatchId) {
-            echo json_encode(['success' => false, 'message' => 'Please select a dispatch.']);
             exit;
         }
+
         $truckCheck = $pdo->prepare("SELECT truck_id FROM trucks WHERE truck_id = ?");
         $truckCheck->execute([$truckId]);
         if (!$truckCheck->fetchColumn()) {
@@ -181,6 +182,16 @@ if ($action === 'submit_checklist') {
         exit;
     }
 
+// ── Submit pre-trip checklist ─────────────────────────────────────────────────
+if ($action === 'submit_checklist') {
+
+        $dispatchId = (int)($_POST['dispatch_id'] ?? 0);
+        $notes      = trim($_POST['notes']        ?? '') ?: null;
+
+        if (!$dispatchId) {
+            echo json_encode(['success' => false, 'message' => 'Please select a dispatch.']);
+            exit;
+        }
     // Verify dispatch exists and is approved
     $dispCheck = $pdo->prepare("
         SELECT dispatch_id, truck_id FROM dispatch_requests

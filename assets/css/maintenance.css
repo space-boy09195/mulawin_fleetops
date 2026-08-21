@@ -40,6 +40,10 @@
   transition: background 0.15s, box-shadow 0.15s;
 }
 
+.inspection-view {
+  border-radius: 0 !important;
+}
+
 .btn-mnt-primary:hover,
 .btn-mnt-primary:focus {
   background: #0b5ed7;

@@ -102,12 +102,13 @@
   const recNextDue    = document.getElementById('recNextDue');
   const recCost       = document.getElementById('recCost');
   const recIncidentId = document.getElementById('recIncidentId');
+  const recInspectionId = document.getElementById('recInspectionId');
   const submitRecordBtn = document.getElementById('submitRecordBtn');
   const recBtnSpinner = document.getElementById('recBtnSpinner');
   const recordFormAlert = document.getElementById('recordFormAlert');
 
   recordModal?.addEventListener('hidden.bs.modal', () => {
-    [recTruckId, recType, recTruckStatus, recDescription, recNextDue, recIncidentId].forEach(el => {
+    [recTruckId, recType, recTruckStatus, recDescription, recNextDue, recIncidentId, recInspectionId].forEach(el => {
       if (el) el.value = '';
     });
     if (recCost)         recCost.value         = '';
@@ -127,6 +128,7 @@
     const nextDue      = recNextDue?.value          ?? '';
     const cost         = recCost?.value             ?? '';
     const incidentId   = recIncidentId?.value       ?? '';
+    const inspectionId = recInspectionId?.value     ?? '';
 
     if (!truckId || !type || !truckStatus || !description || !datePerformed) {
       showAlert(recordFormAlert, 'Please fill in all required fields.');
@@ -145,6 +147,7 @@
       next_due_date: nextDue,
       cost,
       incident_id:   incidentId,
+      inspection_id: inspectionId,
     })
       .then(res => {
         setBusy(submitRecordBtn, recBtnSpinner, false);
@@ -246,6 +249,25 @@
       document.getElementById('descModalTruck').textContent = btn.dataset.truck || '';
       document.getElementById('descModalType').textContent  = btn.dataset.type  || '';
       document.getElementById('descModalText').textContent  = btn.dataset.description || '';
+      descModal?.show();
+    });
+  });
+
+  recTruckId?.addEventListener('change', () => {
+    recInspectionId?.querySelectorAll('option[data-truck-id]').forEach(option => {
+      option.hidden = option.dataset.truckId !== recTruckId.value;
+      if (option.hidden && option.selected) recInspectionId.value = '';
+    });
+  });
+
+  document.querySelectorAll('.inspection-result-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const result = JSON.parse(btn.dataset.inspection || '{}');
+      document.getElementById('descModalTruck').textContent = 'Vehicle Inspection';
+      document.getElementById('descModalType').textContent = result.date || '';
+      document.getElementById('descModalText').textContent =
+        `${result.notes ? `Overall notes: ${result.notes}\n` : ''}` +
+        (result.findings || []).map(f => `${f.view_name} — ${f.part_name}: ${f.condition}${f.notes ? ` (${f.notes})` : ''}`).join('\n');
       descModal?.show();
     });
   });

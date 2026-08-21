@@ -38,6 +38,39 @@ if (!strtotime($scheduledAt)) {
 
 $pdo = getDBConnection();
 
+// A driver/helper may be scheduled again only after the current trip is done,
+// and never twice on the same calendar day.
+$availability = $pdo->prepare("
+    SELECT dr.dispatch_id, dr.driver_id, dr.helper_id,
+           e_d.full_name AS driver_name,
+           e_h.full_name AS helper_name,
+           dr.scheduled_at
+    FROM dispatch_requests dr
+    JOIN employees e_d ON e_d.employee_id = dr.driver_id
+    LEFT JOIN employees e_h ON e_h.employee_id = dr.helper_id
+    LEFT JOIN trips t ON t.dispatch_id = dr.dispatch_id
+    WHERE dr.status IN ('Pending', 'Approved')
+      AND DATE(dr.scheduled_at) = DATE(?)
+      AND (t.trip_id IS NULL OR t.status NOT IN ('Completed', 'Cancelled'))
+      AND (dr.driver_id = ? OR (? IS NOT NULL AND dr.helper_id = ?))
+    LIMIT 1
+");
+$availability->execute([$scheduledAt, $driverId, $helperId, $helperId]);
+$busy = $availability->fetch(PDO::FETCH_ASSOC);
+if ($busy) {
+    $person = (int)$busy['driver_id'] === $driverId
+        ? $busy['driver_name']
+        : $busy['helper_name'];
+    if (!$person) {
+        $person = $busy['helper_name'];
+    }
+    echo json_encode([
+        'success' => false,
+        'message' => $person . ' is already assigned to an active dispatch on that date.',
+    ]);
+    exit;
+}
+
 // Ensure truck is still Available
 $truck = $pdo->prepare("SELECT status FROM trucks WHERE truck_id = :id LIMIT 1");
 $truck->execute([':id' => $truckId]);

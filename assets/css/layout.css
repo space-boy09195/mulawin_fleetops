@@ -951,6 +951,17 @@ body {
   box-shadow: none !important;
 }
 
+/* Dashboard title rows are open headers, not boxed cards. */
+.da-page .da-header,
+.dd-page .dd-header,
+.dm-page .dm-header {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 2px solid var(--card-border) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
 [class$="-page"] [class$="-title"],
 [class$="-page"] [class$="-widget-title"],
 [class$="-page"] [class$="-card-value"],

@@ -35,6 +35,20 @@ $rows = $pdo->query("
     LIMIT 100
 ")->fetchAll(PDO::FETCH_ASSOC);
 
+$expenseStmt = $pdo->query("
+    SELECT e.trip_id, e.expense_type, e.amount, e.quantity, e.expense_date,
+           e.notes, u.full_name AS recorded_by
+    FROM trip_expenses e
+    JOIN users u ON u.user_id = e.recorded_by
+    JOIN trips t ON t.trip_id = e.trip_id
+    WHERE t.status <> 'Cancelled'
+    ORDER BY e.expense_date DESC, e.created_at DESC
+");
+$expensesByTrip = [];
+foreach ($expenseStmt->fetchAll(PDO::FETCH_ASSOC) as $expense) {
+    $expensesByTrip[(int)$expense['trip_id']][] = $expense;
+}
+
 function expectedFuel(array $row): float {
     $distance = (float)($row['distance_km'] ?? 0);
     $efficiency = (float)($row['fuel_efficiency_km_per_liter'] ?? 0);
@@ -71,7 +85,13 @@ function expectedFuel(array $row): float {
         <td><?= htmlspecialchars($row['trip_number']) ?></td>
         <td><?= htmlspecialchars($row['plate_number']) ?></td>
         <td>₱<?= number_format((float)$row['revenue'], 2) ?></td>
-        <td>₱<?= number_format((float)$row['total_expense'], 2) ?></td>
+        <td>
+          <button type="button" class="btn btn-sm btn-outline-secondary expense-breakdown-btn"
+                  data-trip="<?= htmlspecialchars($row['trip_number']) ?>"
+                  data-expenses="<?= htmlspecialchars(json_encode($expensesByTrip[(int)$row['trip_id']] ?? []), ENT_QUOTES, 'UTF-8') ?>">
+            ₱<?= number_format((float)$row['total_expense'], 2) ?> <span aria-hidden="true">...</span>
+          </button>
+        </td>
         <td class="<?= $profit >= 0 ? 'text-success' : 'text-danger' ?>">₱<?= number_format($profit, 2) ?></td>
         <td>₱<?= number_format($cpk, 2) ?>/km</td>
         <td>
@@ -90,6 +110,19 @@ function expectedFuel(array $row): float {
       </tbody>
     </table>
     <?php if (!$rows): ?><div class="bil-empty"><p>No trip cost records yet.</p></div><?php endif; ?>
+  </div>
+
+  <div class="modal fade" id="expenseBreakdownModal" tabindex="-1" aria-labelledby="expenseBreakdownTitle">
+    <div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title" id="expenseBreakdownTitle">Expense Breakdown</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="table-responsive"><table class="table table-sm" id="expenseBreakdownTable">
+          <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Quantity</th><th>Notes</th><th>Recorded By</th></tr></thead>
+          <tbody></tbody><tfoot><tr><th colspan="2">Total</th><th id="expenseBreakdownTotal"></th><th colspan="3"></th></tr></tfoot>
+        </table></div>
+        <div id="expenseBreakdownEmpty" class="text-muted d-none">No manually recorded expenses for this trip.</div>
+      </div>
+    </div></div>
   </div>
 </div>
 
@@ -116,5 +149,28 @@ document.getElementById('expenseForm').addEventListener('submit', async function
   const result = await response.json();
   document.getElementById('expenseMessage').innerHTML = '<div class="alert alert-' + (result.success ? 'success' : 'danger') + '">' + result.message + '</div>';
   if (result.success) setTimeout(() => window.location.reload(), 700);
+});
+
+document.querySelectorAll('.expense-breakdown-btn').forEach((button) => {
+  button.addEventListener('click', () => {
+    const expenses = JSON.parse(button.dataset.expenses || '[]');
+    const tbody = document.querySelector('#expenseBreakdownTable tbody');
+    const empty = document.getElementById('expenseBreakdownEmpty');
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+    }[char]));
+    let total = 0;
+    tbody.innerHTML = expenses.map((expense) => {
+      total += Number(expense.amount);
+      return `<tr><td>${escapeHtml(expense.expense_date)}</td><td>${escapeHtml(expense.expense_type)}</td>` +
+        `<td>₱${Number(expense.amount).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>` +
+        `<td>${expense.quantity ? `${escapeHtml(expense.quantity)} L` : '—'}</td>` +
+        `<td>${escapeHtml(expense.notes || '—')}</td><td>${escapeHtml(expense.recorded_by)}</td></tr>`;
+    }).join('');
+    document.getElementById('expenseBreakdownTitle').textContent = `Expense Breakdown — ${button.dataset.trip}`;
+    document.getElementById('expenseBreakdownTotal').textContent = `₱${total.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+    empty.classList.toggle('d-none', expenses.length > 0);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('expenseBreakdownModal')).show();
+  });
 });
 </script>

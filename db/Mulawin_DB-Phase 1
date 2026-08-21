@@ -308,6 +308,7 @@ CREATE TABLE maintenance_records (
   truck_id         INT UNSIGNED  NOT NULL,
   performed_by     INT UNSIGNED  NOT NULL COMMENT 'References users.user_id (Maintenance role)',
   incident_id      INT UNSIGNED  NULL     COMMENT 'Link if this record resolves an incident',
+  inspection_id    INT UNSIGNED  NULL     COMMENT 'Vehicle inspection linked to this record',
   maintenance_type ENUM(
                      'Preventive',
                      'Corrective',
@@ -327,6 +328,7 @@ CREATE TABLE maintenance_records (
   INDEX idx_maint_truck    (truck_id),
   INDEX idx_maint_date     (date_performed),
   INDEX idx_maint_incident (incident_id),
+  INDEX idx_maint_inspection (inspection_id),
   CONSTRAINT fk_maint_truck     FOREIGN KEY (truck_id)    REFERENCES trucks    (truck_id),
   CONSTRAINT fk_maint_performer FOREIGN KEY (performed_by) REFERENCES users    (user_id),
   CONSTRAINT fk_maint_incident  FOREIGN KEY (incident_id) REFERENCES incidents (incident_id) ON DELETE SET NULL

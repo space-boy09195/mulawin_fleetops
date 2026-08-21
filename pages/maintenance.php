@@ -41,6 +41,7 @@ $recordsSql = "
         mr.cost,
         mr.date_performed,
         mr.next_due_date,
+        mr.inspection_id,
         mr.created_at,
         tr.plate_number,
         tr.brand,
@@ -59,6 +60,24 @@ $recordsStmt = $pdo->prepare($recordsSql);
 if ($rangeStartSql) $recordsStmt->bindValue(':rangeStart', $rangeStartSql);
 $recordsStmt->execute();
 $records = $recordsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+$inspectionRows = $pdo->query("
+    SELECT vi.inspection_id, vi.truck_id, vi.inspection_date, vi.notes,
+           tr.plate_number, u.full_name AS inspected_by
+    FROM vehicle_inspections vi
+    JOIN trucks tr ON tr.truck_id = vi.truck_id
+    JOIN users u ON u.user_id = vi.inspected_by
+    ORDER BY vi.inspection_date DESC, vi.created_at DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+$findingRows = $pdo->query("
+    SELECT inspection_id, view_name, part_name, condition, notes
+    FROM vehicle_inspection_findings
+    ORDER BY view_name, part_name
+")->fetchAll(PDO::FETCH_ASSOC);
+$findingsByInspection = [];
+foreach ($findingRows as $finding) {
+    $findingsByInspection[(int)$finding['inspection_id']][] = $finding;
+}
 
 // ── Checklists ────────────────────────────────────────────────────────────────
 $checklistSql = "
@@ -335,6 +354,7 @@ $checklistItems = [
               <th>Date Performed</th>
               <th>Next Due</th>
               <th>Performed By</th>
+              <th>Inspection Results</th>
               <th>Linked Incident</th>
             </tr>
           </thead>
@@ -386,6 +406,20 @@ $checklistItems = [
                 <?php endif; ?>
               </td>
               <td><?= htmlspecialchars($rec['performed_by_name']) ?></td>
+              <td>
+                <?php if ($rec['inspection_id'] && !empty($findingsByInspection[(int)$rec['inspection_id']])): ?>
+                <?php $inspection = array_values(array_filter($inspectionRows, fn($item) => (int)$item['inspection_id'] === (int)$rec['inspection_id']))[0] ?? null; ?>
+                <button type="button" class="mnt-desc-text inspection-result-btn"
+                        data-inspection="<?= htmlspecialchars(json_encode([
+                          'date' => $inspection['inspection_date'] ?? '',
+                          'notes' => $inspection['notes'] ?? '',
+                          'inspected_by' => $inspection['inspected_by'] ?? '',
+                          'findings' => $findingsByInspection[(int)$rec['inspection_id']],
+                        ]), ENT_QUOTES, 'UTF-8') ?>">
+                  View findings
+                </button>
+                <?php else: ?><span class="text-muted">—</span><?php endif; ?>
+              </td>
               <td>
                 <?php if ($rec['incident_id']): ?>
                 <span class="mnt-incident-link">
@@ -518,6 +552,17 @@ $checklistItems = [
               <?php foreach ($trucks as $tr): ?>
               <option value="<?= $tr['truck_id'] ?>">
                 <?= htmlspecialchars($tr['plate_number']) ?> — <?= htmlspecialchars($tr['brand'] . ' ' . $tr['model']) ?>
+              </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label mnt-label" for="recInspectionId">Vehicle Inspection (optional)</label>
+            <select class="form-select mnt-input" id="recInspectionId">
+              <option value="">— None —</option>
+              <?php foreach ($inspectionRows as $inspection): ?>
+              <option value="<?= $inspection['inspection_id'] ?>" data-truck-id="<?= $inspection['truck_id'] ?>">
+                <?= htmlspecialchars($inspection['plate_number']) ?> — <?= date('M d, Y', strtotime($inspection['inspection_date'])) ?>
               </option>
               <?php endforeach; ?>
             </select>

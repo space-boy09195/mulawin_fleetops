@@ -44,6 +44,7 @@
   const COLLAPSED_KEY = 'mulawin_sidebar_collapsed';
 
   function setSidebarCollapsed(collapsed) {
+    if (!sidebar || !appShell) return;
     if (collapsed) {
       sidebar.classList.add('collapsed');
       appShell.classList.add('sidebar-collapsed');
@@ -57,14 +58,30 @@
   function toggleSidebar() {
     // On mobile — use overlay mode
     if (window.innerWidth <= 768) {
+      // A desktop collapsed state must never carry into the mobile drawer.
+      sidebar.classList.remove('collapsed');
+      appShell.classList.remove('sidebar-collapsed');
       const isOpen = sidebar.classList.contains('mobile-open');
       sidebar.classList.toggle('mobile-open', !isOpen);
-      overlay.classList.toggle('active', !isOpen);
+      if (overlay) overlay.classList.toggle('active', !isOpen);
       return;
     }
+    sidebar.classList.remove('mobile-open');
+    if (overlay) overlay.classList.remove('active');
     // On desktop — collapse to icon-only
     const isCollapsed = sidebar.classList.contains('collapsed');
     setSidebarCollapsed(!isCollapsed);
+  }
+
+  function syncSidebarViewport() {
+    if (window.innerWidth <= 768) {
+      sidebar.classList.remove('collapsed');
+      appShell.classList.remove('sidebar-collapsed');
+      return;
+    }
+    sidebar.classList.remove('mobile-open');
+    if (overlay) overlay.classList.remove('active');
+    setSidebarCollapsed(localStorage.getItem(COLLAPSED_KEY) === '1');
   }
 
   // ---- Active nav link -------------------------------------
@@ -99,11 +116,8 @@
     const savedTheme = localStorage.getItem(THEME_KEY) || THEMES.light;
     applyTheme(savedTheme);
 
-    // Restore sidebar collapsed state (desktop only)
-    if (window.innerWidth > 768) {
-      const wasCollapsed = localStorage.getItem(COLLAPSED_KEY) === '1';
-      setSidebarCollapsed(wasCollapsed);
-    }
+    // Restore the appropriate state for the current viewport.
+    syncSidebarViewport();
 
     // The <html>.sidebar-precollapsed class + matching CSS in layout.php is
     // only a temporary bridge to prevent a flash before this script runs —
@@ -128,6 +142,8 @@
         overlay.classList.remove('active');
       });
     }
+
+    window.addEventListener('resize', syncSidebarViewport);
 
     // Theme toggle button
     if (themeToggleBtn) {

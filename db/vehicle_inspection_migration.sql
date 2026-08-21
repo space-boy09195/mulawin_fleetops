@@ -32,3 +32,10 @@ ALTER TABLE vehicle_inspection_findings
 ALTER TABLE vehicle_inspection_findings
   MODIFY condition ENUM('Good','Needs Attention','Damaged','Missing','Leaking','Worn','Not Checked')
   NOT NULL DEFAULT 'Not Checked';
+
+ALTER TABLE maintenance_records
+  ADD COLUMN inspection_id INT UNSIGNED NULL
+  COMMENT 'Vehicle inspection linked to this record',
+  ADD INDEX idx_maint_inspection (inspection_id),
+  ADD CONSTRAINT fk_maint_inspection
+    FOREIGN KEY (inspection_id) REFERENCES vehicle_inspections (inspection_id) ON DELETE SET NULL;

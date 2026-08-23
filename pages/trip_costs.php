@@ -133,14 +133,16 @@ function expectedFuel(array $row): float {
       <div class="modal-header"><h5 class="modal-title" id="expenseModalTitle">Record Trip Expense</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body expense-receipt-layout">
         <div class="expense-entry-panel">
-        <input type="hidden" name="action" value="create_expense">
-        <input type="hidden" name="expense_id" value="">
-        <div class="mb-3"><label class="form-label">Trip</label><select name="trip_id" class="form-select" required><option value="">Select trip</option><?php foreach ($trips as $trip): ?><option value="<?= $trip['trip_id'] ?>"><?= htmlspecialchars($trip['trip_number'] . ' — ' . $trip['plate_number']) ?></option><?php endforeach; ?></select></div>
-        <div class="row g-2"><div class="col-md-6"><label class="form-label">Type</label><select name="expense_type" id="expenseType" class="form-select" required><option>Fuel</option><option>Toll</option><option>Driver Allowance</option><option>Other</option></select></div><div class="col-md-6"><label class="form-label">Amount (₱)</label><input name="amount" id="expenseAmount" type="number" min="0.01" step="0.01" class="form-control" required></div></div>
-        <div id="otherDescriptionWrap" class="mt-2 d-none"><label class="form-label">What is it?</label><input name="other_description" id="otherDescription" class="form-control" maxlength="255" placeholder="Describe this expense"></div>
-        <div class="row g-2 mt-1"><div class="col-md-6"><label class="form-label">Fuel quantity (L)</label><input name="quantity" id="expenseQuantity" type="number" min="0.01" step="0.01" class="form-control"></div><div class="col-md-6"><label class="form-label">Date</label><input name="expense_date" id="expenseDate" type="date" value="<?= date('Y-m-d') ?>" min="<?= date('Y-m-d') ?>" class="form-control" required></div></div>
-        <div class="mt-2"><label class="form-label">Notes</label><input name="notes" class="form-control" maxlength="255"></div>
-        <div id="expenseMessage" class="mt-3"></div>
+          <input type="hidden" name="action" value="create_expense">
+          <input type="hidden" name="expense_id" value="">
+          <div class="mb-3"><label class="form-label">Trip</label><select name="trip_id" class="form-select" required><option value="">Select trip</option><?php foreach ($trips as $trip): ?><option value="<?= $trip['trip_id'] ?>"><?= htmlspecialchars($trip['trip_number'] . ' — ' . $trip['plate_number']) ?></option><?php endforeach; ?></select></div>
+          <div class="row g-2 mb-3"><div class="col-md-12"><label class="form-label">Date</label><input name="expense_date" id="expenseDate" type="date" value="<?= date('Y-m-d') ?>" min="<?= date('Y-m-d') ?>" class="form-control" required></div></div>
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <label class="form-label mb-0">Expense entries</label>
+            <button type="button" id="addExpenseRow" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus-lg me-1"></i>Add item</button>
+          </div>
+          <div id="expenseRows" class="d-grid gap-3"></div>
+          <div id="expenseMessage" class="mt-3"></div>
         </div>
         <aside class="expense-receipt" aria-label="Expense receipt preview">
           <div class="receipt-heading"><span>EXPENSE RECEIPT</span><small id="receiptDate"><?= date('Y-m-d') ?></small></div>
@@ -154,27 +156,131 @@ function expectedFuel(array $row): float {
 </div>
 <script>
 const expenseForm = document.getElementById('expenseForm');
-const expenseType = document.getElementById('expenseType');
-const expenseAmount = document.getElementById('expenseAmount');
+const expenseRows = document.getElementById('expenseRows');
 const expenseDate = document.getElementById('expenseDate');
-const otherWrap = document.getElementById('otherDescriptionWrap');
 const receiptItems = document.getElementById('receiptItems');
 const receiptTotal = document.getElementById('receiptTotal');
+const addExpenseRowButton = document.getElementById('addExpenseRow');
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'}[char]));
-function updateReceipt() {
-  const type = expenseType.value === 'Other' && document.getElementById('otherDescription').value.trim()
-    ? document.getElementById('otherDescription').value.trim() : expenseType.value;
-  const amount = Number(expenseAmount.value || 0);
-  document.getElementById('receiptDate').textContent = expenseDate.value || '—';
-  receiptItems.innerHTML = amount > 0 ? `<div class="receipt-line"><span>${escapeHtml(type || 'Expense')}</span><strong>₱${amount.toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></div>` : '<div class="text-muted">Enter an amount to preview it here.</div>';
-  receiptTotal.textContent = `₱${amount.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+
+function buildExpenseRow(index) {
+  const row = document.createElement('div');
+  row.className = 'expense-item border rounded p-3';
+  row.dataset.index = String(index);
+  row.innerHTML = `
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <span class="fw-semibold">Expense <span class="expense-row-number">${index + 1}</span></span>
+      <button type="button" class="btn btn-sm btn-outline-danger remove-expense-row">Remove</button>
+    </div>
+    <div class="row g-2">
+      <div class="col-md-4"><label class="form-label">Type</label><select name="expenses[${index}][expense_type]" class="form-select expense-item-type" required><option>Fuel</option><option>Toll</option><option>Driver Allowance</option><option>Other</option></select></div>
+      <div class="col-md-4"><label class="form-label">Amount (₱)</label><input name="expenses[${index}][amount]" type="number" min="0.01" step="0.01" class="form-control expense-item-amount" required></div>
+      <div class="col-md-4 expense-item-quantity-wrap"><label class="form-label">Fuel quantity (L)</label><input name="expenses[${index}][quantity]" type="number" min="0.01" step="0.01" class="form-control expense-item-quantity"></div>
+    </div>
+    <div class="expense-item-other-wrap mt-2 d-none"><label class="form-label">What is it?</label><input name="expenses[${index}][other_description]" class="form-control expense-item-other-description" maxlength="255" placeholder="Describe this expense"></div>
+    <div class="mt-2"><label class="form-label">Notes</label><input name="expenses[${index}][notes]" class="form-control expense-item-notes" maxlength="255"></div>
+  `;
+
+  const typeSelect = row.querySelector('.expense-item-type');
+  const quantityWrap = row.querySelector('.expense-item-quantity-wrap');
+  const otherWrap = row.querySelector('.expense-item-other-wrap');
+  const otherDescription = row.querySelector('.expense-item-other-description');
+  const amountInput = row.querySelector('.expense-item-amount');
+  const removeButton = row.querySelector('.remove-expense-row');
+
+  const syncTypeFields = () => {
+    const isOther = typeSelect.value === 'Other';
+    const isFuel = typeSelect.value === 'Fuel';
+    otherWrap.classList.toggle('d-none', !isOther);
+    quantityWrap.classList.toggle('d-none', !isFuel);
+    if (!isFuel) row.querySelector('.expense-item-quantity').value = '';
+    if (!isOther) otherDescription.value = '';
+  };
+
+  typeSelect.addEventListener('change', syncTypeFields);
+  amountInput.addEventListener('input', updateReceipt);
+  [otherDescription, expenseDate].forEach((el) => el && el.addEventListener('input', updateReceipt));
+  removeButton.addEventListener('click', () => {
+    if (document.querySelectorAll('.expense-item').length > 1) {
+      row.remove();
+      updateExpenseRowNumbers();
+      updateReceipt();
+    }
+  });
+
+  syncTypeFields();
+  return row;
 }
-expenseType.addEventListener('change', () => { otherWrap.classList.toggle('d-none', expenseType.value !== 'Other'); updateReceipt(); });
-[expenseAmount, expenseDate, document.getElementById('otherDescription')].forEach((el) => el.addEventListener('input', updateReceipt));
+
+function updateExpenseRowNumbers() {
+  document.querySelectorAll('.expense-item').forEach((row, index) => {
+    row.querySelector('.expense-row-number').textContent = index + 1;
+    const typeSelect = row.querySelector('.expense-item-type');
+    const amountInput = row.querySelector('.expense-item-amount');
+    const quantityInput = row.querySelector('.expense-item-quantity');
+    const otherInput = row.querySelector('.expense-item-other-description');
+    const notesInput = row.querySelector('.expense-item-notes');
+    if (typeSelect) typeSelect.name = `expenses[${index}][expense_type]`;
+    if (amountInput) amountInput.name = `expenses[${index}][amount]`;
+    if (quantityInput) quantityInput.name = `expenses[${index}][quantity]`;
+    if (otherInput) otherInput.name = `expenses[${index}][other_description]`;
+    if (notesInput) notesInput.name = `expenses[${index}][notes]`;
+  });
+}
+
+function addExpenseRow() {
+  const index = document.querySelectorAll('.expense-item').length;
+  expenseRows.appendChild(buildExpenseRow(index));
+  updateExpenseRowNumbers();
+  updateReceipt();
+}
+
+function updateReceipt() {
+  const entries = [...document.querySelectorAll('.expense-item')].map((row) => {
+    const type = row.querySelector('.expense-item-type').value;
+    const amount = Number(row.querySelector('.expense-item-amount').value || 0);
+    const customLabel = type === 'Other' ? (row.querySelector('.expense-item-other-description').value.trim() || 'Other') : type;
+    return { type: customLabel, amount };
+  }).filter((entry) => entry.amount > 0);
+
+  document.getElementById('receiptDate').textContent = expenseDate.value || '—';
+  if (!entries.length) {
+    receiptItems.innerHTML = '<div class="text-muted">Enter an amount to preview it here.</div>';
+    receiptTotal.textContent = '₱0.00';
+    return;
+  }
+
+  const total = entries.reduce((sum, entry) => sum + entry.amount, 0);
+  receiptItems.innerHTML = entries.map((entry) => `
+    <div class="receipt-line"><span>${escapeHtml(entry.type || 'Expense')}</span><strong>₱${entry.amount.toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></div>
+  `).join('');
+  receiptTotal.textContent = `₱${total.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+}
+
+addExpenseRowButton.addEventListener('click', addExpenseRow);
+expenseDate.addEventListener('input', updateReceipt);
 expenseForm.addEventListener('submit', async function (event) {
   event.preventDefault();
+  const rows = [...document.querySelectorAll('.expense-item')];
+  if (!rows.length) {
+    document.getElementById('expenseMessage').innerHTML = '<div class="alert alert-danger">Add at least one expense entry.</div>';
+    return;
+  }
+  const validEntries = rows.filter((row) => {
+    const type = row.querySelector('.expense-item-type').value;
+    const amount = Number(row.querySelector('.expense-item-amount').value || 0);
+    const quantity = row.querySelector('.expense-item-quantity');
+    const other = row.querySelector('.expense-item-other-description');
+    return type && amount > 0 && (!quantity || Number(quantity.value || 0) > 0 || type !== 'Fuel') && (type !== 'Other' || other.value.trim());
+  });
+
+  if (validEntries.length !== rows.length) {
+    document.getElementById('expenseMessage').innerHTML = '<div class="alert alert-danger">Every expense needs a valid type and amount, and fuel entries require liters.</div>';
+    return;
+  }
+
   const response = await fetch(this.action, { method: 'POST', body: new URLSearchParams(new FormData(this)) });
-   const result = await response.json();
+  const result = await response.json();
   document.getElementById('expenseMessage').innerHTML = '<div class="alert alert-' + (result.success ? 'success' : 'danger') + '">' + result.message + '</div>';
   if (result.success) setTimeout(() => window.location.reload(), 700);
 });
@@ -207,16 +313,29 @@ document.addEventListener('click', (event) => {
   const button = event.target.closest('.edit-expense-btn');
   if (!button) return;
   const expense = JSON.parse(button.dataset.expense);
-  Object.entries({expense_id: expense.expense_id, trip_id: expense.trip_id, expense_type: expense.expense_type, amount: expense.amount, quantity: expense.quantity || '', other_description: expense.other_description || '', expense_date: expense.expense_date, notes: expense.notes || ''}).forEach(([name, value]) => expenseForm.elements[name].value = value);
+  expenseRows.innerHTML = '';
+  const row = buildExpenseRow(0);
+  row.querySelector('.expense-item-type').value = expense.expense_type;
+  row.querySelector('.expense-item-amount').value = expense.amount;
+  row.querySelector('.expense-item-quantity').value = expense.quantity || '';
+  row.querySelector('.expense-item-other-description').value = expense.other_description || '';
+  row.querySelector('.expense-item-notes').value = expense.notes || '';
+  row.querySelector('.remove-expense-row').style.display = 'none';
+  row.querySelector('.expense-item-type').dispatchEvent(new Event('change'));
+  expenseRows.appendChild(row);
+  expenseForm.elements.trip_id.value = expense.trip_id;
+  expenseForm.elements.expense_date.value = expense.expense_date;
+  expenseForm.elements.expense_id.value = expense.expense_id;
   expenseForm.elements.action.value = 'update_expense';
   expenseDate.removeAttribute('min');
   document.getElementById('expenseModalTitle').textContent = 'Edit Trip Expense';
   document.getElementById('expenseSubmitText').textContent = 'Update Expense';
-  otherWrap.classList.toggle('d-none', expense.expense_type !== 'Other');
   updateReceipt();
   bootstrap.Modal.getOrCreateInstance(document.getElementById('expenseModal')).show();
 });
 document.getElementById('expenseModal').addEventListener('hidden.bs.modal', () => {
+  expenseRows.innerHTML = '';
+  addExpenseRow();
   expenseForm.reset();
   expenseForm.elements.action.value = 'create_expense';
   expenseForm.elements.expense_id.value = '';
@@ -224,8 +343,12 @@ document.getElementById('expenseModal').addEventListener('hidden.bs.modal', () =
   expenseDate.value = '<?= date('Y-m-d') ?>';
   document.getElementById('expenseModalTitle').textContent = 'Record Trip Expense';
   document.getElementById('expenseSubmitText').textContent = 'Save Expense';
-  otherWrap.classList.add('d-none');
+  document.getElementById('expenseMessage').innerHTML = '';
   updateReceipt();
 });
+
+expenseRows.innerHTML = '';
+addExpenseRow();
+updateReceipt();
 </script>
 <?php layoutFoot(); ?>

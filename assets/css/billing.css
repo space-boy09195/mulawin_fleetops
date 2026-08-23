@@ -454,6 +454,26 @@
   gap: 1.5rem;
 }
 
+.expense-entry-panel {
+  min-width: 0;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#expenseRows {
+  display: grid;
+  gap: 1rem;
+  max-height: 52vh;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.expense-item {
+  background: #fff;
+  border: 1px solid var(--bs-border-color);
+}
+
 .expense-receipt {
   align-self: stretch;
   padding: 1.25rem;

@@ -8,6 +8,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/alerts.php';
 
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE, ROLE_ACCOUNTING]);
 $role   = currentRoleId();
@@ -491,6 +492,51 @@ $GLOBALS['analytics_data'] = json_encode([
     </div>
     <?php endif; ?>
   </div>
+
+  <!-- Alerts (rule-based) -->
+  <?php
+  // Build metrics bag for alerts helper
+  $metricsForAlerts = [
+      'utilizationRate' => $utilizationRate ?? null,
+      'collectionRate'  => $collectionRate ?? null,
+      'onTimeRate'      => $onTimeRate ?? null,
+      'maintCost'       => $maintCost ?? null,
+      'revTrend'        => $revTrend ?? [],
+      'costTrend'       => $costTrend ?? [],
+  ];
+  $alerts = getAnalyticsAlerts($pdo, $metricsForAlerts, $periodLabel);
+  ?>
+
+  <?php if (!empty($alerts)): ?>
+  <div class="an-alerts">
+    <div class="an-alerts-header">
+      <i class="bi bi-exclamation-circle"></i> Attention
+      <span class="an-alerts-count"><?= count($alerts) ?></span>
+    </div>
+    <table class="table an-table">
+      <thead><tr><th>Alert</th><th>Severity</th><th>Source</th><th>Detail</th></tr></thead>
+      <tbody>
+        <?php foreach ($alerts as $a): ?>
+        <tr>
+          <td><?= htmlspecialchars($a['alert']) ?></td>
+          <td>
+            <?php
+            $sevCls = match($a['severity']) {
+                'Critical' => 'an-sev-critical',
+                'Warning'  => 'an-sev-warning',
+                default    => 'an-sev-info',
+            };
+            ?>
+            <span class="an-severity <?= $sevCls ?>"><?= htmlspecialchars($a['severity']) ?></span>
+          </td>
+          <td class="an-muted"><?= htmlspecialchars($a['source']) ?></td>
+          <td class="an-muted"><?= htmlspecialchars($a['detail']) ?> <?php if (!empty($a['action_url'])): ?><a class="an-action-link" href="<?= APP_BASE . $a['action_url'] ?>">Take action</a><?php endif; ?></td>
+        </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+  <?php endif; ?>
 
   <!-- Chart grid -->
   <div class="an-grid">

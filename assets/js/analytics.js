@@ -378,4 +378,16 @@
       URL.revokeObjectURL(url);
     });
   });
+
+  // ── Alert card toggles (Analytics page) ───────────────────────────────────
+  document.querySelectorAll('.an-alert-toggle').forEach(btn => {
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const id = btn.dataset.target;
+      const el = document.getElementById(id);
+      if (!el) return;
+      const shown = el.classList.toggle('show');
+      btn.textContent = shown ? 'Hide details' : 'Show details';
+    });
+  });
 })();

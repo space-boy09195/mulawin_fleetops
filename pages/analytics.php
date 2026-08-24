@@ -508,34 +508,44 @@ $GLOBALS['analytics_data'] = json_encode([
   ?>
 
   <?php if (!empty($alerts)): ?>
-  <div class="an-alerts">
-    <div class="an-alerts-header">
-      <i class="bi bi-exclamation-circle"></i> Attention
-      <span class="an-alerts-count"><?= count($alerts) ?></span>
-    </div>
-    <table class="table an-table">
-      <thead><tr><th>Alert</th><th>Severity</th><th>Source</th><th>Detail</th></tr></thead>
-      <tbody>
-        <?php foreach ($alerts as $a): ?>
-        <tr>
-          <td><?= htmlspecialchars($a['alert']) ?></td>
-          <td>
-            <?php
-            $sevCls = match($a['severity']) {
-                'Critical' => 'an-sev-critical',
-                'Warning'  => 'an-sev-warning',
-                default    => 'an-sev-info',
-            };
-            ?>
-            <span class="an-severity <?= $sevCls ?>"><?= htmlspecialchars($a['severity']) ?></span>
-          </td>
-          <td class="an-muted"><?= htmlspecialchars($a['source']) ?></td>
-          <td class="an-muted"><?= htmlspecialchars($a['detail']) ?> <?php if (!empty($a['action_url'])): ?><a class="an-action-link" href="<?= APP_BASE . $a['action_url'] ?>">Take action</a><?php endif; ?></td>
-        </tr>
-        <?php endforeach; ?>
-      </tbody>
-    </table>
+  <?php
+    $critCount = count(array_filter($alerts, fn($x) => $x['severity'] === 'Critical'));
+    $warnCount = count(array_filter($alerts, fn($x) => $x['severity'] === 'Warning'));
+    $infoCount = count(array_filter($alerts, fn($x) => $x['severity'] === 'Info'));
+    $topAlert  = $alerts[0] ?? null;
+  ?>
+
+  <div class="an-alerts-summary">
+    <div class="an-alert-summary-item"><span class="an-alert-count"><?= $critCount ?></span> Critical</div>
+    <div class="an-alert-summary-item"><span class="an-alert-count" style="background:rgba(255,193,7,0.12);color:#856404"><?= $warnCount ?></span> Warnings</div>
+    <div class="an-alert-summary-item"><span class="an-alert-count" style="background:rgba(13,110,253,0.06);color:#0d6efd"><?= $infoCount ?></span> Info</div>
+    <?php if ($topAlert): ?>
+    <div class="an-alert-summary-item" style="margin-left:auto;font-weight:700;">Top: <?= htmlspecialchars($topAlert['alert']) ?></div>
+    <?php endif; ?>
   </div>
+
+  <div class="an-alert-cards">
+    <?php foreach ($alerts as $i => $a):
+      $priorityClass = $a['priority'] ?? ($a['severity'] === 'Critical' ? 'high' : 'medium');
+      $prioLabel = strtoupper($a['priority'] ?? ($a['severity'] === 'Critical' ? 'HIGH' : 'MED'));
+    ?>
+    <div class="dh-rec-card an-alert-card dh-rec-<?= htmlspecialchars($priorityClass) ?>">
+      <div class="dh-rec-priority dh-rec-priority-<?= htmlspecialchars($priorityClass) ?> an-alert-priority"><?= htmlspecialchars($prioLabel) ?></div>
+      <div class="dh-rec-body an-alert-body">
+        <div class="an-alert-title"><?= htmlspecialchars($a['alert']) ?> <span style="font-size:0.78rem;color:var(--bs-secondary-color);">&mdash; <?= htmlspecialchars($a['source']) ?></span></div>
+        <div class="an-alert-summary-text" style="color:var(--bs-secondary-color);font-size:0.9rem;"><?= htmlspecialchars(substr($a['detail'],0,120)) ?><?= strlen($a['detail'])>120 ? '...' : '' ?></div>
+        <div id="alertDetail<?= $i ?>" class="an-alert-detail"><?= htmlspecialchars($a['detail']) ?></div>
+      </div>
+      <div class="an-alert-actions">
+        <?php if (!empty($a['action_url'])): ?>
+          <a class="dh-rec-action" href="<?= APP_BASE . $a['action_url'] ?>">Take action</a>
+        <?php endif; ?>
+        <button class="an-alert-toggle" data-target="alertDetail<?= $i ?>">Show details</button>
+      </div>
+    </div>
+    <?php endforeach; ?>
+  </div>
+
   <?php endif; ?>
 
   <!-- Chart grid -->

@@ -163,6 +163,7 @@ $onTimeRate     = $completedTrips > 0 ? round((($completedTrips - $lateCount) / 
 
 // ── KPI: Fleet utilization (distinct trucks dispatched / total trucks) ───────
 $totalTrucks = (int)$pdo->query("SELECT COUNT(*) FROM trucks")->fetchColumn();
+$avgCostPerTruck = $totalTrucks > 0 ? $maintCost / $totalTrucks : 0;
 $utilizedTrucks = (int)qRange($pdo, "
     SELECT COUNT(DISTINCT dr.truck_id)
     FROM dispatch_requests dr
@@ -293,8 +294,6 @@ if ($role === ROLE_MAINTENANCE) {
     $maintRecordsLoggedCount = (int)qRange($pdo, "
         SELECT COUNT(*) FROM maintenance_records WHERE date_performed >= :rangeStart
     ", $rangeStartSql)->fetchColumn();
-
-    $avgCostPerTruck = $totalTrucks > 0 ? $maintCost / $totalTrucks : 0;
 
     $topTrucksByMaintCost = qRange($pdo, "
         SELECT tr.plate_number, tr.brand, tr.model,
@@ -534,13 +533,12 @@ $GLOBALS['analytics_data'] = json_encode([
       <div class="dh-rec-body an-alert-body">
         <div class="an-alert-title"><?= htmlspecialchars($a['alert']) ?> <span style="font-size:0.78rem;color:var(--bs-secondary-color);">&mdash; <?= htmlspecialchars($a['source']) ?></span></div>
         <div class="an-alert-summary-text" style="color:var(--bs-secondary-color);font-size:0.9rem;"><?= htmlspecialchars(substr($a['detail'],0,120)) ?><?= strlen($a['detail'])>120 ? '...' : '' ?></div>
-        <div id="alertDetail<?= $i ?>" class="an-alert-detail"><?= htmlspecialchars($a['detail']) ?></div>
       </div>
       <div class="an-alert-actions">
         <?php if (!empty($a['action_url'])): ?>
           <a class="dh-rec-action" href="<?= APP_BASE . $a['action_url'] ?>">Take action</a>
         <?php endif; ?>
-        <button class="an-alert-toggle" data-target="alertDetail<?= $i ?>">Show details</button>
+        <button class="an-alert-toggle" data-title="<?= htmlspecialchars($a['alert']) ?>" data-detail="<?= htmlspecialchars($a['detail']) ?>" data-prescription="<?= htmlspecialchars(json_encode($a['prescription'] ?? []), ENT_QUOTES) ?>" data-action="<?= !empty($a['action_url']) ? (APP_BASE . $a['action_url']) : '' ?>">Show details</button>
       </div>
     </div>
     <?php endforeach; ?>

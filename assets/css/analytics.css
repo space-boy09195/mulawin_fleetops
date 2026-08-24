@@ -385,6 +385,9 @@
   grid-template-columns: repeat(2, 1fr);
   gap: 0.9rem;
   margin-bottom: 1rem;
+  max-height: 360px; /* prevent infinite expansion */
+  overflow-y: auto;
+  padding-right: 6px; /* room for scrollbar */
 }
 
 .an-alert-card {
@@ -438,6 +441,44 @@
   color: var(--bs-secondary-color);
   cursor: pointer;
   font-weight: 600;
+}
+
+/* popover that appears when Show details is clicked */
+.an-alert-popover {
+  position: absolute;
+  z-index: 1200;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(23,35,27,0.12);
+  padding: 14px;
+  width: 320px;
+  max-width: calc(100vw - 40px);
+}
+
+.an-alert-popover h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.98rem;
+}
+
+.an-alert-prescriptions {
+  margin-top: 8px;
+  font-size: 0.9rem;
+}
+
+.an-alert-prescriptions li {
+  margin-bottom: 6px;
+}
+
+.an-alert-popover .close-pop {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  font-weight: 700;
+  color: var(--bs-secondary-color);
+  cursor: pointer;
 }
 
 @media (max-width: 900px) {

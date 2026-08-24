@@ -379,15 +379,89 @@
     });
   });
 
-  // ── Alert card toggles (Analytics page) ───────────────────────────────────
+  // ── Alert popover behavior (Analytics page) ──────────────────────────────
+  const popover = document.createElement('div');
+  popover.className = 'an-alert-popover';
+  popover.style.display = 'none';
+  document.body.appendChild(popover);
+
+  function closePopover() {
+    popover.style.display = 'none';
+    popover.innerHTML = '';
+  }
+
+  document.addEventListener('click', (ev) => {
+    // close when clicking outside
+    if (!popover.contains(ev.target) && !ev.target.closest('.an-alert-toggle')) {
+      closePopover();
+    }
+  });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closePopover(); });
+
   document.querySelectorAll('.an-alert-toggle').forEach(btn => {
     btn.addEventListener('click', (ev) => {
       ev.preventDefault();
-      const id = btn.dataset.target;
-      const el = document.getElementById(id);
-      if (!el) return;
-      const shown = el.classList.toggle('show');
-      btn.textContent = shown ? 'Hide details' : 'Show details';
+      const detail = btn.dataset.detail || '';
+      const presJson = btn.dataset.prescription || '[]';
+      let prescriptions = [];
+      try { prescriptions = JSON.parse(presJson); } catch (e) { prescriptions = []; }
+      const actionUrl = btn.dataset.action || '';
+      const title = btn.dataset.title || 'Detail';
+
+      popover.innerHTML = '';
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'close-pop';
+      closeBtn.textContent = '×';
+      closeBtn.addEventListener('click', closePopover);
+      popover.appendChild(closeBtn);
+
+      const h = document.createElement('h4');
+      h.textContent = title;
+      popover.appendChild(h);
+
+      const p = document.createElement('div');
+      p.style.color = 'var(--bs-secondary-color)';
+      p.style.fontSize = '0.95rem';
+      p.textContent = detail;
+      popover.appendChild(p);
+
+      if (prescriptions.length) {
+        const pres = document.createElement('div');
+        pres.className = 'an-alert-prescriptions';
+        const presTitle = document.createElement('div');
+        presTitle.style.fontWeight = '700';
+        presTitle.style.marginTop = '8px';
+        presTitle.textContent = 'Suggested actions';
+        pres.appendChild(presTitle);
+        const ul = document.createElement('ul');
+        prescriptions.forEach(it => {
+          const li = document.createElement('li');
+          li.textContent = it;
+          ul.appendChild(li);
+        });
+        pres.appendChild(ul);
+        popover.appendChild(pres);
+      }
+
+      if (actionUrl) {
+        const a = document.createElement('a');
+        a.href = actionUrl;
+        a.className = 'dh-rec-action';
+        a.style.display = 'inline-block';
+        a.style.marginTop = '10px';
+        a.textContent = 'Take action';
+        popover.appendChild(a);
+      }
+
+      // position popover near the button, but keep inside viewport
+      const rect = btn.getBoundingClientRect();
+      const docLeft = window.pageXOffset || document.documentElement.scrollLeft;
+      const docTop = window.pageYOffset || document.documentElement.scrollTop;
+      const left = Math.min(Math.max(docLeft + rect.left, 12), window.innerWidth - 340);
+      const top = docTop + rect.bottom + 8;
+      popover.style.left = left + 'px';
+      popover.style.top = top + 'px';
+      popover.style.display = 'block';
     });
   });
 })();

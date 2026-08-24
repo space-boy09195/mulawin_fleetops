@@ -16,7 +16,12 @@ function getAnalyticsAlerts(PDO $pdo, array $metrics, string $periodLabel): arra
             'detail' => "Fleet utilization is {$util}% for {$periodLabel} — consider reassigning idle trucks or promoting load consolidation.",
             'action_url' => '/pages/fleet_status.php',
             'type' => 'utilization',
-        ];
+                'prescription' => [
+                    'Review idle truck list and assign to pending dispatches.',
+                    'Check recent trip cancellations and contact affected clients.',
+                    'Consider promotions or consolidated loads to increase utilization.'
+                ],
+            ];
     }
 
     $coll = isset($metrics['collectionRate']) ? (float)$metrics['collectionRate'] : null;
@@ -28,7 +33,12 @@ function getAnalyticsAlerts(PDO $pdo, array $metrics, string $periodLabel): arra
             'detail' => "Collection rate is {$coll}% for {$periodLabel} — follow up on overdue invoices.",
             'action_url' => '/pages/billing.php',
             'type' => 'collections',
-        ];
+                'prescription' => [
+                    'Open the overdue invoices report and prioritize top balances.',
+                    'Call or email clients with invoices older than 30 days.',
+                    'Offer partial-payment plans where appropriate and record promises to pay.'
+                ],
+            ];
     }
 
     $onTime = isset($metrics['onTimeRate']) ? (float)$metrics['onTimeRate'] : null;
@@ -40,7 +50,12 @@ function getAnalyticsAlerts(PDO $pdo, array $metrics, string $periodLabel): arra
             'detail' => "On-time delivery is {$onTime}% for {$periodLabel} — investigate delays or scheduling issues.",
             'action_url' => '/pages/trip_monitor.php',
             'type' => 'ontime',
-        ];
+                'prescription' => [
+                    'Review delayed trips and identify common bottlenecks (loading, traffic, driver availability).',
+                    'Contact drivers with repeated late trips to coach or reschedule.',
+                    'Adjust routing or dispatch windows to improve punctuality.'
+                ],
+            ];
     }
 
     // Trend-based alerts: detect sharp increase in maintenance cost vs previous bucket
@@ -61,6 +76,11 @@ function getAnalyticsAlerts(PDO $pdo, array $metrics, string $periodLabel): arra
                         'detail' => "Maintenance cost increased by " . round($pct,1) . "% vs previous period. Review recent repairs and parts usage.",
                         'action_url' => '/pages/maintenance.php',
                         'type' => 'maint_spike',
+                        'prescription' => [
+                            'Open recent maintenance records and inspect parts replaced and truck IDs.',
+                            'Identify recurring failures and consider preventive replacement of affected parts.',
+                            'Schedule a maintenance review meeting to check root causes.'
+                        ],
                     ];
                 } elseif ($pct >= 15) {
                     $alerts[] = [
@@ -70,6 +90,11 @@ function getAnalyticsAlerts(PDO $pdo, array $metrics, string $periodLabel): arra
                         'detail' => "Maintenance cost rose by " . round($pct,1) . "% vs previous period.",
                         'action_url' => '/pages/maintenance.php',
                         'type' => 'maint_rise',
+                        'prescription' => [
+                            'Inspect last month`s maintenance log for high-cost repairs.',
+                            'Check parts inventory consumption to detect abnormal usage.',
+                            'Plan preventive maintenance for vehicles with repeated repairs.'
+                        ],
                     ];
                 }
             } else {
@@ -82,6 +107,11 @@ function getAnalyticsAlerts(PDO $pdo, array $metrics, string $periodLabel): arra
                         'detail' => "Maintenance cost for the latest bucket is ₱" . number_format($last,2) . ", while previous bucket had no spending.",
                         'action_url' => '/pages/maintenance.php',
                         'type' => 'maint_new',
+                        'prescription' => [
+                            'Review the new maintenance entries to confirm scope and cost.',
+                            'Check whether multiple trucks show the same fault — may indicate supplier or part batch issues.',
+                            'If expensive, obtain a second estimate or review warranty/coverage.'
+                        ],
                     ];
                 }
             }
@@ -98,7 +128,12 @@ function getAnalyticsAlerts(PDO $pdo, array $metrics, string $periodLabel): arra
             'detail' => "{$openIncidents} unresolved incident" . ($openIncidents !== 1 ? 's' : '') . ". Investigate and resolve.",
             'action_url' => '/pages/incidents.php',
             'type' => 'incidents',
-        ];
+                'prescription' => [
+                    'Open each unresolved incident and assign an owner for remediation.',
+                    'If safety-related, halt affected vehicle until inspected.',
+                    'Log follow-up actions and expected resolution dates.'
+                ],
+            ];
     }
 
     // Sort alerts by severity and return

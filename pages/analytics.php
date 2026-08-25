@@ -2,8 +2,6 @@
 // ============================================================
 // pages/analytics.php
 // Cross-functional analytics hub — Head Management only.
-// Pulls together Operations, Maintenance, and Accounting data
-// that no single role dashboard shows together.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';

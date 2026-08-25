@@ -261,6 +261,7 @@ $collectedPrev = $hasComparison ? (float)qPrev($pdo, "
     SELECT COALESCE(SUM(c.amount_paid), 0) FROM collections c
     WHERE c.payment_date >= :prevStart AND c.payment_date < :prevEnd
 ", $prevRangeStartSql, $prevRangeEndSql)->fetchColumn() : null;
+$collectionRatePrev = ($hasComparison && $revenuePrev > 0) ? round(($collectedPrev / $revenuePrev) * 100, 1) : null;
 
 $maintCostPrev = $hasComparison ? (float)qPrev($pdo, "
     SELECT COALESCE(SUM(cost), 0) FROM maintenance_records
@@ -639,18 +640,48 @@ $GLOBALS['analytics_data'] = json_encode([
     <?php endif; ?>
   </div>
 
-  <!-- Alerts (rule-based) -->
+  <!-- Analytical Insights (rule-based: descriptive, comparative, diagnostic) -->
   <?php
-  // Build metrics bag for alerts helper
+  // Build metrics bag for the insights/alerts helper. Includes real
+  // period-over-period baselines (not just bucket-to-bucket trend noise)
+  // so the engine can say *why* something changed, not just flag a number.
   $metricsForAlerts = [
-      'utilizationRate' => $utilizationRate ?? null,
-      'collectionRate'  => $collectionRate ?? null,
-      'onTimeRate'      => $onTimeRate ?? null,
-      'maintCost'       => $maintCost ?? null,
-      'revTrend'        => $revTrend ?? [],
-      'costTrend'       => $costTrend ?? [],
+      'utilizationRate'     => $utilizationRate ?? null,
+      'utilizationRatePrev' => $utilizationRatePrev ?? null,
+      'collectionRate'      => $collectionRate ?? null,
+      'collectionRatePrev'  => $collectionRatePrev ?? null,
+      'onTimeRate'          => $onTimeRate ?? null,
+      'onTimeRatePrev'      => $onTimeRatePrev ?? null,
+      'maintCost'           => $maintCost ?? null,
+      'maintCostPrev'       => $maintCostPrev ?? null,
+      'revenue'             => $revenue ?? null,
+      'revenuePrev'         => $revenuePrev ?? null,
+      'revTrend'            => $revTrend ?? [],
+      'costTrend'           => $costTrend ?? [],
+      'hasComparison'       => $hasComparison,
+      'rangeStartSql'       => $rangeStartSql,
+      'prevRangeStartSql'   => $prevRangeStartSql ?? null,
+      'prevRangeEndSql'     => $prevRangeEndSql ?? null,
+      'periodLabel'         => $periodLabel,
   ];
   $alerts = getAnalyticsAlerts($pdo, $metricsForAlerts, $periodLabel);
+
+  // ── Role-scope the insights ───────────────────────────────────────────────
+  // Every insight already carries a 'source' department (Dispatch, Maintenance,
+  // Accounting, Operations, Safety). Head Management is cross-functional by
+  // design and sees everything; every other role only sees insights about
+  // their own area — mirroring the same per-role split already used for the
+  // KPI cards and charts above, so an Accounting user isn't shown a
+  // Maintenance cost spike, for example.
+  if (!$isHead) {
+      $roleAlertSources = [
+          ROLE_DISPATCHER  => ['Dispatch', 'Operations'],
+          ROLE_MAINTENANCE => ['Maintenance', 'Safety'],
+          ROLE_ACCOUNTING  => ['Accounting'],
+      ];
+      $allowedSources = $roleAlertSources[$role] ?? [];
+      $alerts = array_values(array_filter($alerts, fn($a) => in_array($a['source'], $allowedSources, true)));
+  }
   ?>
 
   <?php if (!empty($alerts)): ?>
@@ -664,7 +695,7 @@ $GLOBALS['analytics_data'] = json_encode([
   <div class="an-alerts-summary">
     <div class="an-alert-summary-item"><span class="an-alert-count"><?= $critCount ?></span> Critical</div>
     <div class="an-alert-summary-item"><span class="an-alert-count" style="background:rgba(255,193,7,0.12);color:#856404"><?= $warnCount ?></span> Warnings</div>
-    <div class="an-alert-summary-item"><span class="an-alert-count" style="background:rgba(13,110,253,0.06);color:#0d6efd"><?= $infoCount ?></span> Info</div>
+    <div class="an-alert-summary-item"><span class="an-alert-count" style="background:rgba(25,135,84,0.12);color:#146c43"><?= $infoCount ?></span> Positive</div>
     <?php if ($topAlert): ?>
     <div class="an-alert-summary-item" style="margin-left:auto;font-weight:700;">Top: <?= htmlspecialchars($topAlert['alert']) ?></div>
     <?php endif; ?>
@@ -672,8 +703,8 @@ $GLOBALS['analytics_data'] = json_encode([
 
   <div class="an-alert-cards">
     <?php foreach ($alerts as $i => $a):
-      $priorityClass = $a['priority'] ?? ($a['severity'] === 'Critical' ? 'high' : 'medium');
-      $prioLabel = strtoupper($a['priority'] ?? ($a['severity'] === 'Critical' ? 'HIGH' : 'MED'));
+      $priorityClass = $a['priority'] ?? ($a['severity'] === 'Critical' ? 'high' : ($a['severity'] === 'Info' ? 'good' : 'medium'));
+      $prioLabel = strtoupper($a['priority'] ?? ($a['severity'] === 'Critical' ? 'HIGH' : ($a['severity'] === 'Info' ? 'GOOD' : 'MED')));
     ?>
     <div class="dh-rec-card an-alert-card dh-rec-<?= htmlspecialchars($priorityClass) ?>">
       <div class="dh-rec-priority dh-rec-priority-<?= htmlspecialchars($priorityClass) ?> an-alert-priority"><?= htmlspecialchars($prioLabel) ?></div>

@@ -436,6 +436,42 @@
   text-transform: uppercase;
 }
 
+/* dh-rec-* severity classes, reused here for alert cards. These previously
+   had no effect on this page because they were only ever defined in
+   dashboard_head.css, which analytics.php doesn't load — defining them here
+   fixes uncolored alert borders/badges and adds the missing "good" tier for
+   positive-trend insights (the Info severity bucket the UI already counts
+   but had nothing populating it). */
+.dh-rec-high {
+  border-left: 3px solid #dc3545;
+  background: rgba(220, 53, 69, 0.04);
+}
+
+.dh-rec-medium {
+  border-left: 3px solid #e67e00;
+  background: rgba(230, 126, 0, 0.04);
+}
+
+.dh-rec-good {
+  border-left: 3px solid #198754;
+  background: rgba(25, 135, 84, 0.04);
+}
+
+.dh-rec-priority-high {
+  background: rgba(220, 53, 69, 0.15);
+  color: #b02a37;
+}
+
+.dh-rec-priority-medium {
+  background: rgba(230, 126, 0, 0.18);
+  color: #9a5500;
+}
+
+.dh-rec-priority-good {
+  background: rgba(25, 135, 84, 0.18);
+  color: #146c43;
+}
+
 .an-alert-body {
   flex: 1;
 }

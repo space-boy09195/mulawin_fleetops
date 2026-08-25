@@ -133,6 +133,82 @@ function qRange(PDO $pdo, string $sql, string $rangeStartSql): PDOStatement {
     return $stmt;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// PERIOD-OVER-PERIOD COMPARISON
+// Resolves an immediately-preceding window of the same length as the
+// selected period, so KPI cards can show "+12.4% vs last period" alongside
+// the raw number. "All Time" has no natural prior window, so comparison is
+// simply turned off for that period rather than showing a misleading figure.
+// ══════════════════════════════════════════════════════════════════════════
+$hasComparison = $months !== null;
+if ($hasComparison) {
+    $prevRangeEnd      = clone $rangeStart;                 // exclusive upper bound
+    $prevRangeStart     = (clone $rangeStart)->modify("-$months months");
+    $prevRangeStartSql = $prevRangeStart->format('Y-m-d 00:00:00');
+    $prevRangeEndSql   = $prevRangeEnd->format('Y-m-d 00:00:00');
+} else {
+    $prevRangeStartSql = null;
+    $prevRangeEndSql   = null;
+}
+
+// Runs a query bound between the previous period's start (inclusive) and the
+// current period's start (exclusive) — i.e. the window immediately before
+// the one currently on screen.
+function qPrev(PDO $pdo, string $sql, ?string $prevStart, ?string $prevEnd) {
+    if ($prevStart === null) return null;
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([':prevStart' => $prevStart, ':prevEnd' => $prevEnd]);
+    return $stmt;
+}
+
+// Percent change from $previous to $current. Returns null (rather than a
+// divide-by-zero or a misleading 0%) when there's no previous-period
+// baseline to compare against.
+function pctChange(float $current, float $previous): ?float {
+    if ($previous == 0.0) {
+        return $current == 0.0 ? 0.0 : null;
+    }
+    return round((($current - $previous) / $previous) * 100, 1);
+}
+
+// Renders a small "▲ +12.4% vs last period" badge for a KPI card, comparing
+// raw amounts/counts. $higherIsBetter flips which direction is shown as
+// good (green) vs bad (red) — e.g. rising revenue is good, rising cost isn't.
+function trendBadge($current, $previous, bool $higherIsBetter = true, bool $hasComparison = true): string {
+    if (!$hasComparison || $previous === null) return '';
+    $pct = pctChange((float)$current, (float)$previous);
+    if ($pct === null) {
+        return '<span class="an-trend an-trend-flat"><i class="bi bi-dash"></i> new vs last period</span>';
+    }
+    if (abs($pct) < 0.05) {
+        return '<span class="an-trend an-trend-flat"><i class="bi bi-dash"></i> flat vs last period</span>';
+    }
+    $up   = $pct > 0;
+    $good = $higherIsBetter ? $up : !$up;
+    $cls  = $good ? 'an-trend-up' : 'an-trend-down';
+    $icon = $up ? 'bi-arrow-up-short' : 'bi-arrow-down-short';
+    $sign = $up ? '+' : '';
+    return '<span class="an-trend ' . $cls . '"><i class="bi ' . $icon . '"></i> ' . $sign . number_format($pct, 1) . '% vs last period</span>';
+}
+
+// Same idea, but for metrics that are ALREADY percentages (on-time rate,
+// utilization rate). Comparing those with percent-of-a-percent math is
+// confusing ("90%→95%" reads as "+5.6%"), so this shows the plain
+// percentage-point difference instead ("+5.0 pts").
+function trendBadgePts($current, $previous, bool $higherIsBetter = true, bool $hasComparison = true): string {
+    if (!$hasComparison || $previous === null) return '';
+    $diff = round((float)$current - (float)$previous, 1);
+    if (abs($diff) < 0.05) {
+        return '<span class="an-trend an-trend-flat"><i class="bi bi-dash"></i> flat vs last period</span>';
+    }
+    $up   = $diff > 0;
+    $good = $higherIsBetter ? $up : !$up;
+    $cls  = $good ? 'an-trend-up' : 'an-trend-down';
+    $icon = $up ? 'bi-arrow-up-short' : 'bi-arrow-down-short';
+    $sign = $up ? '+' : '';
+    return '<span class="an-trend ' . $cls . '"><i class="bi ' . $icon . '"></i> ' . $sign . number_format($diff, 1) . ' pts vs last period</span>';
+}
+
 // ── KPI: Revenue billed vs collected ──────────────────────────────────────────
 $revenue = (float)qRange($pdo, "
     SELECT COALESCE(SUM(b.amount), 0) FROM billings b WHERE 1=1 $billDateFilter
@@ -174,6 +250,56 @@ $utilizationRate = $totalTrucks > 0 ? round(($utilizedTrucks / $totalTrucks) * 1
 
 // ── KPI: Avg revenue per completed trip ───────────────────────────────────────
 $avgRevenuePerTrip = $completedTrips > 0 ? $revenue / $completedTrips : 0;
+
+// ── Previous-period equivalents of the above, for the trend badges ───────────
+$revenuePrev = $hasComparison ? (float)qPrev($pdo, "
+    SELECT COALESCE(SUM(b.amount), 0) FROM billings b
+    WHERE b.created_at >= :prevStart AND b.created_at < :prevEnd
+", $prevRangeStartSql, $prevRangeEndSql)->fetchColumn() : null;
+
+$collectedPrev = $hasComparison ? (float)qPrev($pdo, "
+    SELECT COALESCE(SUM(c.amount_paid), 0) FROM collections c
+    WHERE c.payment_date >= :prevStart AND c.payment_date < :prevEnd
+", $prevRangeStartSql, $prevRangeEndSql)->fetchColumn() : null;
+
+$maintCostPrev = $hasComparison ? (float)qPrev($pdo, "
+    SELECT COALESCE(SUM(cost), 0) FROM maintenance_records
+    WHERE date_performed >= :prevStart AND date_performed < :prevEnd
+", $prevRangeStartSql, $prevRangeEndSql)->fetchColumn() : null;
+
+$tripStatsPrev = $hasComparison ? qPrev($pdo, "
+    SELECT
+        COUNT(*)                                      AS completed,
+        SUM(CASE WHEN is_late = 1 THEN 1 ELSE 0 END)   AS late_count
+    FROM trips t
+    WHERE t.status = 'Completed' AND t.created_at >= :prevStart AND t.created_at < :prevEnd
+", $prevRangeStartSql, $prevRangeEndSql)->fetch(PDO::FETCH_ASSOC) : null;
+$completedTripsPrev = $hasComparison ? (int)($tripStatsPrev['completed'] ?? 0) : null;
+$lateCountPrev      = $hasComparison ? (int)($tripStatsPrev['late_count'] ?? 0) : null;
+$onTimeRatePrev     = ($hasComparison && $completedTripsPrev > 0)
+    ? round((($completedTripsPrev - $lateCountPrev) / $completedTripsPrev) * 100, 1)
+    : null;
+
+$utilizedTrucksPrev = $hasComparison ? (int)qPrev($pdo, "
+    SELECT COUNT(DISTINCT dr.truck_id)
+    FROM dispatch_requests dr
+    JOIN trips t ON t.dispatch_id = dr.dispatch_id
+    WHERE t.created_at >= :prevStart AND t.created_at < :prevEnd
+", $prevRangeStartSql, $prevRangeEndSql)->fetchColumn() : null;
+// Uses today's total fleet size as the denominator for both periods — the
+// system doesn't track historical fleet size at each past date, and at
+// capstone scale the truck count doesn't meaningfully shift month to month.
+$utilizationRatePrev = ($hasComparison && $totalTrucks > 0)
+    ? round(($utilizedTrucksPrev / $totalTrucks) * 100, 1)
+    : null;
+
+$avgRevenuePerTripPrev = ($hasComparison && $completedTripsPrev > 0)
+    ? $revenuePrev / $completedTripsPrev
+    : null;
+
+$avgCostPerTruckPrev = ($hasComparison && $totalTrucks > 0)
+    ? $maintCostPrev / $totalTrucks
+    : null;
 
 // ── Revenue vs Maintenance Cost trend (bucketed by selected granularity) ─────
 $revBucketExpr  = bucketExpr('created_at', $granularity);
@@ -295,6 +421,11 @@ if ($role === ROLE_MAINTENANCE) {
         SELECT COUNT(*) FROM maintenance_records WHERE date_performed >= :rangeStart
     ", $rangeStartSql)->fetchColumn();
 
+    $maintRecordsLoggedCountPrev = $hasComparison ? (int)qPrev($pdo, "
+        SELECT COUNT(*) FROM maintenance_records
+        WHERE date_performed >= :prevStart AND date_performed < :prevEnd
+    ", $prevRangeStartSql, $prevRangeEndSql)->fetchColumn() : null;
+
     $topTrucksByMaintCost = qRange($pdo, "
         SELECT tr.plate_number, tr.brand, tr.model,
                COUNT(*) AS record_count,
@@ -398,16 +529,19 @@ $GLOBALS['analytics_data'] = json_encode([
       <div class="an-kpi-label"><i class="bi bi-cash-coin"></i> Revenue Billed</div>
       <div class="an-kpi-value">₱<?= number_format($revenue, 2) ?></div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+      <?= trendBadge($revenue, $revenuePrev, true, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-wallet2"></i> Collected</div>
       <div class="an-kpi-value an-value-green">₱<?= number_format($collected, 2) ?></div>
       <div class="an-kpi-sub"><?= $collectionRate ?>% collection rate</div>
+      <?= trendBadge($collected, $collectedPrev, true, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-tools"></i> Maintenance Cost</div>
       <div class="an-kpi-value an-value-orange">₱<?= number_format($maintCost, 2) ?></div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+      <?= trendBadge($maintCost, $maintCostPrev, false, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-clock-history"></i> On-Time Delivery</div>
@@ -415,16 +549,19 @@ $GLOBALS['analytics_data'] = json_encode([
         <?= $onTimeRate ?>%
       </div>
       <div class="an-kpi-sub"><?= $completedTrips ?> completed trip<?= $completedTrips !== 1 ? 's' : '' ?></div>
+      <?= trendBadgePts($onTimeRate, $onTimeRatePrev, true, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-speedometer2"></i> Fleet Utilization</div>
       <div class="an-kpi-value an-value-blue"><?= $utilizationRate ?>%</div>
       <div class="an-kpi-sub"><?= $utilizedTrucks ?> of <?= $totalTrucks ?> trucks active</div>
+      <?= trendBadgePts($utilizationRate, $utilizationRatePrev, true, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-graph-up-arrow"></i> Avg Revenue / Trip</div>
       <div class="an-kpi-value">₱<?= number_format($avgRevenuePerTrip, 2) ?></div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+      <?= trendBadge($avgRevenuePerTrip, $avgRevenuePerTripPrev, true, $hasComparison) ?>
     </div>
 
     <?php elseif ($role === ROLE_DISPATCHER): ?>
@@ -434,21 +571,25 @@ $GLOBALS['analytics_data'] = json_encode([
         <?= $onTimeRate ?>%
       </div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+      <?= trendBadgePts($onTimeRate, $onTimeRatePrev, true, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-speedometer2"></i> Fleet Utilization</div>
       <div class="an-kpi-value an-value-blue"><?= $utilizationRate ?>%</div>
       <div class="an-kpi-sub"><?= $utilizedTrucks ?> of <?= $totalTrucks ?> trucks active</div>
+      <?= trendBadgePts($utilizationRate, $utilizationRatePrev, true, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-check-circle"></i> Completed Trips</div>
       <div class="an-kpi-value an-value-green"><?= $completedTrips ?></div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+      <?= trendBadge($completedTrips, $completedTripsPrev, true, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-exclamation-triangle"></i> Late Trips</div>
       <div class="an-kpi-value <?= $lateCount === 0 ? 'an-value-green' : 'an-value-red' ?>"><?= $lateCount ?></div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+      <?= trendBadge($lateCount, $lateCountPrev, false, $hasComparison) ?>
     </div>
 
     <?php elseif ($role === ROLE_MAINTENANCE): ?>
@@ -456,11 +597,13 @@ $GLOBALS['analytics_data'] = json_encode([
       <div class="an-kpi-label"><i class="bi bi-tools"></i> Maintenance Cost</div>
       <div class="an-kpi-value an-value-orange">₱<?= number_format($maintCost, 2) ?></div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+      <?= trendBadge($maintCost, $maintCostPrev, false, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-clipboard-check"></i> Records Logged</div>
       <div class="an-kpi-value"><?= $maintRecordsLoggedCount ?></div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+      <?= trendBadge($maintRecordsLoggedCount, $maintRecordsLoggedCountPrev, true, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-exclamation-octagon"></i> Open Incidents</div>
@@ -471,6 +614,7 @@ $GLOBALS['analytics_data'] = json_encode([
       <div class="an-kpi-label"><i class="bi bi-truck"></i> Avg Cost / Truck</div>
       <div class="an-kpi-value">₱<?= number_format($avgCostPerTruck, 2) ?></div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+      <?= trendBadge($avgCostPerTruck, $avgCostPerTruckPrev, false, $hasComparison) ?>
     </div>
 
     <?php elseif ($role === ROLE_ACCOUNTING): ?>
@@ -478,16 +622,19 @@ $GLOBALS['analytics_data'] = json_encode([
       <div class="an-kpi-label"><i class="bi bi-cash-coin"></i> Revenue Billed</div>
       <div class="an-kpi-value">₱<?= number_format($revenue, 2) ?></div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+      <?= trendBadge($revenue, $revenuePrev, true, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-wallet2"></i> Collected</div>
       <div class="an-kpi-value an-value-green">₱<?= number_format($collected, 2) ?></div>
       <div class="an-kpi-sub"><?= $collectionRate ?>% collection rate</div>
+      <?= trendBadge($collected, $collectedPrev, true, $hasComparison) ?>
     </div>
     <div class="an-kpi-card">
       <div class="an-kpi-label"><i class="bi bi-graph-up-arrow"></i> Avg Revenue / Trip</div>
       <div class="an-kpi-value">₱<?= number_format($avgRevenuePerTrip, 2) ?></div>
       <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
+      <?= trendBadge($avgRevenuePerTrip, $avgRevenuePerTripPrev, true, $hasComparison) ?>
     </div>
     <?php endif; ?>
   </div>

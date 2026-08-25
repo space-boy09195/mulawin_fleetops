@@ -124,6 +124,34 @@
   color: #dc3545;
 }
 
+/* ── Period-over-period trend badges ─────────── */
+.an-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin-top: 6px;
+}
+
+.an-trend i {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.an-trend-up {
+  color: #198754;
+}
+
+.an-trend-down {
+  color: #dc3545;
+}
+
+.an-trend-flat {
+  color: var(--bs-secondary-color);
+  font-weight: 600;
+}
+
 /* ── Chart grid ──────────────────────────────── */
 .an-grid {
   display: grid;

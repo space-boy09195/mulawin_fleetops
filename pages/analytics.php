@@ -2,11 +2,14 @@
 // ============================================================
 // pages/analytics.php
 // Cross-functional analytics hub — Head Management only.
+// Pulls together Operations, Maintenance, and Accounting data
+// that no single role dashboard shows together.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/alerts.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE, ROLE_ACCOUNTING]);
 $role   = currentRoleId();
@@ -722,6 +725,105 @@ $GLOBALS['analytics_data'] = json_encode([
 
   <?php endif; ?>
 
+  <!-- ══════════════════════════════════════════════════════════════════════
+       VARIANCE ANALYSIS — actual vs. a manually-entered reference (budget),
+       by category. Only meaningful for a bounded period; a budget is tied
+       to specific calendar months, so this section is hidden for "All Time".
+       ══════════════════════════════════════════════════════════════════════ -->
+  <?php
+  $hasBudgetData = $months !== null;
+  $varianceRows  = [];
+  $periodMonths  = [];
+  if ($hasBudgetData) {
+      // Which calendar months does the selected rolling period touch?
+      $monthCursor = (clone $rangeStart)->modify('first day of this month');
+      $monthEnd    = (clone $rangeEnd)->modify('first day of this month');
+      while ($monthCursor <= $monthEnd) {
+          $periodMonths[] = $monthCursor->format('Y-m-01');
+          $monthCursor->modify('+1 month');
+      }
+
+      $placeholders = implode(',', array_fill(0, count($periodMonths), '?'));
+      $budgetStmt = $pdo->prepare("
+          SELECT category, SUM(amount) AS total
+          FROM budgets
+          WHERE period_month IN ($placeholders)
+          GROUP BY category
+      ");
+      $budgetStmt->execute($periodMonths);
+      $budgetTotals = [];
+      foreach ($budgetStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+          $budgetTotals[$row['category']] = (float)$row['total'];
+      }
+
+      // category => [actual figure already computed above, higher-is-better?]
+      $varianceCandidates = [
+          'Revenue'     => ['actual' => $revenue,   'higherIsBetter' => true],
+          'Maintenance' => ['actual' => $maintCost, 'higherIsBetter' => false],
+      ];
+
+      foreach ($varianceCandidates as $category => $c) {
+          if (!isset($budgetTotals[$category])) continue; // no budget set for these months — skip rather than show a fake ₱0 reference
+          $ref         = $budgetTotals[$category];
+          $actual      = $c['actual'];
+          $varianceAmt = $actual - $ref;
+          $variancePct = $ref > 0 ? round(($varianceAmt / $ref) * 100, 1) : null;
+          $favorable   = $c['higherIsBetter'] ? ($varianceAmt >= 0) : ($varianceAmt <= 0);
+          $varianceRows[] = [
+              'category'    => $category,
+              'reference'   => $ref,
+              'actual'      => $actual,
+              'variance'    => $varianceAmt,
+              'variancePct' => $variancePct,
+              'favorable'   => $favorable,
+          ];
+      }
+
+      // Role-scope the same way Insights are scoped above.
+      if (!$isHead) {
+          $roleVarianceCategories = [
+              ROLE_ACCOUNTING  => ['Revenue'],
+              ROLE_MAINTENANCE => ['Maintenance'],
+              ROLE_DISPATCHER  => [],
+          ];
+          $allowedCategories = $roleVarianceCategories[$role] ?? [];
+          $varianceRows = array_values(array_filter($varianceRows, fn($r) => in_array($r['category'], $allowedCategories, true)));
+      }
+  }
+  ?>
+
+  <?php if ($hasBudgetData && ($isHead || !empty($varianceRows))): ?>
+  <div class="an-section-header">
+    <span class="an-section-title"><i class="bi bi-clipboard-data me-2"></i>Variance Analysis</span>
+    <span class="an-section-sub">Actual vs. budget &mdash; <?= htmlspecialchars($periodLabel) ?></span>
+    <?php if ($isHead): ?>
+    <button type="button" class="btn btn-sm btn-outline-primary an-set-budgets-btn" data-bs-toggle="modal" data-bs-target="#setBudgetsModal">
+      <i class="bi bi-pencil-square me-1"></i>Set Budgets
+    </button>
+    <?php endif; ?>
+  </div>
+
+  <?php if (empty($varianceRows)): ?>
+  <div class="an-variance-empty">
+    <?= $isHead ? 'No budget has been set for ' . htmlspecialchars($periodLabel) . ' yet. Use "Set Budgets" above to add one.' : 'No budget has been set for this period yet.' ?>
+  </div>
+  <?php else: ?>
+  <div class="an-variance-cards">
+    <?php foreach ($varianceRows as $v): ?>
+    <div class="an-variance-card <?= $v['favorable'] ? 'an-variance-favorable' : 'an-variance-unfavorable' ?>">
+      <div class="an-variance-category"><?= htmlspecialchars($v['category']) ?></div>
+      <div class="an-variance-row"><span>Reference</span><span>₱<?= number_format($v['reference'], 2) ?></span></div>
+      <div class="an-variance-row"><span>Actual</span><span>₱<?= number_format($v['actual'], 2) ?></span></div>
+      <div class="an-variance-row an-variance-diff">
+        <span>Variance</span>
+        <span><?= $v['variance'] >= 0 ? '+' : '' ?>₱<?= number_format($v['variance'], 2) ?><?= $v['variancePct'] !== null ? ' (' . ($v['variancePct'] >= 0 ? '+' : '') . $v['variancePct'] . '%)' : '' ?></span>
+      </div>
+    </div>
+    <?php endforeach; ?>
+  </div>
+  <?php endif; ?>
+  <?php endif; ?>
+
   <!-- Chart grid -->
   <div class="an-grid">
 
@@ -976,6 +1078,54 @@ $GLOBALS['analytics_data'] = json_encode([
 
   </div>
 </div>
+
+<?php if ($hasBudgetData && $isHead): ?>
+<!-- ══ Set Budgets Modal ═══════════════════════════════════════════════════ -->
+<div class="modal fade" id="setBudgetsModal" tabindex="-1" aria-labelledby="setBudgetsLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="setBudgetsLabel"><i class="bi bi-clipboard-data me-2"></i>Set Budgets</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="setBudgetsAlert" class="alert d-none" role="alert"></div>
+        <p class="text-secondary" style="font-size:0.85rem;">
+          Set the reference (budgeted) amount for each month in the currently selected period
+          (<?= htmlspecialchars($periodLabel) ?>). Leave a field blank to leave that month/category unbudgeted.
+        </p>
+        <input type="hidden" id="an-csrf-token" name="<?= CSRF_TOKEN_NAME ?>" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
+        <div id="setBudgetsFields">
+          <?php foreach ($periodMonths as $m):
+            $mLabel = (new DateTime($m))->format('F Y');
+          ?>
+          <div class="an-budget-month-group" data-month="<?= htmlspecialchars($m) ?>">
+            <div class="an-budget-month-label"><?= htmlspecialchars($mLabel) ?></div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label">Revenue Target</label>
+                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Revenue" placeholder="₱0.00">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Maintenance Budget</label>
+                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Maintenance" placeholder="₱0.00">
+              </div>
+            </div>
+          </div>
+          <?php endforeach; ?>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="saveBudgetsBtn">
+          <span id="sbBtnText"><i class="bi bi-check-lg me-1"></i>Save Budgets</span>
+          <span id="sbBtnSpinner" class="d-none"><span class="spinner-border spinner-border-sm"></span> Saving&hellip;</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 
 <script>
 window.ANALYTICS_DATA = <?= $GLOBALS['analytics_data'] ?>;

@@ -464,4 +464,107 @@
       popover.style.display = 'block';
     });
   });
+
+  // ── Set Budgets modal (Head Management only) ─────────────────────────────
+  const setBudgetsModalEl = document.getElementById('setBudgetsModal');
+  if (setBudgetsModalEl) {
+    const BASE      = window.APP_BASE ?? '';
+    const AJAX_URL  = BASE + '/ajax/budgets_handler.php';
+    const csrfInput = document.getElementById('an-csrf-token');
+    const alertEl   = document.getElementById('setBudgetsAlert');
+    const saveBtn   = document.getElementById('saveBudgetsBtn');
+    const btnText   = document.getElementById('sbBtnText');
+    const btnSpin   = document.getElementById('sbBtnSpinner');
+
+    function postAjax(data) {
+      return fetch(AJAX_URL, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body:    new URLSearchParams(data),
+      }).then(r => r.json());
+    }
+
+    function showAlert(msg, type) {
+      if (!alertEl) return;
+      alertEl.className = `alert alert-${type}`;
+      alertEl.textContent = msg;
+      alertEl.classList.remove('d-none');
+    }
+
+    function hideAlert() {
+      if (!alertEl) return;
+      alertEl.classList.add('d-none');
+    }
+
+    // Pre-fill the fields with whatever budgets already exist for these months.
+    setBudgetsModalEl.addEventListener('show.bs.modal', async () => {
+      hideAlert();
+      const monthGroups = setBudgetsModalEl.querySelectorAll('.an-budget-month-group');
+      const months = Array.from(monthGroups).map(g => g.dataset.month);
+
+      // Reset fields first, in case the modal was opened before.
+      setBudgetsModalEl.querySelectorAll('.an-budget-input').forEach(inp => { inp.value = ''; });
+
+      try {
+        const res = await postAjax({
+          action: 'list',
+          months: JSON.stringify(months),
+          [csrfInput.name]: csrfInput.value,
+        });
+        if (res.success && Array.isArray(res.budgets)) {
+          res.budgets.forEach(b => {
+            const group = setBudgetsModalEl.querySelector(`.an-budget-month-group[data-month="${b.period_month}"]`);
+            if (!group) return;
+            const input = group.querySelector(`.an-budget-input[data-category="${b.category}"]`);
+            if (input) input.value = parseFloat(b.amount).toFixed(2);
+          });
+        }
+      } catch (err) {
+        showAlert('Could not load existing budgets. You can still enter new values.', 'warning');
+      }
+    });
+
+    saveBtn?.addEventListener('click', async () => {
+      hideAlert();
+      const entries = [];
+      setBudgetsModalEl.querySelectorAll('.an-budget-month-group').forEach(group => {
+        const month = group.dataset.month;
+        group.querySelectorAll('.an-budget-input').forEach(input => {
+          const val = input.value.trim();
+          if (val === '') return; // blank = leave unbudgeted, don't overwrite with 0
+          const amount = parseFloat(val);
+          if (isNaN(amount) || amount < 0) return;
+          entries.push({ category: input.dataset.category, period_month: month, amount });
+        });
+      });
+
+      if (entries.length === 0) {
+        showAlert('Enter at least one budget amount before saving.', 'warning');
+        return;
+      }
+
+      btnText.classList.add('d-none');
+      btnSpin.classList.remove('d-none');
+      saveBtn.disabled = true;
+
+      try {
+        const res = await postAjax({
+          action: 'save',
+          entries: JSON.stringify(entries),
+          [csrfInput.name]: csrfInput.value,
+        });
+        if (res.success) {
+          window.location.reload();
+        } else {
+          showAlert(res.message || 'Could not save budgets.', 'danger');
+        }
+      } catch (err) {
+        showAlert('Network error while saving budgets.', 'danger');
+      } finally {
+        btnText.classList.remove('d-none');
+        btnSpin.classList.add('d-none');
+        saveBtn.disabled = false;
+      }
+    });
+  }
 })();

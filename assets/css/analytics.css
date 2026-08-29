@@ -549,3 +549,108 @@
   .an-alert-cards { grid-template-columns: 1fr; }
   .an-alerts-summary { flex-wrap: wrap; }
 }
+
+/* ── Variance Analysis ─────────────────────────── */
+.an-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 1.5rem 0 0.9rem;
+}
+
+.an-section-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.an-section-sub {
+  font-size: 0.82rem;
+  color: var(--bs-secondary-color);
+}
+
+.an-set-budgets-btn {
+  margin-left: auto;
+}
+
+.an-variance-empty {
+  background: var(--bs-body-bg);
+  border: 1px dashed var(--bs-border-color);
+  border-radius: 12px;
+  padding: 1.1rem;
+  color: var(--bs-secondary-color);
+  font-size: 0.88rem;
+  margin-bottom: 1rem;
+}
+
+.an-variance-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.an-variance-card {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-left: 4px solid var(--bs-border-color);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+}
+
+.an-variance-favorable {
+  border-left-color: #198754;
+}
+
+.an-variance-unfavorable {
+  border-left-color: #dc3545;
+}
+
+.an-variance-category {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+}
+
+.an-variance-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: var(--bs-secondary-color);
+  padding: 2px 0;
+}
+
+.an-variance-diff {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--bs-border-color);
+  font-weight: 700;
+  color: var(--bs-emphasis-color);
+}
+
+.an-variance-favorable .an-variance-diff span:last-child {
+  color: #198754;
+}
+
+.an-variance-unfavorable .an-variance-diff span:last-child {
+  color: #dc3545;
+}
+
+/* ── Set Budgets modal ─────────────────────────── */
+.an-budget-month-group {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 10px;
+  padding: 0.8rem 1rem;
+  margin-bottom: 0.8rem;
+}
+
+.an-budget-month-label {
+  font-weight: 700;
+  font-size: 0.88rem;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 700px) {
+  .an-variance-cards { grid-template-columns: 1fr; }
+  .an-set-budgets-btn { margin-left: 0; width: 100%; }
+}

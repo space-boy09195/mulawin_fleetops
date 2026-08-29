@@ -10,6 +10,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 header('Content-Type: application/json');
 
@@ -27,6 +28,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['success' => false, 'message' => 'Invalid method.']);
     exit;
 }
+
+enforceCsrf();
 
 $tripId   = filter_input(INPUT_POST, 'trip_id', FILTER_VALIDATE_INT);
 $status   = trim($_POST['status']        ?? '');

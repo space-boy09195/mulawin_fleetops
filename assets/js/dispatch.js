@@ -16,11 +16,12 @@ document.addEventListener('DOMContentLoaded', () => {
     return fetch(url, {
       method:  'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body:    new URLSearchParams(data),
+      body:    new URLSearchParams({ ...data, [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN }),
     }).then(r => r.json());
   }
 
   function postForm(url, formData) {
+    formData.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
     return fetch(url, { method: 'POST', body: formData }).then(r => r.json());
   }
 

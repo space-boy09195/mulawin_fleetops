@@ -104,6 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fd.append('trip_id',       tripId);
         fd.append('status',        status);
         fd.append('notes',         notes);
+        fd.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
 
         const res    = await fetch(window.APP_BASE + '/ajax/update_trip_status.php', { method: 'POST', body: fd });
         const result = await res.json();

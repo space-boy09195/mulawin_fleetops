@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return fetch(AJAX_URL, {
       method:  'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body:    new URLSearchParams(data),
+      body:    new URLSearchParams({ ...data, [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN }),
     }).then(r => r.json());
   }
 
@@ -113,6 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const formData = new FormData();
       formData.append('truck_id', truckId);
       formData.append('status',   newStatus);
+      formData.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
       const res  = await fetch(BASE + '/ajax/update_truck_status.php', { method: 'POST', body: formData });
       const data = await res.json();
       if (data.success) {

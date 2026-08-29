@@ -74,7 +74,7 @@
       fetch(BASE + '/ajax/update_trip_status.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ trip_id: tripId, status }),
+        body: new URLSearchParams({ trip_id: tripId, status, [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN }),
       })
         .then(r => r.json())
         .then(res => {

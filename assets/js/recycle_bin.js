@@ -14,7 +14,7 @@
     return fetch(AJAX_URL, {
       method:  'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body:    new URLSearchParams(data),
+      body:    new URLSearchParams({ ...data, [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN }),
     }).then(r => r.json());
   }
 

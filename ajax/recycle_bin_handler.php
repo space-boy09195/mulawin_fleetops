@@ -8,6 +8,7 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/soft_delete.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 header('Content-Type: application/json');
 
@@ -17,6 +18,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['success' => false, 'message' => 'Invalid method.']);
     exit;
 }
+
+enforceCsrf();
 
 $pdo    = getDBConnection();
 $action = $_POST['action'] ?? '';

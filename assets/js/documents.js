@@ -223,6 +223,7 @@
     formData.append('doc_type',    docType);
     formData.append('trip_id',     uploadTripId?.value     ?? '');
     formData.append('description', uploadDescription?.value.trim() ?? '');
+    formData.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
 
     setBusy(submitUploadBtn, uploadBtnSpinner, true);
     if (uploadBtnText) uploadBtnText.textContent = 'Uploading…';
@@ -294,7 +295,7 @@
     fetch(AJAX_URL, {
       method:  'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body:    new URLSearchParams({ action: 'delete', document_id: pendingDeleteId }),
+      body:    new URLSearchParams({ action: 'delete', document_id: pendingDeleteId, [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN }),
     })
       .then(r => r.json())
       .then(res => {

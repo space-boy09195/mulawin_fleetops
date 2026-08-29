@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/csrf.php';
 
 // ---- Role → dashboard URL map ----------------------------
 function roleDashboardUrl(): string {
@@ -143,6 +144,8 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     $base        = APP_BASE;
     $cssTag      = $extraCss ? "<link rel=\"stylesheet\" href=\"{$extraCss}\">" : '';
     $appBaseJs   = "<script>window.APP_BASE=\"{$base}\";</script>";
+    $csrfToken   = generateCsrfToken();
+    $csrfJs      = "<script>window.CSRF_TOKEN=\"{$csrfToken}\";window.CSRF_TOKEN_NAME=\"" . CSRF_TOKEN_NAME . "\";</script>";
 
     // Announcements bell badge
     $announcements  = getLatestAnnouncements();
@@ -162,6 +165,7 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
   <link rel="stylesheet" href="{$base}/assets/css/layout.css">
   {$cssTag}
   {$appBaseJs}
+  {$csrfJs}
   <script>window.IS_HEAD_MANAGEMENT = {$isHead};</script>
   <script>
     (function(){

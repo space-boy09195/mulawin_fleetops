@@ -2,9 +2,17 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/audit.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 header('Content-Type: application/json');
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]);
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
+    exit;
+}
+
+enforceCsrf();
 
 $action = $_POST['action'] ?? '';
 

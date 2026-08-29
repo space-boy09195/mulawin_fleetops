@@ -195,6 +195,7 @@ async function submitAnnouncement() {
   fd.append('title',     title);
   fd.append('body',      body);
   fd.append('is_pinned', pinned);
+  fd.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
 
   try {
     const res    = await fetch(window.APP_BASE + '/ajax/announcement_handler.php?action=add', { method: 'POST', body: fd });
@@ -216,6 +217,7 @@ async function deleteAnnouncement(id) {
 
   const fd = new FormData();
   fd.append('announcement_id', id);
+  fd.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
 
   try {
     const res    = await fetch(window.APP_BASE + '/ajax/announcement_handler.php?action=delete', { method: 'POST', body: fd });

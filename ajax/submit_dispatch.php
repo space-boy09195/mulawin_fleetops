@@ -6,6 +6,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/csrf.php';
 
 header('Content-Type: application/json');
 
@@ -17,6 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['success' => false, 'message' => 'Invalid method.']);
     exit;
 }
+enforceCsrf();
 
 $truckId     = filter_input(INPUT_POST, 'truck_id',  FILTER_VALIDATE_INT);
 $routeId     = filter_input(INPUT_POST, 'route_id',  FILTER_VALIDATE_INT);

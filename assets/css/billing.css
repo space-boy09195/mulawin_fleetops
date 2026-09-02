@@ -552,3 +552,105 @@ textarea.bil-input { resize: vertical; min-height: 70px; }
   padding: 0.5rem 0.9rem;
   margin: -0.75rem 0 1rem;
 }
+
+/* ── Expenses & Profit tab ─────────────────────── */
+.bil-profit-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+.bil-profit-card {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
+  padding: 1.2rem 1.3rem;
+  text-align: center;
+}
+
+.bil-profit-highlight {
+  border-width: 2px;
+}
+
+.bil-profit-positive-card {
+  border-color: #19875460;
+  background: rgba(25,135,84,0.04);
+}
+
+.bil-profit-negative-card {
+  border-color: #dc354560;
+  background: rgba(220,53,69,0.04);
+}
+
+.bil-profit-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--bs-secondary-color);
+  margin-bottom: 6px;
+}
+
+.bil-profit-value {
+  font-size: 1.6rem;
+  font-weight: 800;
+}
+
+.bil-profit-positive {
+  color: #198754;
+}
+
+.bil-profit-negative {
+  color: #dc3545;
+}
+
+.bil-profit-sub {
+  font-size: 0.78rem;
+  color: var(--bs-secondary-color);
+  margin-top: 4px;
+}
+
+.bil-expense-breakdown-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin-bottom: 0.8rem;
+}
+
+.bil-expense-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.8rem;
+}
+
+.bil-expense-card {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+}
+
+.bil-expense-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--bs-secondary-color);
+  margin-bottom: 6px;
+}
+
+.bil-expense-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.bil-parts-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--bs-secondary-color);
+  background: rgba(13,110,253,0.05);
+  border: 1px solid rgba(13,110,253,0.15);
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+}
+
+@media (max-width: 700px) {
+  .bil-profit-summary { grid-template-columns: 1fr; }
+}

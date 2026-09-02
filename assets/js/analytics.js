@@ -119,6 +119,75 @@
     });
   }
 
+  // ── Net Profit Trend combo chart (Head Management only) ──────────────────
+  const profitTrendCtx = document.getElementById('profitTrendChart');
+  if (profitTrendCtx && D.profitTrend) {
+    new Chart(profitTrendCtx, {
+      type: 'bar',
+      data: {
+        labels: D.profitTrend.labels,
+        datasets: [
+          {
+            type: 'bar',
+            label: 'Revenue',
+            data: D.profitTrend.revenue,
+            backgroundColor: isDark ? 'rgba(86,210,126,0.82)' : 'rgba(25,135,84,0.78)',
+            borderColor: isDark ? '#8af0a4' : '#126b3d',
+            borderWidth: 1,
+            borderRadius: 4,
+            order: 3,
+          },
+          {
+            type: 'bar',
+            label: 'Total Expenses',
+            data: D.profitTrend.expenses,
+            backgroundColor: isDark ? 'rgba(255,123,123,0.75)' : 'rgba(163,38,42,0.7)',
+            borderColor: isDark ? '#ff9b9b' : '#a3262a',
+            borderWidth: 1,
+            borderRadius: 4,
+            order: 2,
+          },
+          {
+            type: 'line',
+            label: 'Net Profit',
+            data: D.profitTrend.profit,
+            borderColor: isDark ? '#f3d16a' : '#9a6800',
+            backgroundColor: 'rgba(224,184,63,0.12)',
+            borderWidth: 3,
+            pointBackgroundColor: isDark ? '#f3d16a' : '#9a6800',
+            pointBorderColor: isDark ? '#fff1e6' : '#fffdf7',
+            pointBorderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            tension: 0.3,
+            fill: false,
+            order: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top', labels: { color: legendTextColor, boxWidth: 12, padding: 14 } },
+          tooltip: {
+            backgroundColor: tooltipBg, borderColor: tooltipBrd, borderWidth: 1,
+            titleColor: legendTextColor, bodyColor: textColor, padding: 10,
+            callbacks: { label: ctx => ` ${ctx.dataset.label}: ${peso(ctx.parsed.y)}` },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: textColor, font: { weight: '600' } } },
+          y: {
+            grid: { color: gridColor },
+            ticks: { color: textColor, font: { weight: '600' }, callback: v => '₱' + Number(v).toLocaleString() },
+          },
+        },
+      },
+    });
+  }
+
   // ── Trip Status donut ──────────────────────────────────────────────────────
   const tripStatusCtx = document.getElementById('tripStatusChart');
   if (tripStatusCtx) {

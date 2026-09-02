@@ -303,6 +303,41 @@ $avgCostPerTruckPrev = ($hasComparison && $totalTrucks > 0)
     ? $maintCostPrev / $totalTrucks
     : null;
 
+// Defensive flag, shared by every payroll-dependent query below: if
+// payroll_records doesn't exist yet, degrade gracefully instead of a fatal
+// crash, and surface one clear on-page notice rather than several.
+$payrollTableMissing = false;
+
+// ── Rolling-period totals for the remaining expense categories, for
+//    Variance Analysis. Same categories already shown on the Billing page's
+//    Expenses & Profit tab, just scoped to this page's rolling period filter
+//    instead of that page's own filter — same underlying tables either way. ──
+$expCategoryTotalsStmt = $pdo->prepare("
+    SELECT expense_type, COALESCE(SUM(amount), 0) AS total
+    FROM trip_expenses
+    WHERE expense_date >= :rangeStart
+    GROUP BY expense_type
+");
+$expCategoryTotalsStmt->execute([':rangeStart' => $rangeStartSql]);
+$expenseCategoryTotals = ['Fuel' => 0.0, 'Toll' => 0.0, 'Driver Allowance' => 0.0, 'Other' => 0.0];
+foreach ($expCategoryTotalsStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    $expenseCategoryTotals[$row['expense_type']] = (float)$row['total'];
+}
+
+// Defensive: same missing-table handling as the Net Profit Trend chart below.
+$payrollTotalForVariance = 0.0;
+try {
+    $payrollTotalStmt = $pdo->prepare("SELECT COALESCE(SUM(amount_paid), 0) FROM payroll_records WHERE paid_date >= :rangeStart");
+    $payrollTotalStmt->execute([':rangeStart' => $rangeStartSql]);
+    $payrollTotalForVariance = (float)$payrollTotalStmt->fetchColumn();
+} catch (PDOException $e) {
+    if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
+        $payrollTableMissing = true;
+    } else {
+        throw $e;
+    }
+}
+
 // ── Revenue vs Maintenance Cost trend (bucketed by selected granularity) ─────
 $revBucketExpr  = bucketExpr('created_at', $granularity);
 $costBucketExpr = bucketExpr('date_performed', $granularity);
@@ -324,6 +359,59 @@ $costByBucket = qRange($pdo, "
 $trendLabels = $buckets['labels'];
 $revTrend    = array_map(fn($k) => round((float)($revByBucket[$k]  ?? 0), 2), $buckets['keys']);
 $costTrend   = array_map(fn($k) => round((float)($costByBucket[$k] ?? 0), 2), $buckets['keys']);
+
+// ── Net Profit trend (Head Management only) — Revenue minus Total Expenses,
+//    bucketed the same way. Total Expenses here is the SAME definition used
+//    on the Billing page's Expenses & Profit tab (maintenance cost + all
+//    trip_expenses categories + logged payroll disbursements), so the two
+//    never disagree with each other. ──
+$profitTrend = null;
+if ($isHead) {
+    $tripExpBucketExpr = bucketExpr('expense_date', $granularity);
+    $tripExpByBucket = qRange($pdo, "
+        SELECT $tripExpBucketExpr AS bucket, SUM(amount) AS total
+        FROM trip_expenses
+        WHERE expense_date >= :rangeStart
+        GROUP BY bucket
+    ", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+
+    // Defensive: if payroll_records hasn't been created yet, degrade to "no
+    // payroll data" instead of a fatal crash, but keep the profit chart
+    // rendering with what IS available — and flag it so the page can tell
+    // Head Management the profit figure is understated until it's fixed.
+    $payrollByBucket = [];
+    try {
+        $payrollBucketExpr = bucketExpr('paid_date', $granularity);
+        $payrollByBucket = qRange($pdo, "
+            SELECT $payrollBucketExpr AS bucket, SUM(amount_paid) AS total
+            FROM payroll_records
+            WHERE paid_date >= :rangeStart
+            GROUP BY bucket
+        ", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+    } catch (PDOException $e) {
+        if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
+            $payrollTableMissing = true;
+        } else {
+            throw $e;
+        }
+    }
+
+    $totalExpensesTrend = array_map(
+        fn($k) => round(
+            (float)($costByBucket[$k] ?? 0) + (float)($tripExpByBucket[$k] ?? 0) + (float)($payrollByBucket[$k] ?? 0),
+            2
+        ),
+        $buckets['keys']
+    );
+    $netProfitTrend = array_map(fn($i) => round($revTrend[$i] - $totalExpensesTrend[$i], 2), array_keys($buckets['keys']));
+
+    $profitTrend = [
+        'labels'   => $trendLabels,
+        'revenue'  => $revTrend,
+        'expenses' => $totalExpensesTrend,
+        'profit'   => $netProfitTrend,
+    ];
+}
 
 // ── Trip status breakdown (period-aware) ──────────────────────────────────────
 $statusRows = qRange($pdo, "
@@ -386,7 +474,20 @@ $incTrend = array_map(fn($k) => (int)($incByBucket[$k] ?? 0), $buckets['keys']);
 // ══════════════════════════════════════════════════════════════════════════
 // ROLE-SPECIFIC DATA — each role gets its own relevant slice, not a
 // relabeled copy of the Head Management view.
+//
+// Safe defaults first: each variable below is only assigned its real value
+// inside a role-matching if-block further down, then read again later in a
+// separate block that re-checks the same $role condition. That's always
+// safe at runtime ($role never changes mid-request), but a static analyzer
+// can't prove the two checks agree, so it flags the later read as a
+// possibly-undefined variable. Defaulting them here removes the warning
+// and costs nothing.
 // ══════════════════════════════════════════════════════════════════════════
+$tripVolumeTrend             = array_fill(0, count($buckets['keys']), 0);
+$collTrend                   = array_fill(0, count($buckets['keys']), 0.0);
+$maintRecordsLoggedCount     = 0;
+$maintRecordsLoggedCountPrev = null;
+$openIncidentsCount          = 0;
 
 // ── Dispatcher: trip volume trend + trucks by trip count ─────────────────────
 if ($role === ROLE_DISPATCHER) {
@@ -468,6 +569,7 @@ if ($role === ROLE_ACCOUNTING) {
 // Pass chart data to JS
 $GLOBALS['analytics_data'] = json_encode([
     'revCostTrend'     => ['labels' => $trendLabels, 'revenue' => $revTrend, 'cost' => $costTrend],
+    'profitTrend'      => $profitTrend,
     'tripStatus'       => ['labels' => $statusLabels, 'data' => $statusData, 'colors' => $statusColors],
     'maintType'        => ['labels' => $maintTypeLabels, 'data' => $maintTypeData, 'colors' => $maintTypeColors],
     'incTrend'         => ['labels' => $trendLabels, 'data' => $incTrend],
@@ -477,6 +579,17 @@ $GLOBALS['analytics_data'] = json_encode([
 ]);
 ?>
 <div class="an-page">
+
+  <?php if ($isHead && $payrollTableMissing): ?>
+  <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="alert">
+    <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+    <div>
+      <strong>Payroll data is not available.</strong> The <code>payroll_records</code> table hasn't been created yet,
+      so the Net Profit Trend chart below does not include payroll. Run <code>db/payroll_migration.sql</code>
+      against the database to fix this.
+    </div>
+  </div>
+  <?php endif; ?>
 
   <!-- Header -->
   <div class="an-header">
@@ -757,10 +870,21 @@ $GLOBALS['analytics_data'] = json_encode([
       }
 
       // category => [actual figure already computed above, higher-is-better?]
+      // All of these are lower-is-better except Revenue — spending more than
+      // budgeted on any expense line is the unfavorable direction.
       $varianceCandidates = [
-          'Revenue'     => ['actual' => $revenue,   'higherIsBetter' => true],
-          'Maintenance' => ['actual' => $maintCost, 'higherIsBetter' => false],
+          'Revenue'          => ['actual' => $revenue,                                  'higherIsBetter' => true],
+          'Maintenance'      => ['actual' => $maintCost,                                'higherIsBetter' => false],
+          'Fuel'             => ['actual' => $expenseCategoryTotals['Fuel'],             'higherIsBetter' => false],
+          'Toll'             => ['actual' => $expenseCategoryTotals['Toll'],             'higherIsBetter' => false],
+          'Driver Allowance' => ['actual' => $expenseCategoryTotals['Driver Allowance'], 'higherIsBetter' => false],
+          'Other'            => ['actual' => $expenseCategoryTotals['Other'],            'higherIsBetter' => false],
       ];
+      // Payroll only added as a candidate if the table actually exists — an
+      // unset budget for a category we can't even measure would be misleading.
+      if (!$payrollTableMissing) {
+          $varianceCandidates['Payroll'] = ['actual' => $payrollTotalForVariance, 'higherIsBetter' => false];
+      }
 
       foreach ($varianceCandidates as $category => $c) {
           if (!isset($budgetTotals[$category])) continue; // no budget set for these months — skip rather than show a fake ₱0 reference
@@ -779,10 +903,13 @@ $GLOBALS['analytics_data'] = json_encode([
           ];
       }
 
-      // Role-scope the same way Insights are scoped above.
+      // Role-scope the same way Insights are scoped above. Fuel, Toll, Driver
+      // Allowance, Other, and Payroll are all entered by Accounting (same
+      // role restriction as trip_costs_handler.php and payroll_handler.php),
+      // so Accounting sees all expense-side variance, not just Revenue.
       if (!$isHead) {
           $roleVarianceCategories = [
-              ROLE_ACCOUNTING  => ['Revenue'],
+              ROLE_ACCOUNTING  => ['Revenue', 'Fuel', 'Toll', 'Driver Allowance', 'Other', 'Payroll'],
               ROLE_MAINTENANCE => ['Maintenance'],
               ROLE_DISPATCHER  => [],
           ];
@@ -834,6 +961,17 @@ $GLOBALS['analytics_data'] = json_encode([
       </div>
       <div class="an-chart-wrap an-chart-tall">
         <canvas id="revCostChart"></canvas>
+      </div>
+    </div>
+    <?php endif; ?>
+
+    <?php if ($isHead): ?>
+    <div class="an-widget an-widget-wide">
+      <div class="an-widget-header">
+        <span class="an-widget-title"><i class="bi bi-graph-up me-2"></i>Net Profit Trend (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
+      </div>
+      <div class="an-chart-wrap an-chart-tall">
+        <canvas id="profitTrendChart"></canvas>
       </div>
     </div>
     <?php endif; ?>
@@ -1101,14 +1239,37 @@ $GLOBALS['analytics_data'] = json_encode([
           ?>
           <div class="an-budget-month-group" data-month="<?= htmlspecialchars($m) ?>">
             <div class="an-budget-month-label"><?= htmlspecialchars($mLabel) ?></div>
-            <div class="row g-2">
+            <div class="row g-2 mb-2">
               <div class="col-md-6">
                 <label class="form-label">Revenue Target</label>
                 <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Revenue" placeholder="₱0.00">
               </div>
-              <div class="col-md-6">
-                <label class="form-label">Maintenance Budget</label>
+            </div>
+            <div class="an-budget-expense-label">Expense budgets</div>
+            <div class="row g-2">
+              <div class="col-md-4 col-sm-6">
+                <label class="form-label">Maintenance</label>
                 <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Maintenance" placeholder="₱0.00">
+              </div>
+              <div class="col-md-4 col-sm-6">
+                <label class="form-label">Fuel</label>
+                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Fuel" placeholder="₱0.00">
+              </div>
+              <div class="col-md-4 col-sm-6">
+                <label class="form-label">Toll</label>
+                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Toll" placeholder="₱0.00">
+              </div>
+              <div class="col-md-4 col-sm-6">
+                <label class="form-label">Driver Allowance</label>
+                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Driver Allowance" placeholder="₱0.00">
+              </div>
+              <div class="col-md-4 col-sm-6">
+                <label class="form-label">Other</label>
+                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Other" placeholder="₱0.00">
+              </div>
+              <div class="col-md-4 col-sm-6">
+                <label class="form-label">Payroll</label>
+                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Payroll" placeholder="₱0.00">
               </div>
             </div>
           </div>

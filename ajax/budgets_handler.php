@@ -28,7 +28,7 @@ enforceCsrf();
 $pdo    = getDBConnection();
 $action = $_POST['action'] ?? '';
 
-const ALLOWED_CATEGORIES = ['Revenue', 'Maintenance', 'Fuel', 'Toll', 'Driver Allowance', 'Other'];
+const ALLOWED_CATEGORIES = ['Revenue', 'Maintenance', 'Fuel', 'Toll', 'Driver Allowance', 'Other', 'Payroll'];
 
 // ── List current budget values for the given months ──────────────────────────
 if ($action === 'list') {

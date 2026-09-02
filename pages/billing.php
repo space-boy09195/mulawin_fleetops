@@ -4,6 +4,7 @@ require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]);
+$isHead = currentRoleId() === ROLE_HEAD_MANAGEMENT;
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/billing.js';
 
@@ -100,11 +101,92 @@ $tripsSql = "
 ";
 $completedTrips = $pdo->query($tripsSql)->fetchAll(PDO::FETCH_ASSOC);
 
+// ── Active employees (for the Log Payroll Payment form) ───────────────────────
+$activeEmployees = $pdo->query("
+    SELECT employee_id, full_name, position
+    FROM employees
+    WHERE is_active = 1
+    ORDER BY full_name
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// ── Payroll: recent records (for the Payroll tab table) ───────────────────────
+$payrollSql = "
+    SELECT
+        pr.payroll_id, pr.employee_id, pr.pay_period_start, pr.pay_period_end,
+        pr.amount_paid, pr.paid_date, pr.notes,
+        e.full_name AS employee_name, e.position,
+        u.full_name AS recorded_by_name
+    FROM payroll_records pr
+    JOIN employees e ON pr.employee_id = e.employee_id
+    JOIN users u     ON pr.recorded_by = u.user_id
+    WHERE 1=1 " . ($rangeStartSql ? "AND pr.paid_date >= :rangeStart" : "") . "
+    ORDER BY pr.paid_date DESC, pr.created_at DESC
+";
+$payrollStmt = $pdo->prepare($payrollSql);
+if ($rangeStartSql) $payrollStmt->bindValue(':rangeStart', $rangeStartSql);
+$payrollStmt->execute();
+$payrollRecords = $payrollStmt->fetchAll(PDO::FETCH_ASSOC);
+$payrollTotal   = array_sum(array_column($payrollRecords, 'amount_paid'));
+
 // ── Summary stats ─────────────────────────────────────────────────────────────
 $totalBilled    = array_sum(array_column($billings, 'amount'));
 $totalCollected = array_sum(array_column($billings, 'total_collected'));
 $totalBalance   = array_sum(array_column($billings, 'balance'));
 $unpaidCount    = count(array_filter($billings, fn($b) => $b['status'] === 'Unpaid'));
+
+// ══════════════════════════════════════════════════════════════════════════
+// EXPENSES & PROFIT — Revenue minus every real expense category, scoped to
+// the same period filter as the rest of this page.
+//
+// Expense sources:
+//   - trip_expenses: Fuel, Toll, Driver Allowance, Other (per-trip costs)
+//   - maintenance_records.cost (per job)
+//   - payroll_records.amount_paid (actual logged disbursements — not an
+//     estimate from a salary rate, only what was actually paid out)
+//
+// Deliberately NOT included: parts_movements purchase cost. Maintenance
+// staff currently enter a record's "Cost" as effectively the parts spend
+// for that job, so adding parts_movements on top would double-count the
+// same money under two different names. Parts-purchase spend is still
+// shown below, but as a separate informational figure for inventory
+// reference — it does not feed into Total Expenses or Profit.
+// ══════════════════════════════════════════════════════════════════════════
+$expenseDateFilter = $rangeStartSql ? "AND te.expense_date >= :rangeStart" : '';
+$expByCategoryStmt = $pdo->prepare("
+    SELECT te.expense_type, COALESCE(SUM(te.amount), 0) AS total
+    FROM trip_expenses te
+    WHERE 1=1 $expenseDateFilter
+    GROUP BY te.expense_type
+");
+if ($rangeStartSql) $expByCategoryStmt->bindValue(':rangeStart', $rangeStartSql);
+$expByCategoryStmt->execute();
+$expenseCategories = ['Fuel' => 0.0, 'Toll' => 0.0, 'Driver Allowance' => 0.0, 'Other' => 0.0];
+foreach ($expByCategoryStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    $expenseCategories[$row['expense_type']] = (float)$row['total'];
+}
+
+$maintDateFilter = $rangeStartSql ? "AND date_performed >= :rangeStart" : '';
+$maintCostStmt = $pdo->prepare("
+    SELECT COALESCE(SUM(cost), 0) FROM maintenance_records WHERE 1=1 $maintDateFilter
+");
+if ($rangeStartSql) $maintCostStmt->bindValue(':rangeStart', $rangeStartSql);
+$maintCostStmt->execute();
+$maintCostTotal = (float)$maintCostStmt->fetchColumn();
+
+// Informational only — inventory reference, not part of Total Expenses (see note above).
+$partsDateFilter = $rangeStartSql ? "AND moved_at >= :rangeStart" : '';
+$partsPurchasedStmt = $pdo->prepare("
+    SELECT COALESCE(SUM(unit_cost * ABS(quantity)), 0)
+    FROM parts_movements
+    WHERE movement_type = 'Stock In' AND unit_cost IS NOT NULL $partsDateFilter
+");
+if ($rangeStartSql) $partsPurchasedStmt->bindValue(':rangeStart', $rangeStartSql);
+$partsPurchasedStmt->execute();
+$partsPurchasedTotal = (float)$partsPurchasedStmt->fetchColumn();
+
+$totalExpenses = $maintCostTotal + array_sum($expenseCategories) + $payrollTotal;
+$profit        = $totalBilled - $totalExpenses;
+$profitMargin  = $totalBilled > 0 ? round(($profit / $totalBilled) * 100, 1) : null;
 
 $paymentModes = ['Cash', 'Check', 'Bank Transfer', 'GCash', 'Other'];
 
@@ -176,6 +258,19 @@ function isOverdue(string $dueDate, string $status): bool {
               data-bs-target="#pane-collections" type="button" role="tab">
         <i class="bi bi-cash-stack me-1"></i> Collections
         <span class="bil-tab-count"><?= count($collections) ?></span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="bil-tab" id="tab-expenses" data-bs-toggle="tab"
+              data-bs-target="#pane-expenses" type="button" role="tab">
+        <i class="bi bi-graph-down-arrow me-1"></i> Expenses &amp; Profit
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="bil-tab" id="tab-payroll" data-bs-toggle="tab"
+              data-bs-target="#pane-payroll" type="button" role="tab">
+        <i class="bi bi-people me-1"></i> Payroll
+        <span class="bil-tab-count"><?= count($payrollRecords) ?></span>
       </button>
     </li>
   </ul>
@@ -353,6 +448,124 @@ function isOverdue(string $dueDate, string $status): bool {
       </div>
     </div>
 
+    <!-- ── Expenses & Profit pane ────────────────────────────────────────── -->
+    <div class="tab-pane fade" id="pane-expenses" role="tabpanel">
+
+      <div class="bil-profit-summary mb-4">
+        <div class="bil-profit-card">
+          <div class="bil-profit-label">Revenue</div>
+          <div class="bil-profit-value">₱<?= number_format($totalBilled, 2) ?></div>
+        </div>
+        <div class="bil-profit-card">
+          <div class="bil-profit-label">Total Expenses</div>
+          <div class="bil-profit-value bil-profit-negative">₱<?= number_format($totalExpenses, 2) ?></div>
+        </div>
+        <div class="bil-profit-card bil-profit-highlight <?= $profit >= 0 ? 'bil-profit-positive-card' : 'bil-profit-negative-card' ?>">
+          <div class="bil-profit-label">Net Profit</div>
+          <div class="bil-profit-value <?= $profit >= 0 ? 'bil-profit-positive' : 'bil-profit-negative' ?>">
+            <?= $profit >= 0 ? '' : '-' ?>₱<?= number_format(abs($profit), 2) ?>
+          </div>
+          <?php if ($profitMargin !== null): ?>
+          <div class="bil-profit-sub"><?= $profitMargin ?>% margin</div>
+          <?php endif; ?>
+        </div>
+      </div>
+
+      <h6 class="bil-expense-breakdown-title">Expense Breakdown <?= htmlspecialchars($periods[$period]) ?></h6>
+      <div class="bil-expense-cards mb-4">
+        <div class="bil-expense-card">
+          <div class="bil-expense-label"><i class="bi bi-people me-1"></i>Payroll</div>
+          <div class="bil-expense-value">₱<?= number_format($payrollTotal, 2) ?></div>
+        </div>
+        <div class="bil-expense-card">
+          <div class="bil-expense-label"><i class="bi bi-tools me-1"></i>Maintenance</div>
+          <div class="bil-expense-value">₱<?= number_format($maintCostTotal, 2) ?></div>
+        </div>
+        <div class="bil-expense-card">
+          <div class="bil-expense-label"><i class="bi bi-fuel-pump me-1"></i>Fuel</div>
+          <div class="bil-expense-value">₱<?= number_format($expenseCategories['Fuel'], 2) ?></div>
+        </div>
+        <div class="bil-expense-card">
+          <div class="bil-expense-label"><i class="bi bi-signpost-split me-1"></i>Toll</div>
+          <div class="bil-expense-value">₱<?= number_format($expenseCategories['Toll'], 2) ?></div>
+        </div>
+        <div class="bil-expense-card">
+          <div class="bil-expense-label"><i class="bi bi-person-badge me-1"></i>Driver Allowance</div>
+          <div class="bil-expense-value">₱<?= number_format($expenseCategories['Driver Allowance'], 2) ?></div>
+        </div>
+        <div class="bil-expense-card">
+          <div class="bil-expense-label"><i class="bi bi-three-dots me-1"></i>Other</div>
+          <div class="bil-expense-value">₱<?= number_format($expenseCategories['Other'], 2) ?></div>
+        </div>
+      </div>
+
+      <div class="bil-parts-note">
+        <i class="bi bi-info-circle me-1"></i>
+        Parts purchased this period: <strong>₱<?= number_format($partsPurchasedTotal, 2) ?></strong>
+        — shown for inventory reference only. Not included in Total Expenses, since Maintenance Cost already
+        reflects parts spend per job.
+      </div>
+
+    </div>
+
+    <!-- ── Payroll pane ──────────────────────────────────────────────────── -->
+    <div class="tab-pane fade" id="pane-payroll" role="tabpanel">
+
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="bil-payroll-total">
+          Total logged <?= htmlspecialchars($periods[$period]) ?>: <strong>₱<?= number_format($payrollTotal, 2) ?></strong>
+        </div>
+        <button class="btn btn-bil-primary" data-bs-toggle="modal" data-bs-target="#logPayrollModal">
+          <i class="bi bi-plus-lg me-1"></i> Log Payment
+        </button>
+      </div>
+
+      <div class="bil-table-wrap">
+        <?php if (empty($payrollRecords)): ?>
+        <div class="no-results">
+          <i class="bi bi-cash-coin"></i>
+          <span>No payroll payments logged for this period yet.</span>
+        </div>
+        <?php else: ?>
+        <table class="table bil-table">
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Position</th>
+              <th>Pay Period</th>
+              <th>Amount Paid</th>
+              <th>Paid Date</th>
+              <th>Recorded By</th>
+              <th>Notes</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($payrollRecords as $pr): ?>
+            <tr data-payroll-id="<?= $pr['payroll_id'] ?>">
+              <td><?= htmlspecialchars($pr['employee_name']) ?></td>
+              <td><?= htmlspecialchars($pr['position']) ?></td>
+              <td><?= date('M d', strtotime($pr['pay_period_start'])) ?> &ndash; <?= date('M d, Y', strtotime($pr['pay_period_end'])) ?></td>
+              <td>₱<?= number_format($pr['amount_paid'], 2) ?></td>
+              <td><?= date('M d, Y', strtotime($pr['paid_date'])) ?></td>
+              <td><?= htmlspecialchars($pr['recorded_by_name']) ?></td>
+              <td><?= $pr['notes'] ? htmlspecialchars($pr['notes']) : '<span class="text-muted">—</span>' ?></td>
+              <td>
+                <?php if ($isHead): ?>
+                <button type="button" class="btn btn-sm btn-outline-danger bil-delete-payroll-btn" data-id="<?= $pr['payroll_id'] ?>" title="Delete">
+                  <i class="bi bi-trash"></i>
+                </button>
+                <?php endif; ?>
+              </td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+        <?php endif; ?>
+      </div>
+
+    </div>
+
   </div><!-- /tab-content -->
 </div>
 
@@ -471,6 +684,59 @@ function isOverdue(string $dueDate, string $status): bool {
         <button type="button" class="btn btn-bil-success" id="submitPaymentBtn">
           <span id="payBtnText">Record Payment</span>
           <span id="payBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ Log Payroll Payment Modal ═══════════════════════════════════════════ -->
+<div class="modal fade" id="logPayrollModal" tabindex="-1" aria-labelledby="logPayrollLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="logPayrollLabel"><i class="bi bi-cash-coin me-2"></i>Log Payroll Payment</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="payrollFormAlert" class="alert d-none" role="alert"></div>
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label bil-label" for="prEmployee">Employee</label>
+            <select class="form-select bil-input" id="prEmployee" required>
+              <option value="">Select employee…</option>
+              <?php foreach ($activeEmployees as $emp): ?>
+              <option value="<?= $emp['employee_id'] ?>"><?= htmlspecialchars($emp['full_name']) ?> — <?= htmlspecialchars($emp['position']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label bil-label" for="prPeriodStart">Pay Period Start</label>
+            <input type="date" class="form-control bil-input" id="prPeriodStart" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label bil-label" for="prPeriodEnd">Pay Period End</label>
+            <input type="date" class="form-control bil-input" id="prPeriodEnd" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label bil-label" for="prAmount">Amount Paid (₱)</label>
+            <input type="number" class="form-control bil-input" id="prAmount" min="0.01" step="0.01" placeholder="0.00" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label bil-label" for="prPaidDate">Paid Date</label>
+            <input type="date" class="form-control bil-input" id="prPaidDate" max="<?= date('Y-m-d') ?>" required>
+          </div>
+          <div class="col-12">
+            <label class="form-label bil-label" for="prNotes">Notes (optional)</label>
+            <textarea class="form-control bil-input" id="prNotes" rows="2" placeholder="e.g. Includes overtime, minus cash advance…"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer bil-modal-footer">
+        <button type="button" class="btn btn-bil-cancel" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-bil-primary" id="submitPayrollBtn">
+          <span id="prBtnText">Log Payment</span>
+          <span id="prBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
         </button>
       </div>
     </div>

@@ -650,6 +650,15 @@
   margin-bottom: 8px;
 }
 
+.an-budget-expense-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--bs-secondary-color);
+  margin: 4px 0 6px;
+}
+
 @media (max-width: 700px) {
   .an-variance-cards { grid-template-columns: 1fr; }
   .an-set-budgets-btn { margin-left: 0; width: 100%; }

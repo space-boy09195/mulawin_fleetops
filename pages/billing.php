@@ -102,31 +102,55 @@ $tripsSql = "
 $completedTrips = $pdo->query($tripsSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Active employees (for the Log Payroll Payment form) ───────────────────────
+// Drivers and Helpers are on-call, not fixed-salary — they're already paid
+// per trip via the "Driver Allowance" line in trip_expenses (logged on the
+// Trip Costs page). Excluding them here prevents accidentally double-paying
+// the same person: once per trip through Driver Allowance, and again here
+// through a periodic payroll entry.
 $activeEmployees = $pdo->query("
     SELECT employee_id, full_name, position
     FROM employees
     WHERE is_active = 1
+      AND position NOT IN ('Driver', 'Helper')
     ORDER BY full_name
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Payroll: recent records (for the Payroll tab table) ───────────────────────
-$payrollSql = "
-    SELECT
-        pr.payroll_id, pr.employee_id, pr.pay_period_start, pr.pay_period_end,
-        pr.amount_paid, pr.paid_date, pr.notes,
-        e.full_name AS employee_name, e.position,
-        u.full_name AS recorded_by_name
-    FROM payroll_records pr
-    JOIN employees e ON pr.employee_id = e.employee_id
-    JOIN users u     ON pr.recorded_by = u.user_id
-    WHERE 1=1 " . ($rangeStartSql ? "AND pr.paid_date >= :rangeStart" : "") . "
-    ORDER BY pr.paid_date DESC, pr.created_at DESC
-";
-$payrollStmt = $pdo->prepare($payrollSql);
-if ($rangeStartSql) $payrollStmt->bindValue(':rangeStart', $rangeStartSql);
-$payrollStmt->execute();
-$payrollRecords = $payrollStmt->fetchAll(PDO::FETCH_ASSOC);
-$payrollTotal   = array_sum(array_column($payrollRecords, 'amount_paid'));
+// Wrapped defensively: if payroll_records hasn't been created yet (migration
+// not run), degrade to "no payroll data" instead of a fatal crash — but keep
+// a flag so the page can tell Accounting/Head *why* payroll is showing as
+// zero, rather than silently under-reporting Total Expenses and Profit.
+$payrollTableMissing = false;
+$payrollRecords = [];
+$payrollTotal   = 0.0;
+try {
+    $payrollSql = "
+        SELECT
+            pr.payroll_id, pr.employee_id, pr.pay_period_start, pr.pay_period_end,
+            pr.amount_paid, pr.paid_date, pr.notes,
+            e.full_name AS employee_name, e.position,
+            u.full_name AS recorded_by_name
+        FROM payroll_records pr
+        JOIN employees e ON pr.employee_id = e.employee_id
+        JOIN users u     ON pr.recorded_by = u.user_id
+        WHERE 1=1 " . ($rangeStartSql ? "AND pr.paid_date >= :rangeStart" : "") . "
+        ORDER BY pr.paid_date DESC, pr.created_at DESC
+    ";
+    $payrollStmt = $pdo->prepare($payrollSql);
+    if ($rangeStartSql) $payrollStmt->bindValue(':rangeStart', $rangeStartSql);
+    $payrollStmt->execute();
+    $payrollRecords = $payrollStmt->fetchAll(PDO::FETCH_ASSOC);
+    $payrollTotal   = array_sum(array_column($payrollRecords, 'amount_paid'));
+} catch (PDOException $e) {
+    // SQLSTATE 42S02 / MySQL 1146 = table doesn't exist. Anything else is a
+    // real problem (bad credentials, syntax error, etc.) and should still
+    // surface loudly rather than being swallowed here.
+    if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
+        $payrollTableMissing = true;
+    } else {
+        throw $e;
+    }
+}
 
 // ── Summary stats ─────────────────────────────────────────────────────────────
 $totalBilled    = array_sum(array_column($billings, 'amount'));
@@ -197,6 +221,17 @@ function isOverdue(string $dueDate, string $status): bool {
 ?>
 
 <div class="bil-page">
+
+  <?php if ($payrollTableMissing): ?>
+  <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="alert">
+    <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+    <div>
+      <strong>Payroll data is not available.</strong> The <code>payroll_records</code> table hasn't been created yet,
+      so Total Expenses and Net Profit below do not include payroll. Run <code>db/payroll_migration.sql</code>
+      against the database to fix this.
+    </div>
+  </div>
+  <?php endif; ?>
 
   <!-- Header -->
   <div class="bil-header d-flex align-items-center justify-content-between mb-4">
@@ -511,13 +546,29 @@ function isOverdue(string $dueDate, string $status): bool {
     <!-- ── Payroll pane ──────────────────────────────────────────────────── -->
     <div class="tab-pane fade" id="pane-payroll" role="tabpanel">
 
-      <div class="d-flex justify-content-between align-items-center mb-3">
+      <div class="bil-payroll-note">
+        <i class="bi bi-info-circle me-1"></i>
+        This covers fixed-salary staff only. Drivers and Helpers are on-call and already paid per trip via
+        <strong>Driver Allowance</strong> on the Trip Costs page — they don't appear here to avoid paying them twice.
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <div class="bil-payroll-total">
           Total logged <?= htmlspecialchars($periods[$period]) ?>: <strong>₱<?= number_format($payrollTotal, 2) ?></strong>
         </div>
-        <button class="btn btn-bil-primary" data-bs-toggle="modal" data-bs-target="#logPayrollModal">
-          <i class="bi bi-plus-lg me-1"></i> Log Payment
-        </button>
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-outline-secondary btn-sm" id="printPayrollReportBtn">
+            <i class="bi bi-printer me-1"></i> Print Report
+          </button>
+          <?php if (!$isHead): ?>
+          <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#sendPayrollReportModal">
+            <i class="bi bi-send me-1"></i> Send to Head
+          </button>
+          <?php endif; ?>
+          <button class="btn btn-bil-primary btn-sm" data-bs-toggle="modal" data-bs-target="#logPayrollModal">
+            <i class="bi bi-plus-lg me-1"></i> Log Payment
+          </button>
+        </div>
       </div>
 
       <div class="bil-table-wrap">
@@ -562,6 +613,54 @@ function isOverdue(string $dueDate, string $status): bool {
           </tbody>
         </table>
         <?php endif; ?>
+      </div>
+
+      <!-- Print-only view: hidden on screen, shown only when printing/saving as PDF -->
+      <div class="bil-print-only">
+        <div class="bil-print-header">
+          <h2>RP Mulawin Trucking Services</h2>
+          <h3>Payroll Report</h3>
+          <p>Period: <?= htmlspecialchars($periods[$period]) ?> &middot; Generated: <?= date('F d, Y g:i A') ?></p>
+        </div>
+        <?php if (empty($payrollRecords)): ?>
+        <p>No payroll payments logged for this period.</p>
+        <?php else: ?>
+        <table class="bil-print-table">
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Position</th>
+              <th>Pay Period</th>
+              <th>Amount Paid</th>
+              <th>Paid Date</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($payrollRecords as $pr): ?>
+            <tr>
+              <td><?= htmlspecialchars($pr['employee_name']) ?></td>
+              <td><?= htmlspecialchars($pr['position']) ?></td>
+              <td><?= date('M d', strtotime($pr['pay_period_start'])) ?> &ndash; <?= date('M d, Y', strtotime($pr['pay_period_end'])) ?></td>
+              <td>₱<?= number_format($pr['amount_paid'], 2) ?></td>
+              <td><?= date('M d, Y', strtotime($pr['paid_date'])) ?></td>
+              <td><?= $pr['notes'] ? htmlspecialchars($pr['notes']) : '—' ?></td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="3"><strong>Total</strong></td>
+              <td><strong>₱<?= number_format($payrollTotal, 2) ?></strong></td>
+              <td colspan="2"></td>
+            </tr>
+          </tfoot>
+        </table>
+        <?php endif; ?>
+        <div class="bil-print-footer">
+          <p>Prepared by: _______________________</p>
+          <p>Reviewed by: _______________________</p>
+        </div>
       </div>
 
     </div>
@@ -742,5 +841,42 @@ function isOverdue(string $dueDate, string $status): bool {
     </div>
   </div>
 </div>
+
+<?php if (!$isHead): ?>
+<!-- ══ Send Payroll Report to Head Modal ═══════════════════════════════════ -->
+<div class="modal fade" id="sendPayrollReportModal" tabindex="-1" aria-labelledby="sendPayrollReportLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="sendPayrollReportLabel"><i class="bi bi-send me-2"></i>Send Payroll Report to Head</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="sendReportAlert" class="alert d-none" role="alert"></div>
+        <p class="text-secondary" style="font-size:0.85rem;">
+          Click <strong>Print Report</strong> first and save it as a PDF, then attach that file here.
+          It'll appear on the Documents page, which Head Management already has access to.
+        </p>
+        <div class="mb-3">
+          <label class="form-label bil-label" for="reportFile">Payroll Report File (PDF)</label>
+          <input type="file" class="form-control bil-input" id="reportFile" accept="application/pdf">
+        </div>
+        <div class="mb-3">
+          <label class="form-label bil-label" for="reportDescription">Description</label>
+          <input type="text" class="form-control bil-input" id="reportDescription"
+                 value="Payroll Report — <?= htmlspecialchars($periods[$period]) ?> (generated <?= date('M d, Y') ?>)">
+        </div>
+      </div>
+      <div class="modal-footer bil-modal-footer">
+        <button type="button" class="btn btn-bil-cancel" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-bil-primary" id="submitSendReportBtn">
+          <span id="srBtnText">Send</span>
+          <span id="srBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 
 <?php layoutFoot(); ?>

@@ -300,4 +300,165 @@
     applyBillingFilters();
   }
 
+  // ── Payroll: log payment ────────────────────────────────────────────────────
+  const PAYROLL_AJAX_URL = BASE + '/ajax/payroll_handler.php';
+
+  function postPayrollAjax(data) {
+    return fetch(PAYROLL_AJAX_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    new URLSearchParams({ ...data, [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN }),
+    }).then(r => r.json());
+  }
+
+  const logPayrollModal   = document.getElementById('logPayrollModal');
+  const submitPayrollBtn  = document.getElementById('submitPayrollBtn');
+  const prBtnSpinner      = document.getElementById('prBtnSpinner');
+  const payrollFormAlert  = document.getElementById('payrollFormAlert');
+  const prEmployee        = document.getElementById('prEmployee');
+  const prPeriodStart     = document.getElementById('prPeriodStart');
+  const prPeriodEnd       = document.getElementById('prPeriodEnd');
+  const prAmount          = document.getElementById('prAmount');
+  const prPaidDate        = document.getElementById('prPaidDate');
+  const prNotes           = document.getElementById('prNotes');
+
+  logPayrollModal?.addEventListener('show.bs.modal', () => {
+    hideAlert(payrollFormAlert);
+    if (prEmployee)    prEmployee.value    = '';
+    if (prPeriodStart) prPeriodStart.value = '';
+    if (prPeriodEnd)   prPeriodEnd.value   = '';
+    if (prAmount)      prAmount.value      = '';
+    if (prPaidDate)    prPaidDate.value    = new Date().toISOString().slice(0, 10);
+    if (prNotes)       prNotes.value       = '';
+    setBusy(submitPayrollBtn, prBtnSpinner, false);
+  });
+
+  submitPayrollBtn?.addEventListener('click', () => {
+    hideAlert(payrollFormAlert);
+
+    const employeeId   = prEmployee?.value    ?? '';
+    const periodStart  = prPeriodStart?.value ?? '';
+    const periodEnd    = prPeriodEnd?.value   ?? '';
+    const amount       = prAmount?.value      ?? '';
+    const paidDate     = prPaidDate?.value    ?? '';
+    const notes        = prNotes?.value.trim() ?? '';
+
+    if (!employeeId) {
+      showAlert(payrollFormAlert, 'Select an employee.');
+      return;
+    }
+    if (!periodStart || !periodEnd) {
+      showAlert(payrollFormAlert, 'Enter the pay period.');
+      return;
+    }
+    if (new Date(periodEnd) < new Date(periodStart)) {
+      showAlert(payrollFormAlert, 'Pay period end must be on or after the start date.');
+      return;
+    }
+    if (!amount || parseFloat(amount) <= 0) {
+      showAlert(payrollFormAlert, 'Enter an amount greater than zero.');
+      return;
+    }
+    if (!paidDate) {
+      showAlert(payrollFormAlert, 'Enter the paid date.');
+      return;
+    }
+
+    setBusy(submitPayrollBtn, prBtnSpinner, true);
+
+    postPayrollAjax({
+      action:           'create',
+      employee_id:      employeeId,
+      pay_period_start: periodStart,
+      pay_period_end:   periodEnd,
+      amount_paid:      amount,
+      paid_date:        paidDate,
+      notes,
+    })
+      .then(res => {
+        setBusy(submitPayrollBtn, prBtnSpinner, false);
+        if (res.success) {
+          window.location.reload();
+        } else {
+          showAlert(payrollFormAlert, res.message ?? 'Failed to log payment.');
+        }
+      })
+      .catch(() => {
+        setBusy(submitPayrollBtn, prBtnSpinner, false);
+        showAlert(payrollFormAlert, 'Network error. Please try again.');
+      });
+  });
+
+  // ── Payroll: delete record (Head Management only) ────────────────────────
+  document.querySelectorAll('.bil-delete-payroll-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      if (!id) return;
+      if (!confirm('Delete this payroll record? It can be recovered from the Recycle Bin.')) return;
+
+      postPayrollAjax({ action: 'delete', payroll_id: id })
+        .then(res => {
+          if (res.success) {
+            window.location.reload();
+          } else {
+            alert(res.message ?? 'Could not delete this record.');
+          }
+        })
+        .catch(() => alert('Network error. Please try again.'));
+    });
+  });
+
+  // ── Payroll: print report ─────────────────────────────────────────────────
+  document.getElementById('printPayrollReportBtn')?.addEventListener('click', () => {
+    window.print();
+  });
+
+  // ── Payroll: send report to Head (uploads via the existing Documents
+  //    infrastructure, so it shows up on the Documents page Head already
+  //    has access to — no new backend, no new page) ─────────────────────────
+  const sendReportBtn = document.getElementById('submitSendReportBtn');
+  if (sendReportBtn) {
+    const DOCS_AJAX_URL   = BASE + '/ajax/document_handler.php';
+    const sendReportAlert = document.getElementById('sendReportAlert');
+    const srBtnSpinner    = document.getElementById('srBtnSpinner');
+
+    sendReportBtn.addEventListener('click', () => {
+      hideAlert(sendReportAlert);
+
+      const fileInput = document.getElementById('reportFile');
+      const file       = fileInput?.files?.[0];
+      const description = document.getElementById('reportDescription')?.value.trim() || '';
+
+      if (!file) {
+        showAlert(sendReportAlert, 'Attach the PDF you saved from Print Report first.');
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append('action',      'upload');
+      fd.append('file',        file);
+      fd.append('doc_type',    'Company Document');
+      fd.append('description', description);
+      fd.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
+
+      setBusy(sendReportBtn, srBtnSpinner, true);
+
+      fetch(DOCS_AJAX_URL, { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(res => {
+          setBusy(sendReportBtn, srBtnSpinner, false);
+          if (res.success) {
+            showAlert(sendReportAlert, 'Sent — Head Management can now see this on the Documents page.', 'success');
+            fileInput.value = '';
+          } else {
+            showAlert(sendReportAlert, res.message ?? 'Could not send the report.');
+          }
+        })
+        .catch(() => {
+          setBusy(sendReportBtn, srBtnSpinner, false);
+          showAlert(sendReportAlert, 'Network error. Please try again.');
+        });
+    });
+  }
+
 })();

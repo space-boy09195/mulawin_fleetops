@@ -89,7 +89,7 @@
             pointBorderWidth: 2,
             pointRadius: 4,
             pointHoverRadius: 6,
-            tension: 0.3,
+            tension: 0.1,
             fill: false,
             order: 1,
           },

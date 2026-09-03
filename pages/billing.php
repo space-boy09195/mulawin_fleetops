@@ -152,6 +152,38 @@ try {
     }
 }
 
+// ── Crew pay: Driver/Helper per-trip wages (for the merged Payroll Report) ────
+// Same defensive pattern as payroll_records above.
+$tripPayTableMissing = false;
+$tripPayRecords = [];
+$tripPayTotal   = 0.0;
+try {
+    $tripPaySql = "
+        SELECT
+            tp.trip_pay_id, tp.employee_id, tp.crew_role, tp.amount, tp.paid_date, tp.notes,
+            e.full_name AS employee_name, e.position,
+            t.trip_number,
+            u.full_name AS recorded_by_name
+        FROM trip_pay tp
+        JOIN employees e ON tp.employee_id = e.employee_id
+        JOIN trips t     ON tp.trip_id     = t.trip_id
+        JOIN users u     ON tp.recorded_by = u.user_id
+        WHERE 1=1 " . ($rangeStartSql ? "AND tp.paid_date >= :rangeStart" : "") . "
+        ORDER BY tp.paid_date DESC, tp.created_at DESC
+    ";
+    $tripPayStmt = $pdo->prepare($tripPaySql);
+    if ($rangeStartSql) $tripPayStmt->bindValue(':rangeStart', $rangeStartSql);
+    $tripPayStmt->execute();
+    $tripPayRecords = $tripPayStmt->fetchAll(PDO::FETCH_ASSOC);
+    $tripPayTotal   = array_sum(array_column($tripPayRecords, 'amount'));
+} catch (PDOException $e) {
+    if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
+        $tripPayTableMissing = true;
+    } else {
+        throw $e;
+    }
+}
+
 // ── Summary stats ─────────────────────────────────────────────────────────────
 $totalBilled    = array_sum(array_column($billings, 'amount'));
 $totalCollected = array_sum(array_column($billings, 'total_collected'));
@@ -208,7 +240,7 @@ if ($rangeStartSql) $partsPurchasedStmt->bindValue(':rangeStart', $rangeStartSql
 $partsPurchasedStmt->execute();
 $partsPurchasedTotal = (float)$partsPurchasedStmt->fetchColumn();
 
-$totalExpenses = $maintCostTotal + array_sum($expenseCategories) + $payrollTotal;
+$totalExpenses = $maintCostTotal + array_sum($expenseCategories) + $payrollTotal + $tripPayTotal;
 $profit        = $totalBilled - $totalExpenses;
 $profitMargin  = $totalBilled > 0 ? round(($profit / $totalBilled) * 100, 1) : null;
 
@@ -304,8 +336,8 @@ function isOverdue(string $dueDate, string $status): bool {
     <li class="nav-item" role="presentation">
       <button class="bil-tab" id="tab-payroll" data-bs-toggle="tab"
               data-bs-target="#pane-payroll" type="button" role="tab">
-        <i class="bi bi-people me-1"></i> Payroll
-        <span class="bil-tab-count"><?= count($payrollRecords) ?></span>
+        <i class="bi bi-people me-1"></i> Payroll Report
+        <span class="bil-tab-count"><?= count($payrollRecords) + count($tripPayRecords) ?></span>
       </button>
     </li>
   </ul>
@@ -513,6 +545,10 @@ function isOverdue(string $dueDate, string $status): bool {
           <div class="bil-expense-value">₱<?= number_format($payrollTotal, 2) ?></div>
         </div>
         <div class="bil-expense-card">
+          <div class="bil-expense-label"><i class="bi bi-person-workspace me-1"></i>Crew Pay</div>
+          <div class="bil-expense-value">₱<?= number_format($tripPayTotal, 2) ?></div>
+        </div>
+        <div class="bil-expense-card">
           <div class="bil-expense-label"><i class="bi bi-tools me-1"></i>Maintenance</div>
           <div class="bil-expense-value">₱<?= number_format($maintCostTotal, 2) ?></div>
         </div>
@@ -546,15 +582,52 @@ function isOverdue(string $dueDate, string $status): bool {
     <!-- ── Payroll pane ──────────────────────────────────────────────────── -->
     <div class="tab-pane fade" id="pane-payroll" role="tabpanel">
 
+      <?php
+      // ── Merge payroll_records (salaried staff) + trip_pay (Drivers/Helpers)
+      //    into one consolidated Payroll Report, sorted by paid date. ──
+      $payrollReportRows = [];
+      foreach ($payrollRecords as $pr) {
+          $payrollReportRows[] = [
+              'type'         => 'Salary',
+              'employee_name'=> $pr['employee_name'],
+              'position'     => $pr['position'],
+              'reference'    => date('M d', strtotime($pr['pay_period_start'])) . ' – ' . date('M d, Y', strtotime($pr['pay_period_end'])),
+              'amount'       => (float)$pr['amount_paid'],
+              'paid_date'    => $pr['paid_date'],
+              'recorded_by'  => $pr['recorded_by_name'],
+              'notes'        => $pr['notes'],
+              'delete_type'  => 'payroll',
+              'delete_id'    => $pr['payroll_id'],
+          ];
+      }
+      foreach ($tripPayRecords as $tp) {
+          $payrollReportRows[] = [
+              'type'         => 'Trip Pay',
+              'employee_name'=> $tp['employee_name'],
+              'position'     => $tp['crew_role'],
+              'reference'    => 'Trip ' . $tp['trip_number'],
+              'amount'       => (float)$tp['amount'],
+              'paid_date'    => $tp['paid_date'],
+              'recorded_by'  => $tp['recorded_by_name'],
+              'notes'        => $tp['notes'],
+              'delete_type'  => 'trip_pay',
+              'delete_id'    => $tp['trip_pay_id'],
+          ];
+      }
+      usort($payrollReportRows, fn($a, $b) => strcmp($b['paid_date'], $a['paid_date']));
+      $payrollReportTotal = $payrollTotal + $tripPayTotal;
+      ?>
+
       <div class="bil-payroll-note">
         <i class="bi bi-info-circle me-1"></i>
-        This covers fixed-salary staff only. Drivers and Helpers are on-call and already paid per trip via
-        <strong>Driver Allowance</strong> on the Trip Costs page — they don't appear here to avoid paying them twice.
+        This report combines fixed-salary payments (Salary) with per-trip Driver/Helper wages (Trip Pay).
+        It does not include <strong>Driver Allowance</strong>, which is trip expense reimbursement, not wages —
+        that's tracked separately on the Trip Costs page.
       </div>
 
       <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <div class="bil-payroll-total">
-          Total logged <?= htmlspecialchars($periods[$period]) ?>: <strong>₱<?= number_format($payrollTotal, 2) ?></strong>
+          Total logged <?= htmlspecialchars($periods[$period]) ?>: <strong>₱<?= number_format($payrollReportTotal, 2) ?></strong>
         </div>
         <div class="d-flex gap-2 flex-wrap">
           <button class="btn btn-outline-secondary btn-sm" id="printPayrollReportBtn">
@@ -566,25 +639,26 @@ function isOverdue(string $dueDate, string $status): bool {
           </button>
           <?php endif; ?>
           <button class="btn btn-bil-primary btn-sm" data-bs-toggle="modal" data-bs-target="#logPayrollModal">
-            <i class="bi bi-plus-lg me-1"></i> Log Payment
+            <i class="bi bi-plus-lg me-1"></i> Log Salary Payment
           </button>
         </div>
       </div>
 
       <div class="bil-table-wrap">
-        <?php if (empty($payrollRecords)): ?>
+        <?php if (empty($payrollReportRows)): ?>
         <div class="no-results">
           <i class="bi bi-cash-coin"></i>
-          <span>No payroll payments logged for this period yet.</span>
+          <span>No payroll or crew pay logged for this period yet.</span>
         </div>
         <?php else: ?>
         <table class="table bil-table">
           <thead>
             <tr>
+              <th>Type</th>
               <th>Employee</th>
-              <th>Position</th>
-              <th>Pay Period</th>
-              <th>Amount Paid</th>
+              <th>Position / Role</th>
+              <th>Reference</th>
+              <th>Amount</th>
               <th>Paid Date</th>
               <th>Recorded By</th>
               <th>Notes</th>
@@ -592,18 +666,20 @@ function isOverdue(string $dueDate, string $status): bool {
             </tr>
           </thead>
           <tbody>
-            <?php foreach ($payrollRecords as $pr): ?>
-            <tr data-payroll-id="<?= $pr['payroll_id'] ?>">
+            <?php foreach ($payrollReportRows as $pr): ?>
+            <tr>
+              <td><span class="badge <?= $pr['type'] === 'Salary' ? 'bg-primary-subtle text-primary-emphasis' : 'bg-success-subtle text-success-emphasis' ?>"><?= $pr['type'] ?></span></td>
               <td><?= htmlspecialchars($pr['employee_name']) ?></td>
               <td><?= htmlspecialchars($pr['position']) ?></td>
-              <td><?= date('M d', strtotime($pr['pay_period_start'])) ?> &ndash; <?= date('M d, Y', strtotime($pr['pay_period_end'])) ?></td>
-              <td>₱<?= number_format($pr['amount_paid'], 2) ?></td>
+              <td><?= htmlspecialchars($pr['reference']) ?></td>
+              <td>₱<?= number_format($pr['amount'], 2) ?></td>
               <td><?= date('M d, Y', strtotime($pr['paid_date'])) ?></td>
-              <td><?= htmlspecialchars($pr['recorded_by_name']) ?></td>
+              <td><?= htmlspecialchars($pr['recorded_by']) ?></td>
               <td><?= $pr['notes'] ? htmlspecialchars($pr['notes']) : '<span class="text-muted">—</span>' ?></td>
               <td>
                 <?php if ($isHead): ?>
-                <button type="button" class="btn btn-sm btn-outline-danger bil-delete-payroll-btn" data-id="<?= $pr['payroll_id'] ?>" title="Delete">
+                <button type="button" class="btn btn-sm btn-outline-danger bil-delete-payroll-btn"
+                        data-id="<?= $pr['delete_id'] ?>" data-type="<?= $pr['delete_type'] ?>" title="Delete">
                   <i class="bi bi-trash"></i>
                 </button>
                 <?php endif; ?>
@@ -622,27 +698,29 @@ function isOverdue(string $dueDate, string $status): bool {
           <h3>Payroll Report</h3>
           <p>Period: <?= htmlspecialchars($periods[$period]) ?> &middot; Generated: <?= date('F d, Y g:i A') ?></p>
         </div>
-        <?php if (empty($payrollRecords)): ?>
-        <p>No payroll payments logged for this period.</p>
+        <?php if (empty($payrollReportRows)): ?>
+        <p>No payroll or crew pay logged for this period.</p>
         <?php else: ?>
         <table class="bil-print-table">
           <thead>
             <tr>
+              <th>Type</th>
               <th>Employee</th>
-              <th>Position</th>
-              <th>Pay Period</th>
-              <th>Amount Paid</th>
+              <th>Position / Role</th>
+              <th>Reference</th>
+              <th>Amount</th>
               <th>Paid Date</th>
               <th>Notes</th>
             </tr>
           </thead>
           <tbody>
-            <?php foreach ($payrollRecords as $pr): ?>
+            <?php foreach ($payrollReportRows as $pr): ?>
             <tr>
+              <td><?= htmlspecialchars($pr['type']) ?></td>
               <td><?= htmlspecialchars($pr['employee_name']) ?></td>
               <td><?= htmlspecialchars($pr['position']) ?></td>
-              <td><?= date('M d', strtotime($pr['pay_period_start'])) ?> &ndash; <?= date('M d, Y', strtotime($pr['pay_period_end'])) ?></td>
-              <td>₱<?= number_format($pr['amount_paid'], 2) ?></td>
+              <td><?= htmlspecialchars($pr['reference']) ?></td>
+              <td>₱<?= number_format($pr['amount'], 2) ?></td>
               <td><?= date('M d, Y', strtotime($pr['paid_date'])) ?></td>
               <td><?= $pr['notes'] ? htmlspecialchars($pr['notes']) : '—' ?></td>
             </tr>
@@ -650,8 +728,8 @@ function isOverdue(string $dueDate, string $status): bool {
           </tbody>
           <tfoot>
             <tr>
-              <td colspan="3"><strong>Total</strong></td>
-              <td><strong>₱<?= number_format($payrollTotal, 2) ?></strong></td>
+              <td colspan="4"><strong>Total</strong></td>
+              <td><strong>₱<?= number_format($payrollReportTotal, 2) ?></strong></td>
               <td colspan="2"></td>
             </tr>
           </tfoot>

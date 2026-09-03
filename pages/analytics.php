@@ -338,6 +338,20 @@ try {
     }
 }
 
+$tripPayTableMissing = false;
+$tripPayTotalForVariance = 0.0;
+try {
+    $tripPayTotalStmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM trip_pay WHERE paid_date >= :rangeStart");
+    $tripPayTotalStmt->execute([':rangeStart' => $rangeStartSql]);
+    $tripPayTotalForVariance = (float)$tripPayTotalStmt->fetchColumn();
+} catch (PDOException $e) {
+    if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
+        $tripPayTableMissing = true;
+    } else {
+        throw $e;
+    }
+}
+
 // ── Revenue vs Maintenance Cost trend (bucketed by selected granularity) ─────
 $revBucketExpr  = bucketExpr('created_at', $granularity);
 $costBucketExpr = bucketExpr('date_performed', $granularity);
@@ -396,9 +410,28 @@ if ($isHead) {
         }
     }
 
+    // Same defensive pattern for trip_pay (Driver/Helper crew pay).
+    $tripPayByBucket = [];
+    try {
+        $tripPayBucketExpr = bucketExpr('paid_date', $granularity);
+        $tripPayByBucket = qRange($pdo, "
+            SELECT $tripPayBucketExpr AS bucket, SUM(amount) AS total
+            FROM trip_pay
+            WHERE paid_date >= :rangeStart
+            GROUP BY bucket
+        ", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+    } catch (PDOException $e) {
+        if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
+            $tripPayTableMissing = true;
+        } else {
+            throw $e;
+        }
+    }
+
     $totalExpensesTrend = array_map(
         fn($k) => round(
-            (float)($costByBucket[$k] ?? 0) + (float)($tripExpByBucket[$k] ?? 0) + (float)($payrollByBucket[$k] ?? 0),
+            (float)($costByBucket[$k] ?? 0) + (float)($tripExpByBucket[$k] ?? 0)
+                + (float)($payrollByBucket[$k] ?? 0) + (float)($tripPayByBucket[$k] ?? 0),
             2
         ),
         $buckets['keys']
@@ -586,6 +619,17 @@ $GLOBALS['analytics_data'] = json_encode([
     <div>
       <strong>Payroll data is not available.</strong> The <code>payroll_records</code> table hasn't been created yet,
       so the Net Profit Trend chart below does not include payroll. Run <code>db/payroll_migration.sql</code>
+      against the database to fix this.
+    </div>
+  </div>
+  <?php endif; ?>
+
+  <?php if ($isHead && $tripPayTableMissing): ?>
+  <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="alert">
+    <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+    <div>
+      <strong>Crew pay data is not available.</strong> The <code>trip_pay</code> table hasn't been created yet,
+      so the Net Profit Trend chart below does not include Driver/Helper pay. Run <code>db/trip_pay_migration.sql</code>
       against the database to fix this.
     </div>
   </div>

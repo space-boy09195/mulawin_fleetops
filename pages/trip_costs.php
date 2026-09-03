@@ -23,12 +23,16 @@ $rows = $pdo->query("
            tr.fuel_efficiency_km_per_liter, tr.capacity_tons, t.cargo_weight_tons,
            COALESCE(SUM(e.amount), 0) AS total_expense,
            COALESCE(SUM(CASE WHEN e.expense_type = 'Fuel' THEN e.quantity ELSE 0 END), 0) AS fuel_liters,
-           COALESCE((SELECT SUM(b.amount) FROM billings b WHERE b.trip_id = t.trip_id), 0) AS revenue
+           COALESCE((SELECT SUM(b.amount) FROM billings b WHERE b.trip_id = t.trip_id), 0) AS revenue,
+           dr.driver_id, drv.full_name AS driver_name,
+           dr.helper_id, hlp.full_name AS helper_name
     FROM trips t
     JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
     JOIN routes r ON r.route_id = dr.route_id
     JOIN trucks tr ON tr.truck_id = dr.truck_id
     LEFT JOIN trip_expenses e ON e.trip_id = t.trip_id
+    LEFT JOIN employees drv ON drv.employee_id = dr.driver_id
+    LEFT JOIN employees hlp ON hlp.employee_id = dr.helper_id
     WHERE t.status <> 'Cancelled'
     GROUP BY t.trip_id
     ORDER BY t.created_at DESC
@@ -48,6 +52,34 @@ $expensesByTrip = [];
 foreach ($expenseStmt->fetchAll(PDO::FETCH_ASSOC) as $expense) {
     $expensesByTrip[(int)$expense['trip_id']][] = $expense;
 }
+
+// ── Crew pay: per-trip Driver/Helper wages ────────────────────────────────────
+// Wrapped defensively: if trip_pay hasn't been created yet (migration not
+// run), degrade to "no crew pay data" instead of a fatal crash.
+$tripPayTableMissing = false;
+$tripPayByTrip = [];
+try {
+    $tripPayStmt = $pdo->query("
+        SELECT tp.trip_pay_id, tp.trip_id, tp.employee_id, tp.crew_role, tp.amount, tp.paid_date,
+               tp.notes, e.full_name AS employee_name, u.full_name AS recorded_by
+        FROM trip_pay tp
+        JOIN employees e ON e.employee_id = tp.employee_id
+        JOIN users u     ON u.user_id     = tp.recorded_by
+        JOIN trips t     ON t.trip_id     = tp.trip_id
+        WHERE t.status <> 'Cancelled'
+        ORDER BY tp.paid_date DESC, tp.created_at DESC
+    ");
+    foreach ($tripPayStmt->fetchAll(PDO::FETCH_ASSOC) as $pay) {
+        $tripPayByTrip[(int)$pay['trip_id']][] = $pay;
+    }
+} catch (PDOException $e) {
+    if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
+        $tripPayTableMissing = true;
+    } else {
+        throw $e;
+    }
+}
+
 $isHead = currentRoleId() === ROLE_HEAD_MANAGEMENT;
 
 function expectedFuel(array $row): float {
@@ -62,6 +94,17 @@ function expectedFuel(array $row): float {
 }
 ?>
 <div class="bil-page">
+
+  <?php if ($tripPayTableMissing): ?>
+  <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="alert">
+    <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+    <div>
+      <strong>Crew pay data is not available.</strong> The <code>trip_pay</code> table hasn't been created yet.
+      Run <code>db/trip_pay_migration.sql</code> against the database to enable Driver/Helper pay tracking.
+    </div>
+  </div>
+  <?php endif; ?>
+
   <div class="bil-header d-flex align-items-center justify-content-between mb-4">
     <div>
       <h1 class="bil-title mb-0">Trip Costs &amp; Fuel Analysis</h1>
@@ -73,18 +116,26 @@ function expectedFuel(array $row): float {
   </div>
   <div class="bil-table-wrap">
     <table class="table bil-table">
-      <thead><tr><th>Trip</th><th>Truck</th><th>Revenue</th><th>Expenses</th><th>Net Profit</th><th>CPK</th><th>Fuel Analysis</th></tr></thead>
+      <thead><tr><th>Trip</th><th>Truck</th><th>Crew</th><th>Revenue</th><th>Expenses</th><th>Crew Pay</th><th>Net Profit</th><th>CPK</th><th>Fuel Analysis</th></tr></thead>
       <tbody>
       <?php foreach ($rows as $row):
         $expected = expectedFuel($row);
         $actual = (float)$row['fuel_liters'];
         $variance = $expected > 0 ? (($actual - $expected) / $expected) * 100 : null;
-        $profit = (float)$row['revenue'] - (float)$row['total_expense'];
+        $tripPayEntries = $tripPayByTrip[(int)$row['trip_id']] ?? [];
+        $tripPayTotal   = array_sum(array_column($tripPayEntries, 'amount'));
+        $profit = (float)$row['revenue'] - (float)$row['total_expense'] - $tripPayTotal;
         $cpk = (float)$row['distance_km'] > 0 ? (float)$row['total_expense'] / (float)$row['distance_km'] : 0;
       ?>
       <tr>
         <td><?= htmlspecialchars($row['trip_number']) ?></td>
         <td><?= htmlspecialchars($row['plate_number']) ?></td>
+        <td>
+          <div><?= htmlspecialchars($row['driver_name'] ?? '—') ?> <span class="text-muted">(Driver)</span></div>
+          <?php if (!empty($row['helper_name'])): ?>
+          <div><?= htmlspecialchars($row['helper_name']) ?> <span class="text-muted">(Helper)</span></div>
+          <?php endif; ?>
+        </td>
         <td>₱<?= number_format((float)$row['revenue'], 2) ?></td>
         <td>
           <button type="button" class="btn btn-sm btn-outline-secondary expense-breakdown-btn"
@@ -92,6 +143,22 @@ function expectedFuel(array $row): float {
                   data-expenses="<?= htmlspecialchars(json_encode($expensesByTrip[(int)$row['trip_id']] ?? []), ENT_QUOTES, 'UTF-8') ?>">
             ₱<?= number_format((float)$row['total_expense'], 2) ?> <span aria-hidden="true">...</span>
           </button>
+        </td>
+        <td>
+          <?php if ($tripPayTableMissing): ?>
+            <span class="text-muted">—</span>
+          <?php else: ?>
+          <button type="button" class="btn btn-sm btn-outline-secondary crew-pay-btn"
+                  data-trip-id="<?= $row['trip_id'] ?>"
+                  data-trip="<?= htmlspecialchars($row['trip_number']) ?>"
+                  data-driver-id="<?= (int)$row['driver_id'] ?>"
+                  data-driver-name="<?= htmlspecialchars($row['driver_name'] ?? '') ?>"
+                  data-helper-id="<?= $row['helper_id'] !== null ? (int)$row['helper_id'] : '' ?>"
+                  data-helper-name="<?= htmlspecialchars($row['helper_name'] ?? '') ?>"
+                  data-existing="<?= htmlspecialchars(json_encode($tripPayEntries), ENT_QUOTES, 'UTF-8') ?>">
+            <?= $tripPayTotal > 0 ? '₱' . number_format($tripPayTotal, 2) : 'Log pay' ?> <span aria-hidden="true">...</span>
+          </button>
+          <?php endif; ?>
         </td>
         <td class="<?= $profit >= 0 ? 'text-success' : 'text-danger' ?>">₱<?= number_format($profit, 2) ?></td>
         <td>₱<?= number_format($cpk, 2) ?>/km</td>
@@ -125,11 +192,38 @@ function expectedFuel(array $row): float {
       </div>
     </div></div>
   </div>
+
+  <div class="modal fade" id="crewPayModal" tabindex="-1" aria-labelledby="crewPayTitle">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="crewPayTitle">Log Crew Pay</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="crewPayMessage"></div>
+        <input type="hidden" id="crewPayTripId">
+        <div class="mb-3">
+          <label class="form-label">Paid Date</label>
+          <input type="date" id="crewPayDate" class="form-control" value="<?= date('Y-m-d') ?>" max="<?= date('Y-m-d') ?>">
+        </div>
+        <div id="crewPayRows" class="d-grid gap-2 mb-3"></div>
+        <div class="mb-3">
+          <label class="form-label">Notes</label>
+          <input type="text" id="crewPayNotes" class="form-control" maxlength="255">
+        </div>
+        <div id="crewPayExisting"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-bil-primary" id="crewPaySubmit">Save Crew Pay</button>
+      </div>
+    </div></div>
+  </div>
 </div>
 
 <div class="modal fade" id="expenseModal" tabindex="-1">
   <div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content">
     <form method="post" action="<?= APP_BASE ?>/ajax/trip_costs_handler.php" id="expenseForm">
+      <input type="hidden" name="<?= CSRF_TOKEN_NAME ?>" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
       <div class="modal-header"><h5 class="modal-title" id="expenseModalTitle">Record Trip Expense</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body expense-receipt-layout">
         <div class="expense-entry-panel">
@@ -350,5 +444,91 @@ document.getElementById('expenseModal').addEventListener('hidden.bs.modal', () =
 expenseRows.innerHTML = '';
 addExpenseRow();
 updateReceipt();
+
+// ── Log Crew Pay ─────────────────────────────────────────────────────────────
+const crewPayModalEl = document.getElementById('crewPayModal');
+const crewPayRows     = document.getElementById('crewPayRows');
+const crewPayMessage  = document.getElementById('crewPayMessage');
+const crewPayExisting = document.getElementById('crewPayExisting');
+const crewPaySubmit   = document.getElementById('crewPaySubmit');
+
+function buildCrewPayRow(employeeId, name, role, existingAmount) {
+  const row = document.createElement('div');
+  row.className = 'row g-2 align-items-end crew-pay-row';
+  row.dataset.employeeId = employeeId;
+  row.dataset.role = role;
+  row.innerHTML = `
+    <div class="col-7"><label class="form-label mb-0">${escapeHtml(name)} <span class="text-muted">(${role})</span></label></div>
+    <div class="col-5">
+      <input type="number" min="0.01" step="0.01" class="form-control crew-pay-amount" placeholder="₱0.00" value="${existingAmount ?? ''}">
+    </div>
+  `;
+  return row;
+}
+
+document.querySelectorAll('.crew-pay-btn').forEach((button) => {
+  button.addEventListener('click', () => {
+    const existing = JSON.parse(button.dataset.existing || '[]');
+    const existingByEmployee = {};
+    existing.forEach((e) => { existingByEmployee[e.employee_id] = e; });
+
+    crewPayRows.innerHTML = '';
+    crewPayMessage.innerHTML = '';
+    document.getElementById('crewPayTripId').value = button.dataset.tripId;
+    document.getElementById('crewPayTitle').textContent = `Log Crew Pay — ${button.dataset.trip}`;
+
+    if (button.dataset.driverId) {
+      const existingPay = existingByEmployee[button.dataset.driverId];
+      crewPayRows.appendChild(buildCrewPayRow(button.dataset.driverId, button.dataset.driverName, 'Driver', existingPay?.amount));
+    }
+    if (button.dataset.helperId) {
+      const existingPay = existingByEmployee[button.dataset.helperId];
+      crewPayRows.appendChild(buildCrewPayRow(button.dataset.helperId, button.dataset.helperName, 'Helper', existingPay?.amount));
+    }
+
+    if (existing.length) {
+      crewPayExisting.innerHTML = '<hr><div class="text-muted small mb-1">Already logged:</div>' +
+        existing.map((e) => `<div class="small">${escapeHtml(e.employee_name)} (${escapeHtml(e.crew_role)}) — ₱${Number(e.amount).toLocaleString(undefined, {minimumFractionDigits: 2})} on ${escapeHtml(e.paid_date)}</div>`).join('');
+    } else {
+      crewPayExisting.innerHTML = '';
+    }
+
+    bootstrap.Modal.getOrCreateInstance(crewPayModalEl).show();
+  });
+});
+
+crewPaySubmit.addEventListener('click', async () => {
+  const tripId = document.getElementById('crewPayTripId').value;
+  const paidDate = document.getElementById('crewPayDate').value;
+  const notes = document.getElementById('crewPayNotes').value.trim();
+
+  const entries = [...crewPayRows.querySelectorAll('.crew-pay-row')].map((row) => ({
+    employee_id: row.dataset.employeeId,
+    crew_role: row.dataset.role,
+    amount: Number(row.querySelector('.crew-pay-amount').value || 0),
+  })).filter((e) => e.amount > 0);
+
+  if (!paidDate || entries.length === 0) {
+    crewPayMessage.innerHTML = '<div class="alert alert-danger">Enter a paid date and at least one amount.</div>';
+    return;
+  }
+
+  const body = new URLSearchParams();
+  body.append('action', 'log');
+  body.append('trip_id', tripId);
+  body.append('paid_date', paidDate);
+  body.append('notes', notes);
+  entries.forEach((e, i) => {
+    body.append(`entries[${i}][employee_id]`, e.employee_id);
+    body.append(`entries[${i}][crew_role]`, e.crew_role);
+    body.append(`entries[${i}][amount]`, e.amount);
+  });
+  body.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
+
+  const response = await fetch('<?= APP_BASE ?>/ajax/trip_pay_handler.php', { method: 'POST', body });
+  const result = await response.json();
+  crewPayMessage.innerHTML = `<div class="alert alert-${result.success ? 'success' : 'danger'}">${escapeHtml(result.message)}</div>`;
+  if (result.success) setTimeout(() => window.location.reload(), 700);
+});
 </script>
 <?php layoutFoot(); ?>

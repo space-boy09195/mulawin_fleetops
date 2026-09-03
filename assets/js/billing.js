@@ -393,9 +393,29 @@
   document.querySelectorAll('.bil-delete-payroll-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const id = btn.dataset.id;
+      const type = btn.dataset.type;
       if (!id) return;
-      if (!confirm('Delete this payroll record? It can be recovered from the Recycle Bin.')) return;
 
+      if (type === 'trip_pay') {
+        if (!confirm('Delete this crew pay entry? This cannot be undone.')) return;
+        fetch(BASE + '/ajax/trip_pay_handler.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ action: 'delete', trip_pay_id: id, [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN }),
+        })
+          .then(r => r.json())
+          .then(res => {
+            if (res.success) {
+              window.location.reload();
+            } else {
+              alert(res.message ?? 'Could not delete this record.');
+            }
+          })
+          .catch(() => alert('Network error. Please try again.'));
+        return;
+      }
+
+      if (!confirm('Delete this payroll record? It can be recovered from the Recycle Bin.')) return;
       postPayrollAjax({ action: 'delete', payroll_id: id })
         .then(res => {
           if (res.success) {

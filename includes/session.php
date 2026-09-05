@@ -10,10 +10,19 @@ require_once __DIR__ . '/../config/app.php';
 // Harden session cookie before session_start()
 session_name(SESSION_NAME);
 
+// ---- Auto-detect HTTPS -------------------------------------
+// Works for direct SSL termination (e.g. Hostinger/cPanel) and
+// for setups behind a proxy/load balancer that forwards the
+// original protocol via X-Forwarded-Proto. No manual flag to
+// remember to flip when moving from local to production.
+$isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (($_SERVER['SERVER_PORT'] ?? null) == 443)
+    || (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https');
+
 session_set_cookie_params([
     'lifetime' => 0,               // Cookie expires when browser closes
     'path'     => '/',
-    'secure'   => false,           // Set TRUE when deployed on HTTPS
+    'secure'   => $isHttps,        // Automatically true once served over HTTPS
     'httponly' => true,            // JS cannot read the cookie
     'samesite' => 'Strict',        // CSRF mitigation
 ]);

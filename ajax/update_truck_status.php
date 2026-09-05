@@ -10,70 +10,40 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
-// ---- Auth check -------------------------------------------
-if (!isLoggedIn()) {
-    echo json_encode(['success' => false, 'message' => 'Not authenticated.']);
-    exit;
-}
+// ---- Auth check ---------------------------------------------
+// Uses the shared requireRole() helper (same one every other
+// handler uses) instead of a hand-rolled isLoggedIn() + role
+// check, so RBAC logic only lives in one place.
+requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]);
 
-if (!in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER], true)) {
-    echo json_encode(['success' => false, 'message' => 'Access denied.']);
-    exit;
-}
-
-// ---- Only accept POST -------------------------------------
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid request method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
-// ---- Validate inputs --------------------------------------
-$truckId   = filter_input(INPUT_POST, 'truck_id', FILTER_VALIDATE_INT);
-$newStatus = trim($_POST['status'] ?? '');
+// ---- Validate inputs ------------------------------------------
+$truckId   = requiredInt('truck_id', 'Truck ID', 1);
+$newStatus = requiredEnum('status', TRUCK_STATUSES, 'Status');
 
-$allowedStatuses = ['Available', 'Deployed', 'Under Maintenance', 'Inactive'];
-
-if (!$truckId || $truckId <= 0) {
-    echo json_encode(['success' => false, 'message' => 'Invalid truck ID.']);
-    exit;
-}
-
-if (!in_array($newStatus, $allowedStatuses, true)) {
-    echo json_encode(['success' => false, 'message' => 'Invalid status value.']);
-    exit;
-}
-
-// ---- Fetch current status for audit log -------------------
-$pdo  = getDBConnection();
-$stmt = $pdo->prepare("SELECT status FROM trucks WHERE truck_id = :id LIMIT 1");
-$stmt->execute([':id' => $truckId]);
-$truck = $stmt->fetch();
-
-if (!$truck) {
-    echo json_encode(['success' => false, 'message' => 'Truck not found.']);
-    exit;
-}
-
+// ---- Fetch current status for audit log -----------------------
+$pdo   = getDBConnection();
+$truck = findOrFail($pdo, 'trucks', 'truck_id', $truckId, 'Truck not found.');
 $oldStatus = $truck['status'];
 
 if ($oldStatus === $newStatus) {
-    echo json_encode(['success' => true, 'message' => 'No change needed.']);
-    exit;
+    jsonOk([], 'No change needed.');
 }
 
 // ---- Update -----------------------------------------------
-$update = $pdo->prepare(
-    "UPDATE trucks SET status = :status WHERE truck_id = :id"
-);
+$update = $pdo->prepare("UPDATE trucks SET status = :status WHERE truck_id = :id");
 $update->execute([':status' => $newStatus, ':id' => $truckId]);
 
 // ---- Audit log -------------------------------------------
 auditLog('UPDATE', 'trucks', $truckId, ['status' => $oldStatus], ['status' => $newStatus]);
 
-echo json_encode(['success' => true, 'message' => 'Truck status updated.']);
+jsonOk([], 'Truck status updated.');

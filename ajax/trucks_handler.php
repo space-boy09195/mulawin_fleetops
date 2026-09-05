@@ -1,76 +1,51 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
 requireRole([ROLE_HEAD_MANAGEMENT]);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
 $action = $_POST['action'] ?? '';
 
-// ── Shared field extractor ────────────────────────────────────────────────────
+// ── Shared field extractor + validator ─────────────────────────────────────
+// Uses the shared validate.php helpers, so a bad field fails the same way
+// (same JSON shape, same trimming/casting rules) as every other handler.
 function extractTruckFields(): array {
     return [
-        'plate_number'   => strtoupper(trim($_POST['plate_number']  ?? '')),
-        'brand'          => trim($_POST['brand']          ?? ''),
-        'model'          => trim($_POST['model']          ?? ''),
-        'year_model'     => (int)($_POST['year_model']    ?? 0),
-        'body_type'      => trim($_POST['body_type']      ?? '') ?: null,
-        'fuel_type'      => trim($_POST['fuel_type']      ?? 'Diesel'),
-        'capacity_tons'  => $_POST['capacity_tons'] !== '' ? (float)$_POST['capacity_tons'] : null,
-        'chassis_number' => trim($_POST['chassis_number'] ?? '') ?: null,
-        'engine_number'  => trim($_POST['engine_number']  ?? '') ?: null,
+        'plate_number'   => strtoupper(requiredString('plate_number', 'Plate number', 20)),
+        'brand'          => requiredString('brand', 'Brand', 100),
+        'model'          => requiredString('model', 'Model', 100),
+        'year_model'     => requiredInt('year_model', 'Year model', 1990, (int)date('Y') + 1),
+        'body_type'      => optionalString('body_type'),
+        'fuel_type'      => requiredEnum('fuel_type', TRUCK_FUEL_TYPES, 'Fuel type'),
+        'capacity_tons'  => optionalFloat('capacity_tons'),
+        'chassis_number' => optionalString('chassis_number'),
+        'engine_number'  => optionalString('engine_number'),
     ];
-}
-
-function validateTruckFields(array $f): ?string {
-    if (!$f['plate_number'])              return 'Plate number is required.';
-    if (!$f['brand'])                     return 'Brand is required.';
-    if (!$f['model'])                     return 'Model is required.';
-    if ($f['year_model'] < 1990 || $f['year_model'] > (int)date('Y') + 1)
-                                          return 'Invalid year model.';
-    $allowed = ['Diesel','Gasoline','LPG','Electric'];
-    if (!in_array($f['fuel_type'], $allowed)) return 'Invalid fuel type.';
-    if ($f['capacity_tons'] !== null && $f['capacity_tons'] < 0)
-                                          return 'Capacity cannot be negative.';
-    return null;
 }
 
 // ── Add truck ─────────────────────────────────────────────────────────────────
 if ($action === 'add') {
     $f = extractTruckFields();
 
-    if ($err = validateTruckFields($f)) {
-        echo json_encode(['success' => false, 'message' => $err]);
-        exit;
+    if ($f['capacity_tons'] !== null && $f['capacity_tons'] < 0) {
+        jsonFail('Capacity cannot be negative.');
     }
 
-    // Unique plate
-    $dup = $pdo->prepare("SELECT truck_id FROM trucks WHERE plate_number = ?");
-    $dup->execute([$f['plate_number']]);
-    if ($dup->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'A truck with that plate number already exists.']);
-        exit;
+    if (existsWhere($pdo, 'trucks', 'plate_number', $f['plate_number'])) {
+        jsonFail('A truck with that plate number already exists.');
     }
-
-    // Unique chassis if provided
-    if ($f['chassis_number']) {
-        $dupCh = $pdo->prepare("SELECT truck_id FROM trucks WHERE chassis_number = ?");
-        $dupCh->execute([$f['chassis_number']]);
-        if ($dupCh->fetch()) {
-            echo json_encode(['success' => false, 'message' => 'A truck with that chassis number already exists.']);
-            exit;
-        }
+    if ($f['chassis_number'] && existsWhere($pdo, 'trucks', 'chassis_number', $f['chassis_number'])) {
+        jsonFail('A truck with that chassis number already exists.');
     }
 
     try {
@@ -93,61 +68,30 @@ if ($action === 'add') {
             'model'        => $f['model'],
         ]);
 
-        echo json_encode(['success' => true, 'message' => 'Truck added successfully.', 'id' => $newId]);
+        jsonOk(['id' => $newId], 'Truck added successfully.');
     } catch (PDOException $e) {
         error_log('trucks_handler/add: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Edit truck ────────────────────────────────────────────────────────────────
 if ($action === 'edit') {
-    $truckId = (int)($_POST['truck_id'] ?? 0);
-    $status  = trim($_POST['status']   ?? '');
+    $truckId = requiredInt('truck_id', 'Truck ID', 1);
+    $status  = requiredEnum('status', TRUCK_STATUSES, 'Status');
     $f       = extractTruckFields();
 
-    if (!$truckId) {
-        echo json_encode(['success' => false, 'message' => 'Invalid truck ID.']);
-        exit;
+    if ($f['capacity_tons'] !== null && $f['capacity_tons'] < 0) {
+        jsonFail('Capacity cannot be negative.');
     }
 
-    if ($err = validateTruckFields($f)) {
-        echo json_encode(['success' => false, 'message' => $err]);
-        exit;
-    }
+    $oldData = findOrFail($pdo, 'trucks', 'truck_id', $truckId, 'Truck not found.');
 
-    $allowedStatuses = ['Available', 'Deployed', 'Under Maintenance', 'Inactive'];
-    if (!in_array($status, $allowedStatuses)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid status.']);
-        exit;
+    if (existsWhere($pdo, 'trucks', 'plate_number', $f['plate_number'], $truckId, 'truck_id')) {
+        jsonFail('Another truck already has that plate number.');
     }
-
-    // Fetch old for audit
-    $old = $pdo->prepare("SELECT * FROM trucks WHERE truck_id = ?");
-    $old->execute([$truckId]);
-    $oldData = $old->fetch(PDO::FETCH_ASSOC);
-    if (!$oldData) {
-        echo json_encode(['success' => false, 'message' => 'Truck not found.']);
-        exit;
-    }
-
-    // Unique plate excluding self
-    $dup = $pdo->prepare("SELECT truck_id FROM trucks WHERE plate_number = ? AND truck_id != ?");
-    $dup->execute([$f['plate_number'], $truckId]);
-    if ($dup->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Another truck already has that plate number.']);
-        exit;
-    }
-
-    // Unique chassis excluding self
-    if ($f['chassis_number']) {
-        $dupCh = $pdo->prepare("SELECT truck_id FROM trucks WHERE chassis_number = ? AND truck_id != ?");
-        $dupCh->execute([$f['chassis_number'], $truckId]);
-        if ($dupCh->fetch()) {
-            echo json_encode(['success' => false, 'message' => 'Another truck already has that chassis number.']);
-            exit;
-        }
+    if ($f['chassis_number'] && existsWhere($pdo, 'trucks', 'chassis_number', $f['chassis_number'], $truckId, 'truck_id')) {
+        jsonFail('Another truck already has that chassis number.');
     }
 
     try {
@@ -170,12 +114,11 @@ if ($action === 'edit') {
             ['plate_number' => $f['plate_number'],       'status' => $status]
         );
 
-        echo json_encode(['success' => true, 'message' => 'Truck updated successfully.']);
+        jsonOk([], 'Truck updated successfully.');
     } catch (PDOException $e) {
         error_log('trucks_handler/edit: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

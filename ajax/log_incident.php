@@ -1,18 +1,16 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE]);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
@@ -21,40 +19,19 @@ $action = $_POST['action'] ?? '';
 // ── Log a new incident ────────────────────────────────────────────────────────
 if ($action === 'log') {
 
-    if (!in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER])) {
-        echo json_encode(['success' => false, 'message' => 'You are not authorised to log incidents.']);
-        exit;
+    if (!in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER], true)) {
+        jsonFail('You are not authorised to log incidents.', 403);
     }
 
-    $tripId      = (int)($_POST['trip_id']    ?? 0);
-    $type        = trim($_POST['type']        ?? '');
-    $description = trim($_POST['description'] ?? '');
-
-    $allowedTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
-
-    if (!$tripId || !$type || !$description) {
-        echo json_encode(['success' => false, 'message' => 'All fields are required.']);
-        exit;
-    }
-
-    if (!in_array($type, $allowedTypes)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid incident type.']);
-        exit;
-    }
+    $tripId      = requiredInt('trip_id', 'Trip ID', 1);
+    $type        = requiredEnum('type', INCIDENT_TYPES, 'Incident type');
+    $description = requiredString('description', 'Description', 1000);
 
     // Verify trip exists and is still active
-    $tripStmt = $pdo->prepare("SELECT trip_id, status FROM trips WHERE trip_id = ?");
-    $tripStmt->execute([$tripId]);
-    $trip = $tripStmt->fetch(PDO::FETCH_ASSOC);
+    $trip = findOrFail($pdo, 'trips', 'trip_id', $tripId, 'Trip not found.');
 
-    if (!$trip) {
-        echo json_encode(['success' => false, 'message' => 'Trip not found.']);
-        exit;
-    }
-
-    if (in_array($trip['status'], ['Completed', 'Cancelled'])) {
-        echo json_encode(['success' => false, 'message' => 'Incidents can only be logged against active trips.']);
-        exit;
+    if (in_array($trip['status'], TRIP_TERMINAL_STATUSES, true)) {
+        jsonFail('Incidents can only be logged against active trips.');
     }
 
     try {
@@ -71,37 +48,23 @@ if ($action === 'log') {
             'description'   => $description,
         ]);
 
-        echo json_encode(['success' => true, 'message' => 'Incident logged successfully.', 'id' => $newId]);
+        jsonOk(['id' => $newId], 'Incident logged successfully.');
     } catch (PDOException $e) {
         error_log('log_incident/log: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Resolve an existing incident ──────────────────────────────────────────────
 if ($action === 'resolve') {
 
-    $incidentId      = (int)($_POST['incident_id']     ?? 0);
-    $resolutionNotes = trim($_POST['resolution_notes'] ?? '');
+    $incidentId      = requiredInt('incident_id', 'Incident ID', 1);
+    $resolutionNotes = optionalString('resolution_notes', null, 1000);
 
-    if (!$incidentId) {
-        echo json_encode(['success' => false, 'message' => 'Invalid incident ID.']);
-        exit;
-    }
-
-    $stmt = $pdo->prepare("SELECT incident_id, resolved_at FROM incidents WHERE incident_id = ?");
-    $stmt->execute([$incidentId]);
-    $incident = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$incident) {
-        echo json_encode(['success' => false, 'message' => 'Incident not found.']);
-        exit;
-    }
+    $incident = findOrFail($pdo, 'incidents', 'incident_id', $incidentId, 'Incident not found.');
 
     if (!empty($incident['resolved_at'])) {
-        echo json_encode(['success' => false, 'message' => 'This incident is already resolved.']);
-        exit;
+        jsonFail('This incident is already resolved.');
     }
 
     try {
@@ -111,23 +74,18 @@ if ($action === 'resolve') {
                 resolved_at      = NOW()
             WHERE incident_id = ?
         ");
-        $upd->execute([
-            $resolutionNotes ?: null,
-            $incidentId,
-        ]);
+        $upd->execute([$resolutionNotes, $incidentId]);
 
         auditLog('RESOLVE_INCIDENT', 'incidents', $incidentId,
             ['resolved_at' => null],
             ['resolved_at' => date('Y-m-d H:i:s'), 'resolution_notes' => $resolutionNotes]
         );
 
-        echo json_encode(['success' => true, 'message' => 'Incident marked as resolved.']);
+        jsonOk([], 'Incident marked as resolved.');
     } catch (PDOException $e) {
         error_log('log_incident/resolve: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
-// ── Unknown action ────────────────────────────────────────────────────────────
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

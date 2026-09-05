@@ -1,18 +1,16 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
@@ -22,44 +20,35 @@ $action = $_POST['action'] ?? '';
 if ($action === 'add_part') {
 
     if (currentRoleId() !== ROLE_HEAD_MANAGEMENT) {
-        echo json_encode(['success' => false, 'message' => 'Only Head Management can add parts.']);
-        exit;
+        jsonFail('Only Head Management can add parts.', 403);
     }
 
-    $name         = trim($_POST['part_name']     ?? '');
-    $partNumber   = trim($_POST['part_number']   ?? '') ?: null;
-    $category     = trim($_POST['category']      ?? '');
-    $unit         = trim($_POST['unit']          ?? 'pcs');
-    $reorderLevel = (int)($_POST['reorder_level'] ?? 5);
-    $unitCost     = $_POST['unit_cost'] !== '' ? (float)$_POST['unit_cost'] : null;
+    $name          = requiredString('part_name', 'Part name', 150);
+    $partNumber    = optionalString('part_number');
+    $category      = requiredString('category', 'Category', 100);
+    $unit          = optionalString('unit', 'pcs');
+    $reorderLevel  = filter_input(INPUT_POST, 'reorder_level', FILTER_VALIDATE_INT);
+    $reorderLevel  = ($reorderLevel === false || $reorderLevel === null) ? 5 : $reorderLevel;
+    $unitCost      = optionalFloat('unit_cost');
     $rawInitialQty = $_POST['initial_qty'] ?? '';
-    $supplier     = trim($_POST['supplier']      ?? '') ?: null;
-
-    if (!$name || !$category || !$unit) {
-        echo json_encode(['success' => false, 'message' => 'Part name, category, and unit are required.']);
-        exit;
-    }
+    $supplier      = optionalString('supplier');
 
     if ($rawInitialQty === '') {
-        echo json_encode(['success' => false, 'message' => 'Initial quantity is required.']);
-        exit;
+        jsonFail('Initial quantity is required.');
     }
 
     $initialQty = (int)$rawInitialQty;
 
-    if ($reorderLevel < 0 || $initialQty < 0) {
-        echo json_encode(['success' => false, 'message' => 'Quantity and reorder level cannot be negative.']);
-        exit;
+    if ($reorderLevel < 0) {
+        jsonFail('Reorder level cannot be negative.');
+    }
+    if ($initialQty < 0) {
+        jsonFail('Initial quantity cannot be negative.');
     }
 
     // Check for duplicate part number
-    if ($partNumber) {
-        $dupCheck = $pdo->prepare("SELECT part_id FROM parts_inventory WHERE part_number = ?");
-        $dupCheck->execute([$partNumber]);
-        if ($dupCheck->fetch()) {
-            echo json_encode(['success' => false, 'message' => 'A part with that part number already exists.']);
-            exit;
-        }
+    if ($partNumber && existsWhere($pdo, 'parts_inventory', 'part_number', $partNumber)) {
+        jsonFail('A part with that part number already exists.');
     }
 
     try {
@@ -90,64 +79,39 @@ if ($action === 'add_part') {
             'initial_qty'  => $initialQty,
         ]);
 
-        echo json_encode(['success' => true, 'message' => 'Part added successfully.', 'id' => $newId]);
+        jsonOk(['id' => $newId], 'Part added successfully.');
     } catch (PDOException $e) {
         $pdo->rollBack();
         error_log('parts_handler/add_part: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Record movement ───────────────────────────────────────────────────────────
 if ($action === 'record_movement') {
 
-    $partId      = (int)($_POST['part_id']       ?? 0);
-    $movType     = trim($_POST['movement_type']  ?? '');
-    $qty         = (int)($_POST['quantity']      ?? 0);
-    $unitCost    = $_POST['unit_cost'] !== '' ? (float)$_POST['unit_cost'] : null;
-    $maintenanceId = !empty($_POST['maintenance_id']) ? (int)$_POST['maintenance_id'] : null;
-    $reference   = trim($_POST['reference_number'] ?? '') ?: null;
-    $notes       = trim($_POST['notes']          ?? '') ?: null;
-
-    $allowedTypes = ['Stock In', 'Stock Out', 'Adjustment'];
-
-    if (!$partId || !$movType || $qty <= 0) {
-        echo json_encode(['success' => false, 'message' => 'Part, movement type, and a positive quantity are required.']);
-        exit;
-    }
-
-    if (!in_array($movType, $allowedTypes)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid movement type.']);
-        exit;
-    }
+    $partId        = requiredInt('part_id', 'Part', 1);
+    $movType       = requiredEnum('movement_type', PARTS_MOVEMENT_TYPES, 'Movement type');
+    $qty           = requiredInt('quantity', 'Quantity', 1);
+    $unitCost      = optionalFloat('unit_cost');
+    $maintenanceId = filter_input(INPUT_POST, 'maintenance_id', FILTER_VALIDATE_INT) ?: null;
+    $reference     = optionalString('reference_number');
+    $notes         = optionalString('notes');
 
     if ($maintenanceId) {
         $jobCheck = $pdo->prepare("SELECT record_id FROM maintenance_records WHERE record_id = ?");
         $jobCheck->execute([$maintenanceId]);
         if (!$jobCheck->fetch()) {
-            echo json_encode(['success' => false, 'message' => 'Linked job not found.']);
-            exit;
+            jsonFail('Linked job not found.');
         }
     }
 
     // Fetch current stock
-    $partStmt = $pdo->prepare("SELECT part_id, part_name, quantity, unit FROM parts_inventory WHERE part_id = ?");
-    $partStmt->execute([$partId]);
-    $part = $partStmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$part) {
-        echo json_encode(['success' => false, 'message' => 'Part not found.']);
-        exit;
-    }
+    $part = findOrFail($pdo, 'parts_inventory', 'part_id', $partId, 'Part not found.');
 
     // For Stock Out, ensure enough stock
     if ($movType === 'Stock Out' && $part['quantity'] < $qty) {
-        echo json_encode([
-            'success' => false,
-            'message' => "Insufficient stock. Current stock: {$part['quantity']} {$part['unit']}.",
-        ]);
-        exit;
+        jsonFail("Insufficient stock. Current stock: {$part['quantity']} {$part['unit']}.");
     }
 
     // Signed quantity: negative for Stock Out
@@ -155,8 +119,7 @@ if ($action === 'record_movement') {
     $newQty     = $part['quantity'] + $signedQty;
 
     if ($newQty < 0) {
-        echo json_encode(['success' => false, 'message' => 'Movement would result in negative stock.']);
-        exit;
+        jsonFail('Movement would result in negative stock.');
     }
 
     try {
@@ -186,18 +149,15 @@ if ($action === 'record_movement') {
             ['quantity' => $newQty, 'movement_type' => $movType, 'change' => $signedQty]
         );
 
-        echo json_encode([
-            'success'   => true,
-            'message'   => "Movement recorded. New stock: <strong>$newQty {$part['unit']}</strong>.",
-            'new_stock' => $newQty,
-        ]);
+        jsonOk(
+            ['new_stock' => $newQty],
+            "Movement recorded. New stock: <strong>$newQty {$part['unit']}</strong>."
+        );
     } catch (PDOException $e) {
         $pdo->rollBack();
         error_log('parts_handler/record_movement: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
-// ── Unknown action ────────────────────────────────────────────────────────────
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

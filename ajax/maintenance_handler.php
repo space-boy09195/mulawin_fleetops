@@ -1,18 +1,16 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
@@ -21,55 +19,22 @@ $action = $_POST['action'] ?? '';
 // ── Log maintenance record ────────────────────────────────────────────────────
 if ($action === 'log_record') {
 
-    $truckId      = (int)($_POST['truck_id']     ?? 0);
-    $type         = trim($_POST['type']           ?? '');
-    $truckStatus  = trim($_POST['truck_status']   ?? '');
-    $description  = trim($_POST['description']    ?? '');
-    $datePerformed = trim($_POST['date_performed'] ?? '');
-    $nextDue      = trim($_POST['next_due_date']  ?? '') ?: null;
-    $cost         = $_POST['cost'] !== '' ? (float)$_POST['cost'] : null;
-    $incidentId   = (int)($_POST['incident_id']   ?? 0) ?: null;
-    $inspectionId = (int)($_POST['inspection_id'] ?? 0) ?: null;
+    $truckId       = requiredInt('truck_id', 'Truck', 1);
+    $type          = requiredEnum('type', MAINTENANCE_TYPES, 'Maintenance type');
+    $truckStatus   = requiredEnum('truck_status', MAINTENANCE_TRUCK_STATUSES, 'Truck status');
+    $description   = requiredString('description', 'Description', 1000);
+    $datePerformed = requiredDate('date_performed', 'Date performed', true);
+    $nextDue       = optionalString('next_due_date');
+    $cost          = optionalFloat('cost');
+    $incidentId    = filter_input(INPUT_POST, 'incident_id', FILTER_VALIDATE_INT) ?: null;
+    $inspectionId  = filter_input(INPUT_POST, 'inspection_id', FILTER_VALIDATE_INT) ?: null;
 
-    $allowedTypes    = ['Preventive', 'Corrective', 'Inspection'];
-    $allowedStatuses = ['Operational', 'Scheduled Maintenance', 'Under Repair'];
-
-    if (!$truckId || !$type || !$truckStatus || !$description || !$datePerformed) {
-        echo json_encode(['success' => false, 'message' => 'Please fill in all required fields.']);
-        exit;
-    }
-
-    if (!in_array($type, $allowedTypes)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid maintenance type.']);
-        exit;
-    }
-
-    if (!in_array($truckStatus, $allowedStatuses)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid truck status.']);
-        exit;
-    }
-
-    // Validate date
-    if (!isValidDate($datePerformed)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid date format.']);
-        exit;
-    }
-    if (isPassedDate($datePerformed)) {
-        echo json_encode(['success' => false, 'message' => 'New maintenance records cannot use a passed date.']);
-        exit;
-    }
     if ($nextDue !== null && (!isValidDate($nextDue) || isPassedDate($nextDue))) {
-        echo json_encode(['success' => false, 'message' => 'Next due date cannot be a passed date.']);
-        exit;
+        jsonFail('Next due date cannot be a passed date.');
     }
 
     // Verify truck exists
-    $truckCheck = $pdo->prepare("SELECT truck_id FROM trucks WHERE truck_id = ?");
-    $truckCheck->execute([$truckId]);
-    if (!$truckCheck->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Truck not found.']);
-        exit;
-    }
+    findOrFail($pdo, 'trucks', 'truck_id', $truckId, 'Truck not found.');
 
     // Verify incident belongs to this truck if provided
     if ($incidentId) {
@@ -81,16 +46,14 @@ if ($action === 'log_record') {
         ");
         $incCheck->execute([$incidentId, $truckId]);
         if (!$incCheck->fetch()) {
-            echo json_encode(['success' => false, 'message' => 'Incident does not belong to the selected truck.']);
-            exit;
+            jsonFail('Incident does not belong to the selected truck.');
         }
 
         if ($inspectionId) {
             $inspectionCheck = $pdo->prepare("SELECT inspection_id FROM vehicle_inspections WHERE inspection_id = ? AND truck_id = ?");
             $inspectionCheck->execute([$inspectionId, $truckId]);
             if (!$inspectionCheck->fetch()) {
-                echo json_encode(['success' => false, 'message' => 'Inspection does not belong to the selected truck.']);
-                exit;
+                jsonFail('Inspection does not belong to the selected truck.');
             }
         }
     }
@@ -140,78 +103,61 @@ if ($action === 'log_record') {
             'inspection_id'    => $inspectionId,
         ]);
 
-        echo json_encode(['success' => true, 'message' => 'Maintenance record saved.', 'id' => $newId]);
+        jsonOk(['id' => $newId], 'Maintenance record saved.');
     } catch (PDOException $e) {
         $pdo->rollBack();
         error_log('maintenance_handler/log_record: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
+// ── Save vehicle inspection ───────────────────────────────────────────────────
 if ($action === 'save_inspection') {
-        $truckId = (int)($_POST['truck_id'] ?? 0);
-        $date = trim($_POST['inspection_date'] ?? '');
-        $notes = trim($_POST['notes'] ?? '') ?: null;
-        $findings = json_decode($_POST['findings'] ?? '[]', true);
-        $allowedViews = ['Front', 'Side', 'Rear', 'Top'];
-        $allowedConditions = ['Good', 'Needs Attention', 'Damaged', 'Missing', 'Leaking', 'Worn', 'Not Checked'];
+    $truckId  = requiredInt('truck_id', 'Truck', 1);
+    $date     = requiredDate('inspection_date', 'Inspection date', true);
+    $notes    = optionalString('notes');
+    $findings = json_decode($_POST['findings'] ?? '[]', true);
 
-        if (!$truckId || !isValidDate($date) || !is_array($findings)) {
-            echo json_encode(['success' => false, 'message' => 'Vehicle, date, and valid inspection findings are required.']);
-            exit;
-        }
-        if (isPassedDate($date)) {
-            echo json_encode(['success' => false, 'message' => 'New inspections cannot use a passed date.']);
-            exit;
-        }
-
-        $truckCheck = $pdo->prepare("SELECT truck_id FROM trucks WHERE truck_id = ?");
-        $truckCheck->execute([$truckId]);
-        if (!$truckCheck->fetchColumn()) {
-            echo json_encode(['success' => false, 'message' => 'Truck not found.']);
-            exit;
-        }
-
-        try {
-            $pdo->beginTransaction();
-            $pdo->prepare("INSERT INTO vehicle_inspections (truck_id, inspected_by, inspection_date, notes) VALUES (?, ?, ?, ?)")
-                ->execute([$truckId, currentUserId(), $date, $notes]);
-            $inspectionId = (int)$pdo->lastInsertId();
-            $findingStmt = $pdo->prepare("
-                INSERT INTO vehicle_inspection_findings (inspection_id, view_name, part_name, condition, notes)
-                VALUES (?, ?, ?, ?, ?)
-            ");
-            foreach ($findings as $finding) {
-                $view = $finding['view'] ?? '';
-                $part = trim($finding['part'] ?? '');
-                $condition = $finding['condition'] ?? 'Not Checked';
-                if (!in_array($view, $allowedViews, true) || !$part || !in_array($condition, $allowedConditions, true)) {
-                    throw new InvalidArgumentException('Invalid inspection finding.');
-                }
-                $findingStmt->execute([$inspectionId, $view, $part, $condition, trim($finding['notes'] ?? '') ?: null]);
-            }
-            $pdo->commit();
-            auditLog('SAVE_VEHICLE_INSPECTION', 'vehicle_inspections', $inspectionId, null, ['truck_id' => $truckId]);
-            echo json_encode(['success' => true, 'message' => 'Vehicle inspection saved.']);
-        } catch (Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
-            error_log('maintenance_handler/save_inspection: ' . $e->getMessage());
-            echo json_encode(['success' => false, 'message' => 'Could not save vehicle inspection.']);
-        }
-        exit;
+    if (!is_array($findings)) {
+        jsonFail('Valid inspection findings are required.');
     }
+
+    findOrFail($pdo, 'trucks', 'truck_id', $truckId, 'Truck not found.');
+
+    try {
+        $pdo->beginTransaction();
+        $pdo->prepare("INSERT INTO vehicle_inspections (truck_id, inspected_by, inspection_date, notes) VALUES (?, ?, ?, ?)")
+            ->execute([$truckId, currentUserId(), $date, $notes]);
+        $inspectionId = (int)$pdo->lastInsertId();
+        $findingStmt = $pdo->prepare("
+            INSERT INTO vehicle_inspection_findings (inspection_id, view_name, part_name, condition, notes)
+            VALUES (?, ?, ?, ?, ?)
+        ");
+        foreach ($findings as $finding) {
+            $view = $finding['view'] ?? '';
+            $part = trim($finding['part'] ?? '');
+            $condition = $finding['condition'] ?? 'Not Checked';
+            if (!in_array($view, INSPECTION_VIEWS, true) || !$part || !in_array($condition, INSPECTION_CONDITIONS, true)) {
+                throw new InvalidArgumentException('Invalid inspection finding.');
+            }
+            $findingStmt->execute([$inspectionId, $view, $part, $condition, trim($finding['notes'] ?? '') ?: null]);
+        }
+        $pdo->commit();
+        auditLog('SAVE_VEHICLE_INSPECTION', 'vehicle_inspections', $inspectionId, null, ['truck_id' => $truckId]);
+        jsonOk([], 'Vehicle inspection saved.');
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('maintenance_handler/save_inspection: ' . $e->getMessage());
+        jsonFail('Could not save vehicle inspection.', 500);
+    }
+}
 
 // ── Submit pre-trip checklist ─────────────────────────────────────────────────
 if ($action === 'submit_checklist') {
 
-        $dispatchId = (int)($_POST['dispatch_id'] ?? 0);
-        $notes      = trim($_POST['notes']        ?? '') ?: null;
+    $dispatchId = requiredInt('dispatch_id', 'Dispatch', 1);
+    $notes      = optionalString('notes');
 
-        if (!$dispatchId) {
-            echo json_encode(['success' => false, 'message' => 'Please select a dispatch.']);
-            exit;
-        }
     // Verify dispatch exists and is approved
     $dispCheck = $pdo->prepare("
         SELECT dispatch_id, truck_id FROM dispatch_requests
@@ -221,16 +167,14 @@ if ($action === 'submit_checklist') {
     $dispatch = $dispCheck->fetch(PDO::FETCH_ASSOC);
 
     if (!$dispatch) {
-        echo json_encode(['success' => false, 'message' => 'Dispatch not found or not approved.']);
-        exit;
+        jsonFail('Dispatch not found or not approved.', 404);
     }
 
     // Guard: only one checklist per dispatch
     $dupCheck = $pdo->prepare("SELECT checklist_id FROM maintenance_checklists WHERE dispatch_id = ?");
     $dupCheck->execute([$dispatchId]);
     if ($dupCheck->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'A checklist has already been submitted for this dispatch.']);
-        exit;
+        jsonFail('A checklist has already been submitted for this dispatch.');
     }
 
     $checklistFields = ['lights_ok', 'tires_ok', 'tools_ok', 'medical_kit_ok',
@@ -273,18 +217,15 @@ if ($action === 'submit_checklist') {
             'result'      => $result,
         ]);
 
-        echo json_encode([
-            'success' => true,
-            'message' => "Checklist submitted — result: <strong>$result</strong>.",
-            'result'  => $result,
-            'id'      => $newId,
-        ]);
+        jsonOk(
+            ['result' => $result, 'id' => $newId],
+            "Checklist submitted — result: <strong>$result</strong>."
+        );
     } catch (PDOException $e) {
         error_log('maintenance_handler/submit_checklist: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Unknown action ────────────────────────────────────────────────────────────
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

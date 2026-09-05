@@ -9,28 +9,20 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/soft_delete.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
-if (!isLoggedIn()) {
-    echo json_encode(['success' => false, 'message' => 'Not authenticated.']);
-    exit;
-}
-
 // Only Head Management can post, edit, or delete
-if (currentRoleId() !== ROLE_HEAD_MANAGEMENT) {
-    echo json_encode(['success' => false, 'message' => 'Access denied.']);
-    exit;
-}
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requireRole([ROLE_HEAD_MANAGEMENT]);
+requirePostMethod();
 enforceCsrf();
 
+// NOTE: action is read from $_GET here (not $_POST) — matches the
+// existing frontend, which calls e.g. announcement_handler.php?action=add
 $action = $_GET['action'] ?? '';
 $pdo    = getDBConnection();
 
@@ -45,24 +37,15 @@ function readPinnedFlag(array $post): int {
 // Validates the priority level, defaulting to 'medium' for anything unexpected.
 function readPriority(array $post): string {
     $raw = $post['priority'] ?? 'medium';
-    return in_array($raw, ['high', 'medium', 'low'], true) ? $raw : 'medium';
+    return in_array($raw, ANNOUNCEMENT_PRIORITIES, true) ? $raw : 'medium';
 }
 
 // ---- ADD --------------------------------------------------
 if ($action === 'add') {
-    $title    = trim($_POST['title']     ?? '');
-    $body     = trim($_POST['body']      ?? '');
+    $title    = requiredString('title', 'Title', 200);
+    $body     = requiredString('body', 'Message');
     $priority = readPriority($_POST);
     $isPinned = readPinnedFlag($_POST);
-
-    if ($title === '' || $body === '') {
-        echo json_encode(['success' => false, 'message' => 'Title and message are required.']);
-        exit;
-    }
-    if (mb_strlen($title) > 200) {
-        echo json_encode(['success' => false, 'message' => 'Title is too long (max 200 characters).']);
-        exit;
-    }
 
     $stmt = $pdo->prepare(
         "INSERT INTO announcements (created_by, title, body, priority, is_pinned)
@@ -78,39 +61,18 @@ if ($action === 'add') {
     $newId = (int)$pdo->lastInsertId();
     auditLog('CREATE', 'announcements', $newId);
 
-    echo json_encode(['success' => true, 'message' => 'Announcement posted.']);
-    exit;
+    jsonOk([], 'Announcement posted.');
 }
 
 // ---- EDIT ---------------------------------------------------
 if ($action === 'edit') {
-    $id       = filter_input(INPUT_POST, 'announcement_id', FILTER_VALIDATE_INT);
-    $title    = trim($_POST['title'] ?? '');
-    $body     = trim($_POST['body']  ?? '');
+    $id       = requiredInt('announcement_id', 'Announcement ID', 1);
+    $title    = requiredString('title', 'Title', 200);
+    $body     = requiredString('body', 'Message');
     $priority = readPriority($_POST);
     $isPinned = readPinnedFlag($_POST);
 
-    if (!$id) {
-        echo json_encode(['success' => false, 'message' => 'Invalid ID.']);
-        exit;
-    }
-    if ($title === '' || $body === '') {
-        echo json_encode(['success' => false, 'message' => 'Title and message are required.']);
-        exit;
-    }
-    if (mb_strlen($title) > 200) {
-        echo json_encode(['success' => false, 'message' => 'Title is too long (max 200 characters).']);
-        exit;
-    }
-
-    $old = $pdo->prepare("SELECT title, body, priority, is_pinned FROM announcements WHERE announcement_id = :id");
-    $old->execute([':id' => $id]);
-    $oldData = $old->fetch(PDO::FETCH_ASSOC);
-
-    if (!$oldData) {
-        echo json_encode(['success' => false, 'message' => 'Announcement not found.']);
-        exit;
-    }
+    $oldData = findOrFail($pdo, 'announcements', 'announcement_id', $id, 'Announcement not found.');
 
     $pdo->prepare(
         "UPDATE announcements
@@ -131,29 +93,22 @@ if ($action === 'edit') {
         'is_pinned' => $isPinned,
     ]);
 
-    echo json_encode(['success' => true, 'message' => 'Announcement updated.']);
-    exit;
+    jsonOk([], 'Announcement updated.');
 }
 
 // ---- DELETE -----------------------------------------------
 if ($action === 'delete') {
-    $id = filter_input(INPUT_POST, 'announcement_id', FILTER_VALIDATE_INT);
-    if (!$id) {
-        echo json_encode(['success' => false, 'message' => 'Invalid ID.']);
-        exit;
-    }
+    $id = requiredInt('announcement_id', 'Announcement ID', 1);
 
     $deletedByName = $_SESSION['full_name'] ?? 'Unknown user';
     $archived = archiveAndDelete($pdo, 'announcements', 'announcement_id', $id, currentUserId(), $deletedByName);
 
     if (!$archived) {
-        echo json_encode(['success' => false, 'message' => 'Announcement not found or could not be deleted.']);
-        exit;
+        jsonFail('Announcement not found or could not be deleted.', 404);
     }
 
     auditLog('DELETE', 'announcements', $id);
-    echo json_encode(['success' => true, 'message' => 'Deleted. It can be restored from the Recycle Bin if needed.']);
-    exit;
+    jsonOk([], 'Deleted. It can be restored from the Recycle Bin if needed.');
 }
 
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

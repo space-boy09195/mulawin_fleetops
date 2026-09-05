@@ -1,18 +1,16 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
@@ -21,53 +19,23 @@ $action = $_POST['action'] ?? '';
 // ── Create billing ────────────────────────────────────────────────────────────
 if ($action === 'create_billing') {
 
-    $tripId        = (int)($_POST['trip_id']        ?? 0);
-    $clientName    = trim($_POST['client_name']     ?? '') ?: null;
-    $amount        = (float)($_POST['amount']       ?? 0);
-    $dueDate       = trim($_POST['due_date']        ?? '');
-    $billingNumber = trim($_POST['billing_number']  ?? '');
-    $notes         = trim($_POST['notes']           ?? '') ?: null;
-
-    if (!$tripId || !$amount || !$dueDate || !$billingNumber) {
-        echo json_encode(['success' => false, 'message' => 'Trip, amount, due date, and billing number are required.']);
-        exit;
-    }
-
-    if ($amount <= 0) {
-        echo json_encode(['success' => false, 'message' => 'Amount must be greater than zero.']);
-        exit;
-    }
-
-    if (!isValidDate($dueDate)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid due date format.']);
-        exit;
-    }
-    if (isPassedDate($dueDate)) {
-        echo json_encode(['success' => false, 'message' => 'New billings cannot use a passed due date.']);
-        exit;
-    }
+    $tripId        = requiredInt('trip_id', 'Trip', 1);
+    $clientName    = optionalString('client_name');
+    $amount        = requiredPositiveFloat('amount', 'Amount');
+    $dueDate       = requiredDate('due_date', 'Due date', true);
+    $billingNumber = requiredString('billing_number', 'Billing number', 100);
+    $notes         = optionalString('notes');
 
     // Verify trip exists and is completed
-    $tripCheck = $pdo->prepare("SELECT trip_id, status FROM trips WHERE trip_id = ?");
-    $tripCheck->execute([$tripId]);
-    $trip = $tripCheck->fetch(PDO::FETCH_ASSOC);
-
-    if (!$trip) {
-        echo json_encode(['success' => false, 'message' => 'Trip not found.']);
-        exit;
-    }
+    $trip = findOrFail($pdo, 'trips', 'trip_id', $tripId, 'Trip not found.');
 
     if ($trip['status'] !== 'Completed') {
-        echo json_encode(['success' => false, 'message' => 'Billings can only be created for completed trips.']);
-        exit;
+        jsonFail('Billings can only be created for completed trips.');
     }
 
     // Unique billing number
-    $dupCheck = $pdo->prepare("SELECT billing_id FROM billings WHERE billing_number = ?");
-    $dupCheck->execute([$billingNumber]);
-    if ($dupCheck->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Billing number already exists.']);
-        exit;
+    if (existsWhere($pdo, 'billings', 'billing_number', $billingNumber)) {
+        jsonFail('Billing number already exists.');
     }
 
     try {
@@ -86,49 +54,22 @@ if ($action === 'create_billing') {
             'due_date'       => $dueDate,
         ]);
 
-        echo json_encode(['success' => true, 'message' => 'Billing created successfully.', 'id' => $newId]);
+        jsonOk(['id' => $newId], 'Billing created successfully.');
     } catch (PDOException $e) {
         error_log('billing_handler/create: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Record payment (collection) ───────────────────────────────────────────────
 if ($action === 'record_payment') {
 
-    $billingId  = (int)($_POST['billing_id']    ?? 0);
-    $amountPaid = (float)($_POST['amount_paid'] ?? 0);
-    $payDate    = trim($_POST['payment_date']   ?? '');
-    $payMode    = trim($_POST['payment_mode']   ?? '');
-    $reference  = trim($_POST['reference_no']  ?? '') ?: null;
-    $remarks    = trim($_POST['remarks']        ?? '') ?: null;
-
-    $allowedModes = ['Cash', 'Check', 'Bank Transfer', 'GCash', 'Other'];
-
-    if (!$billingId || !$amountPaid || !$payDate || !$payMode) {
-        echo json_encode(['success' => false, 'message' => 'Billing, amount, date, and payment mode are required.']);
-        exit;
-    }
-
-    if ($amountPaid <= 0) {
-        echo json_encode(['success' => false, 'message' => 'Amount paid must be greater than zero.']);
-        exit;
-    }
-
-    if (!in_array($payMode, $allowedModes)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid payment mode.']);
-        exit;
-    }
-
-    if (!isValidDate($payDate)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid payment date format.']);
-        exit;
-    }
-    if (isPassedDate($payDate)) {
-        echo json_encode(['success' => false, 'message' => 'New payments cannot use a passed date.']);
-        exit;
-    }
+    $billingId  = requiredInt('billing_id', 'Billing', 1);
+    $amountPaid = requiredPositiveFloat('amount_paid', 'Amount paid');
+    $payDate    = requiredDate('payment_date', 'Payment date', true);
+    $payMode    = requiredEnum('payment_mode', PAYMENT_MODES, 'Payment mode');
+    $reference  = optionalString('reference_no');
+    $remarks    = optionalString('remarks');
 
     // Fetch billing and current balance
     $bilStmt = $pdo->prepare("
@@ -141,21 +82,15 @@ if ($action === 'record_payment') {
     $billing = $bilStmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$billing) {
-        echo json_encode(['success' => false, 'message' => 'Billing not found.']);
-        exit;
+        jsonFail('Billing not found.', 404);
     }
 
     if ($billing['status'] === 'Paid') {
-        echo json_encode(['success' => false, 'message' => 'This billing is already fully paid.']);
-        exit;
+        jsonFail('This billing is already fully paid.');
     }
 
     if ($amountPaid > $billing['balance']) {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Payment amount exceeds outstanding balance of ₱' . number_format($billing['balance'], 2) . '.',
-        ]);
-        exit;
+        jsonFail('Payment amount exceeds outstanding balance of ₱' . number_format($billing['balance'], 2) . '.');
     }
 
     try {
@@ -186,19 +121,16 @@ if ($action === 'record_payment') {
             'new_status'  => $newStatus,
         ]);
 
-        echo json_encode([
-            'success'     => true,
-            'message'     => 'Payment recorded. Billing status: <strong>' . $newStatus . '</strong>.',
+        jsonOk([
             'new_status'  => $newStatus,
             'new_balance' => $newBalance,
-        ]);
+        ], 'Payment recorded. Billing status: <strong>' . $newStatus . '</strong>.');
     } catch (PDOException $e) {
         $pdo->rollBack();
         error_log('billing_handler/record_payment: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Unknown action ────────────────────────────────────────────────────────────
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

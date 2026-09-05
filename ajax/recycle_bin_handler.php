@@ -9,16 +9,13 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/soft_delete.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
 requireRole([ROLE_HEAD_MANAGEMENT]);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
@@ -26,11 +23,7 @@ $action = $_POST['action'] ?? '';
 
 // ── Restore ────────────────────────────────────────────────────────────────
 if ($action === 'restore') {
-    $archiveId = (int)($_POST['archive_id'] ?? 0);
-    if (!$archiveId) {
-        echo json_encode(['success' => false, 'message' => 'Invalid archive ID.']);
-        exit;
-    }
+    $archiveId = requiredInt('archive_id', 'Archive ID', 1);
 
     $result = restoreRecord($pdo, $archiveId);
 
@@ -44,19 +37,14 @@ if ($action === 'restore') {
 
 // ── Permanently delete ────────────────────────────────────────────────────────
 if ($action === 'purge') {
-    $archiveId = (int)($_POST['archive_id'] ?? 0);
-    if (!$archiveId) {
-        echo json_encode(['success' => false, 'message' => 'Invalid archive ID.']);
-        exit;
-    }
+    $archiveId = requiredInt('archive_id', 'Archive ID', 1);
 
     $stmt = $pdo->prepare("SELECT * FROM deleted_records WHERE archive_id = ? AND restored_at IS NULL");
     $stmt->execute([$archiveId]);
     $archived = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$archived) {
-        echo json_encode(['success' => false, 'message' => 'Archive record not found, or it was already restored.']);
-        exit;
+        jsonFail('Archive record not found, or it was already restored.', 404);
     }
 
     // Documents keep their physical file on disk until this point — a
@@ -75,11 +63,10 @@ if ($action === 'purge') {
 
     if ($ok) {
         auditLog('PURGE', 'deleted_records', $archiveId);
-        echo json_encode(['success' => true, 'message' => 'Permanently deleted.']);
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Could not permanently delete this record.']);
+        jsonOk([], 'Permanently deleted.');
     }
-    exit;
+
+    jsonFail('Could not permanently delete this record.');
 }
 
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

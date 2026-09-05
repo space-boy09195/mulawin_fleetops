@@ -3,16 +3,13 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
 requireRole([ROLE_HEAD_MANAGEMENT]);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
@@ -20,27 +17,17 @@ $action = $_POST['action'] ?? '';
 
 // ── Add route ─────────────────────────────────────────────────────────────────
 if ($action === 'add') {
-    $name        = trim($_POST['route_name']   ?? '');
-    $origin      = trim($_POST['origin']       ?? '');
-    $destination = trim($_POST['destination']  ?? '');
-    $distance    = $_POST['distance_km'] !== '' ? (float)$_POST['distance_km'] : null;
-
-    if (!$name || !$origin || !$destination) {
-        echo json_encode(['success' => false, 'message' => 'Route name, origin, and destination are required.']);
-        exit;
-    }
+    $name        = requiredString('route_name', 'Route name', 150);
+    $origin      = requiredString('origin', 'Origin', 150);
+    $destination = requiredString('destination', 'Destination', 150);
+    $distance    = optionalFloat('distance_km');
 
     if ($distance !== null && $distance < 0) {
-        echo json_encode(['success' => false, 'message' => 'Distance cannot be negative.']);
-        exit;
+        jsonFail('Distance cannot be negative.');
     }
 
-    // Check for duplicate route name
-    $dup = $pdo->prepare("SELECT route_id FROM routes WHERE route_name = ?");
-    $dup->execute([$name]);
-    if ($dup->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'A route with that name already exists.']);
-        exit;
+    if (existsWhere($pdo, 'routes', 'route_name', $name)) {
+        jsonFail('A route with that name already exists.');
     }
 
     try {
@@ -57,47 +44,26 @@ if ($action === 'add') {
             'destination' => $destination,
         ]);
 
-        echo json_encode(['success' => true, 'message' => 'Route added successfully.', 'id' => $newId]);
+        jsonOk(['id' => $newId], 'Route added successfully.');
     } catch (PDOException $e) {
         error_log('routes_handler/add: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Edit route ────────────────────────────────────────────────────────────────
 if ($action === 'edit') {
-    $routeId     = (int)($_POST['route_id']    ?? 0);
-    $name        = trim($_POST['route_name']   ?? '');
-    $origin      = trim($_POST['origin']       ?? '');
-    $destination = trim($_POST['destination']  ?? '');
-    $distance    = $_POST['distance_km'] !== '' ? (float)$_POST['distance_km'] : null;
-
-    if (!$routeId) {
-        echo json_encode(['success' => false, 'message' => 'Invalid route ID.']);
-        exit;
-    }
-
-    if (!$name || !$origin || !$destination) {
-        echo json_encode(['success' => false, 'message' => 'Route name, origin, and destination are required.']);
-        exit;
-    }
+    $routeId     = requiredInt('route_id', 'Route ID', 1);
+    $name        = requiredString('route_name', 'Route name', 150);
+    $origin      = requiredString('origin', 'Origin', 150);
+    $destination = requiredString('destination', 'Destination', 150);
+    $distance    = optionalFloat('distance_km');
 
     // Fetch old for audit
-    $old = $pdo->prepare("SELECT * FROM routes WHERE route_id = ?");
-    $old->execute([$routeId]);
-    $oldData = $old->fetch(PDO::FETCH_ASSOC);
-    if (!$oldData) {
-        echo json_encode(['success' => false, 'message' => 'Route not found.']);
-        exit;
-    }
+    $oldData = findOrFail($pdo, 'routes', 'route_id', $routeId, 'Route not found.');
 
-    // Unique name excluding self
-    $dup = $pdo->prepare("SELECT route_id FROM routes WHERE route_name = ? AND route_id != ?");
-    $dup->execute([$name, $routeId]);
-    if ($dup->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Another route already has that name.']);
-        exit;
+    if (existsWhere($pdo, 'routes', 'route_name', $name, $routeId, 'route_id')) {
+        jsonFail('Another route already has that name.');
     }
 
     try {
@@ -115,31 +81,18 @@ if ($action === 'edit') {
             ['route_name' => $name, 'origin' => $origin, 'destination' => $destination]
         );
 
-        echo json_encode(['success' => true, 'message' => 'Route updated successfully.']);
+        jsonOk([], 'Route updated successfully.');
     } catch (PDOException $e) {
         error_log('routes_handler/edit: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Toggle active/inactive ────────────────────────────────────────────────────
 if ($action === 'toggle') {
-    $routeId = (int)($_POST['route_id'] ?? 0);
+    $routeId = requiredInt('route_id', 'Route ID', 1);
 
-    if (!$routeId) {
-        echo json_encode(['success' => false, 'message' => 'Invalid route ID.']);
-        exit;
-    }
-
-    $stmt = $pdo->prepare("SELECT route_id, route_name, is_active FROM routes WHERE route_id = ?");
-    $stmt->execute([$routeId]);
-    $route = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$route) {
-        echo json_encode(['success' => false, 'message' => 'Route not found.']);
-        exit;
-    }
+    $route = findOrFail($pdo, 'routes', 'route_id', $routeId, 'Route not found.');
 
     // Prevent deactivating a route that has pending/approved dispatch requests
     if ($route['is_active']) {
@@ -149,11 +102,7 @@ if ($action === 'toggle') {
         ");
         $inUse->execute([$routeId]);
         if ((int)$inUse->fetchColumn() > 0) {
-            echo json_encode([
-                'success' => false,
-                'message' => 'Cannot deactivate a route with pending dispatch requests.',
-            ]);
-            exit;
+            jsonFail('Cannot deactivate a route with pending dispatch requests.');
         }
     }
 
@@ -168,16 +117,14 @@ if ($action === 'toggle') {
             ['is_active' => $newActive]
         );
 
-        echo json_encode([
-            'success'    => true,
-            'message'    => 'Route ' . ($newActive ? 'activated' : 'deactivated') . ' successfully.',
-            'new_active' => $newActive,
-        ]);
+        jsonOk(
+            ['new_active' => $newActive],
+            'Route ' . ($newActive ? 'activated' : 'deactivated') . ' successfully.'
+        );
     } catch (PDOException $e) {
         error_log('routes_handler/toggle: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

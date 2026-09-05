@@ -1,19 +1,17 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/soft_delete.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE, ROLE_ACCOUNTING]);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
@@ -28,24 +26,12 @@ if ($action === 'upload') {
             UPLOAD_ERR_NO_FILE => 'No file was uploaded.',
             default            => 'Upload failed. Please try again.',
         };
-        echo json_encode(['success' => false, 'message' => $errMsg]);
-        exit;
+        jsonFail($errMsg);
     }
 
-    $docType    = trim($_POST['doc_type']    ?? '');
-    $tripId     = (int)($_POST['trip_id']   ?? 0) ?: null;
-    $description = trim($_POST['description'] ?? '') ?: null;
-
-    $allowedTypes = [
-        'OR/CR', 'Delivery Receipt', 'Waybill',
-        'Maintenance Record', 'Billing Record',
-        'Company Document', 'Other',
-    ];
-
-    if (!$docType || !in_array($docType, $allowedTypes)) {
-        echo json_encode(['success' => false, 'message' => 'Please select a valid document type.']);
-        exit;
-    }
+    $docType     = requiredEnum('doc_type', DOCUMENT_TYPES, 'Document type');
+    $tripId      = filter_input(INPUT_POST, 'trip_id', FILTER_VALIDATE_INT) ?: null;
+    $description = optionalString('description');
 
     $file     = $_FILES['file'];
     $origName = basename($file['name']);
@@ -54,8 +40,7 @@ if ($action === 'upload') {
 
     // Max 10 MB
     if ($fileSize > 10 * 1024 * 1024) {
-        echo json_encode(['success' => false, 'message' => 'File exceeds the 10 MB limit.']);
-        exit;
+        jsonFail('File exceeds the 10 MB limit.');
     }
 
     // MIME validation via finfo
@@ -73,8 +58,7 @@ if ($action === 'upload') {
     ];
 
     if (!in_array($mimeType, $allowedMimes)) {
-        echo json_encode(['success' => false, 'message' => 'File type not allowed. Upload PDF, JPG, PNG, DOCX, or XLSX.']);
-        exit;
+        jsonFail('File type not allowed. Upload PDF, JPG, PNG, DOCX, or XLSX.');
     }
 
     // Build upload directory: /uploads/ relative to project root
@@ -91,8 +75,7 @@ if ($action === 'upload') {
 
     if (!move_uploaded_file($tmpPath, $destPath)) {
         error_log('document_handler: move_uploaded_file failed for ' . $origName);
-        echo json_encode(['success' => false, 'message' => 'Failed to save file. Please try again.']);
-        exit;
+        jsonFail('Failed to save file. Please try again.');
     }
 
     try {
@@ -116,47 +99,32 @@ if ($action === 'upload') {
             'trip_id'   => $tripId,
         ]);
 
-        echo json_encode(['success' => true, 'message' => 'Document uploaded successfully.', 'id' => $newId]);
+        jsonOk(['id' => $newId], 'Document uploaded successfully.');
     } catch (PDOException $e) {
         // Clean up orphaned file if DB insert fails
         if (file_exists($destPath)) unlink($destPath);
         error_log('document_handler/upload: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Delete document ───────────────────────────────────────────────────────────
 if ($action === 'delete') {
 
     // Only Head Management and Accounting can delete
-    if (!in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING])) {
-        echo json_encode(['success' => false, 'message' => 'You are not authorised to delete documents.']);
-        exit;
+    if (!in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING], true)) {
+        jsonFail('You are not authorised to delete documents.', 403);
     }
 
-    $docId = (int)($_POST['document_id'] ?? 0);
+    $docId = requiredInt('document_id', 'Document ID', 1);
 
-    if (!$docId) {
-        echo json_encode(['success' => false, 'message' => 'Invalid document ID.']);
-        exit;
-    }
-
-    $stmt = $pdo->prepare("SELECT document_id, stored_name, file_name FROM documents WHERE document_id = ?");
-    $stmt->execute([$docId]);
-    $doc = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$doc) {
-        echo json_encode(['success' => false, 'message' => 'Document not found.']);
-        exit;
-    }
+    $doc = findOrFail($pdo, 'documents', 'document_id', $docId, 'Document not found.');
 
     // Check not referenced in billing_documents
     $billingRef = $pdo->prepare("SELECT billing_id FROM billing_documents WHERE document_id = ? LIMIT 1");
     $billingRef->execute([$docId]);
     if ($billingRef->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'This document is linked to a billing record and cannot be deleted.']);
-        exit;
+        jsonFail('This document is linked to a billing record and cannot be deleted.');
     }
 
     $deletedByName = $_SESSION['full_name'] ?? 'Unknown user';
@@ -164,8 +132,7 @@ if ($action === 'delete') {
     $archived = archiveAndDelete($pdo, 'documents', 'document_id', $docId, currentUserId(), $deletedByName);
 
     if (!$archived) {
-        echo json_encode(['success' => false, 'message' => 'Document not found or could not be deleted.']);
-        exit;
+        jsonFail('Document not found or could not be deleted.', 404);
     }
 
     // Note: the physical file on disk is intentionally NOT removed here.
@@ -175,9 +142,8 @@ if ($action === 'delete') {
 
     auditLog('DELETE_DOCUMENT', 'documents', $docId, ['file_name' => $doc['file_name']], null);
 
-    echo json_encode(['success' => true, 'message' => 'Document deleted. It can be restored from the Recycle Bin if needed.']);
-    exit;
+    jsonOk([], 'Document deleted. It can be restored from the Recycle Bin if needed.');
 }
 
 // ── Unknown action ────────────────────────────────────────────────────────────
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

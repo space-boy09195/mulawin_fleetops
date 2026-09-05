@@ -7,28 +7,19 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
 
 header('Content-Type: application/json');
 
-if (!isLoggedIn() || currentRoleId() !== ROLE_HEAD_MANAGEMENT) {
-    echo json_encode(['success' => false, 'message' => 'Access denied.']);
-    exit;
-}
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
+requireRole([ROLE_HEAD_MANAGEMENT]);
+requirePostMethod();
 enforceCsrf();
 
-$dispatchId = filter_input(INPUT_POST, 'dispatch_id', FILTER_VALIDATE_INT);
-$status     = trim($_POST['status']  ?? '');
-$remarks    = trim($_POST['remarks'] ?? '') ?: null;
-
-if (!$dispatchId || !in_array($status, ['Approved', 'Rejected'], true)) {
-    echo json_encode(['success' => false, 'message' => 'Invalid input.']);
-    exit;
-}
+$dispatchId = requiredInt('dispatch_id', 'Dispatch ID', 1);
+$status     = requiredEnum('status', ['Approved', 'Rejected'], 'Status');
+$remarks    = optionalString('remarks');
 
 $pdo = getDBConnection();
 
@@ -42,8 +33,7 @@ $dr->execute([':id' => $dispatchId]);
 $dispatch = $dr->fetch();
 
 if (!$dispatch) {
-    echo json_encode(['success' => false, 'message' => 'Request not found or already reviewed.']);
-    exit;
+    jsonFail('Request not found or already reviewed.', 404);
 }
 
 // ---- Update dispatch_requests ----------------------------
@@ -82,4 +72,4 @@ if ($status === 'Approved') {
 
 auditLog('UPDATE', 'dispatch_requests', $dispatchId, ['status' => 'Pending'], ['status' => $status]);
 
-echo json_encode(['success' => true, 'message' => "Request {$status}."]);
+jsonOk([], "Request {$status}.");

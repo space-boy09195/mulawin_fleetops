@@ -11,31 +11,25 @@
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/audit.php';
+require_once __DIR__ . '/../includes/validate.php';
 
 header('Content-Type: application/json');
 
 requireRole([ROLE_HEAD_MANAGEMENT]);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
 $action = $_POST['action'] ?? '';
 
-const ALLOWED_CATEGORIES = ['Revenue', 'Maintenance', 'Fuel', 'Toll', 'Driver Allowance', 'Other', 'Payroll'];
-
 // ── List current budget values for the given months ──────────────────────────
 if ($action === 'list') {
     $months = json_decode($_POST['months'] ?? '[]', true);
     if (!is_array($months) || empty($months)) {
-        echo json_encode(['success' => false, 'message' => 'No months provided.']);
-        exit;
+        jsonFail('No months provided.');
     }
 
     // Validate each month is a clean Y-m-01 date before it touches SQL.
@@ -46,8 +40,7 @@ if ($action === 'list') {
         }
     }
     if (empty($cleanMonths)) {
-        echo json_encode(['success' => false, 'message' => 'No valid months provided.']);
-        exit;
+        jsonFail('No valid months provided.');
     }
 
     $placeholders = implode(',', array_fill(0, count($cleanMonths), '?'));
@@ -59,16 +52,14 @@ if ($action === 'list') {
     $stmt->execute($cleanMonths);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    echo json_encode(['success' => true, 'budgets' => $rows]);
-    exit;
+    jsonOk(['budgets' => $rows]);
 }
 
 // ── Save (upsert) one or more budget entries ──────────────────────────────────
 if ($action === 'save') {
     $entries = json_decode($_POST['entries'] ?? '[]', true);
     if (!is_array($entries) || empty($entries)) {
-        echo json_encode(['success' => false, 'message' => 'No budget entries provided.']);
-        exit;
+        jsonFail('No budget entries provided.');
     }
 
     $stmt = $pdo->prepare("
@@ -85,7 +76,7 @@ if ($action === 'save') {
         $month    = $entry['period_month'] ?? '';
         $amount   = $entry['amount'] ?? null;
 
-        if (!in_array($category, ALLOWED_CATEGORIES, true)) continue;
+        if (!in_array($category, BUDGET_CATEGORIES, true)) continue;
         if (!preg_match('/^\d{4}-\d{2}-01$/', $month)) continue;
         if (!is_numeric($amount) || (float)$amount < 0) continue;
 
@@ -106,4 +97,4 @@ if ($action === 'save') {
     exit;
 }
 
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

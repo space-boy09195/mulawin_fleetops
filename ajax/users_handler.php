@@ -3,16 +3,13 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
 requireRole([ROLE_HEAD_MANAGEMENT]);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
@@ -25,54 +22,38 @@ $action = $_POST['action'] ?? '';
 // ── Add user ──────────────────────────────────────────────────────────────────
 if ($action === 'add_user') {
 
-    $fullName = trim($_POST['full_name'] ?? '');
-    $username = trim($_POST['username']  ?? '');
-    $email    = trim($_POST['email']     ?? '');
-    $roleId   = (int)($_POST['role_id'] ?? 0);
-    $password = $_POST['password']       ?? '';
-    $confirm  = $_POST['confirm']        ?? '';
+    $fullName = requiredString('full_name', 'Full name', 150);
+    $username = requiredString('username', 'Username', 100);
+    $email    = requiredString('email', 'Email', 150);
+    $roleId   = requiredInt('role_id', 'Role', 1);
+    $password = $_POST['password'] ?? '';
+    $confirm  = $_POST['confirm']  ?? '';
 
-    if (!$fullName || !$username || !$email || !$roleId || !$password) {
-        echo json_encode(['success' => false, 'message' => 'All fields are required.']);
-        exit;
+    if (!$password) {
+        jsonFail('Password is required.');
     }
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid email address.']);
-        exit;
+        jsonFail('Invalid email address.');
     }
 
     if (strlen($password) < 8) {
-        echo json_encode(['success' => false, 'message' => 'Password must be at least 8 characters.']);
-        exit;
+        jsonFail('Password must be at least 8 characters.');
     }
 
     if ($password !== $confirm) {
-        echo json_encode(['success' => false, 'message' => 'Passwords do not match.']);
-        exit;
+        jsonFail('Passwords do not match.');
     }
 
     // Check role exists
-    $roleCheck = $pdo->prepare("SELECT role_id FROM roles WHERE role_id = ?");
-    $roleCheck->execute([$roleId]);
-    if (!$roleCheck->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Invalid role selected.']);
-        exit;
-    }
+    findOrFail($pdo, 'roles', 'role_id', $roleId, 'Invalid role selected.');
 
     // Unique username and email
-    $dupUser = $pdo->prepare("SELECT user_id FROM users WHERE username = ?");
-    $dupUser->execute([$username]);
-    if ($dupUser->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Username already taken.']);
-        exit;
+    if (existsWhere($pdo, 'users', 'username', $username)) {
+        jsonFail('Username already taken.');
     }
-
-    $dupEmail = $pdo->prepare("SELECT user_id FROM users WHERE email = ?");
-    $dupEmail->execute([$email]);
-    if ($dupEmail->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Email already in use.']);
-        exit;
+    if (existsWhere($pdo, 'users', 'email', $email)) {
+        jsonFail('Email already in use.');
     }
 
     try {
@@ -90,62 +71,41 @@ if ($action === 'add_user') {
             'role_id'   => $roleId,
         ]);
 
-        echo json_encode(['success' => true, 'message' => 'User created successfully.', 'id' => $newId]);
+        jsonOk(['id' => $newId], 'User created successfully.');
     } catch (PDOException $e) {
         error_log('users_handler/add_user: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Edit user ─────────────────────────────────────────────────────────────────
 if ($action === 'edit_user') {
 
-    $userId   = (int)($_POST['user_id']  ?? 0);
-    $fullName = trim($_POST['full_name'] ?? '');
-    $username = trim($_POST['username']  ?? '');
-    $email    = trim($_POST['email']     ?? '');
-    $roleId   = (int)($_POST['role_id'] ?? 0);
+    $userId   = requiredInt('user_id', 'User', 1);
+    $fullName = requiredString('full_name', 'Full name', 150);
+    $username = requiredString('username', 'Username', 100);
+    $email    = requiredString('email', 'Email', 150);
+    $roleId   = requiredInt('role_id', 'Role', 1);
     $isActive = isset($_POST['is_active']) && $_POST['is_active'] === '1' ? 1 : 0;
 
-    if (!$userId || !$fullName || !$username || !$email || !$roleId) {
-        echo json_encode(['success' => false, 'message' => 'All fields are required.']);
-        exit;
-    }
-
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid email address.']);
-        exit;
+        jsonFail('Invalid email address.');
     }
 
     // Prevent deactivating own account
     if ($userId === currentUserId() && !$isActive) {
-        echo json_encode(['success' => false, 'message' => 'You cannot deactivate your own account.']);
-        exit;
+        jsonFail('You cannot deactivate your own account.');
     }
 
     // Fetch old record for audit
-    $old = $pdo->prepare("SELECT * FROM users WHERE user_id = ?");
-    $old->execute([$userId]);
-    $oldData = $old->fetch(PDO::FETCH_ASSOC);
-    if (!$oldData) {
-        echo json_encode(['success' => false, 'message' => 'User not found.']);
-        exit;
-    }
+    $oldData = findOrFail($pdo, 'users', 'user_id', $userId, 'User not found.');
 
     // Unique checks excluding self
-    $dupUser = $pdo->prepare("SELECT user_id FROM users WHERE username = ? AND user_id != ?");
-    $dupUser->execute([$username, $userId]);
-    if ($dupUser->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Username already taken.']);
-        exit;
+    if (existsWhere($pdo, 'users', 'username', $username, $userId, 'user_id')) {
+        jsonFail('Username already taken.');
     }
-
-    $dupEmail = $pdo->prepare("SELECT user_id FROM users WHERE email = ? AND user_id != ?");
-    $dupEmail->execute([$email, $userId]);
-    if ($dupEmail->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Email already in use.']);
-        exit;
+    if (existsWhere($pdo, 'users', 'email', $email, $userId, 'user_id')) {
+        jsonFail('Email already in use.');
     }
 
     try {
@@ -161,42 +121,33 @@ if ($action === 'edit_user') {
             ['full_name' => $fullName, 'role_id' => $roleId, 'is_active' => $isActive]
         );
 
-        echo json_encode(['success' => true, 'message' => 'User updated successfully.']);
+        jsonOk([], 'User updated successfully.');
     } catch (PDOException $e) {
         error_log('users_handler/edit_user: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Reset password ────────────────────────────────────────────────────────────
 if ($action === 'reset_password') {
 
-    $userId   = (int)($_POST['user_id'] ?? 0);
-    $password = $_POST['password']      ?? '';
-    $confirm  = $_POST['confirm']       ?? '';
+    $userId   = requiredInt('user_id', 'User', 1);
+    $password = $_POST['password'] ?? '';
+    $confirm  = $_POST['confirm']  ?? '';
 
-    if (!$userId || !$password) {
-        echo json_encode(['success' => false, 'message' => 'User and new password are required.']);
-        exit;
+    if (!$password) {
+        jsonFail('New password is required.');
     }
 
     if (strlen($password) < 8) {
-        echo json_encode(['success' => false, 'message' => 'Password must be at least 8 characters.']);
-        exit;
+        jsonFail('Password must be at least 8 characters.');
     }
 
     if ($password !== $confirm) {
-        echo json_encode(['success' => false, 'message' => 'Passwords do not match.']);
-        exit;
+        jsonFail('Passwords do not match.');
     }
 
-    $check = $pdo->prepare("SELECT user_id FROM users WHERE user_id = ?");
-    $check->execute([$userId]);
-    if (!$check->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'User not found.']);
-        exit;
-    }
+    findOrFail($pdo, 'users', 'user_id', $userId, 'User not found.');
 
     try {
         $hash = password_hash($password, PASSWORD_BCRYPT);
@@ -205,12 +156,11 @@ if ($action === 'reset_password') {
 
         auditLog('RESET_PASSWORD', 'users', $userId, null, ['note' => 'Password reset by admin']);
 
-        echo json_encode(['success' => true, 'message' => 'Password reset successfully.']);
+        jsonOk([], 'Password reset successfully.');
     } catch (PDOException $e) {
         error_log('users_handler/reset_password: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -219,15 +169,15 @@ if ($action === 'reset_password') {
 
 function extractEmpFields(): array {
     return [
-        'employee_code'  => trim($_POST['employee_code']  ?? ''),
-        'full_name'      => trim($_POST['full_name']      ?? ''),
-        'position'       => trim($_POST['position']       ?? ''),
-        'contact_number' => trim($_POST['contact_number'] ?? '') ?: null,
-        'address'        => trim($_POST['address']        ?? '') ?: null,
-        'license_number' => trim($_POST['license_number'] ?? '') ?: null,
-        'license_expiry' => trim($_POST['license_expiry'] ?? '') ?: null,
-        'license_type'   => trim($_POST['license_type']   ?? '') ?: null,
-        'date_hired'     => trim($_POST['date_hired']     ?? '') ?: null,
+        'employee_code'  => optionalString('employee_code'),
+        'full_name'      => optionalString('full_name'),
+        'position'       => optionalString('position'),
+        'contact_number' => optionalString('contact_number'),
+        'address'        => optionalString('address'),
+        'license_number' => optionalString('license_number'),
+        'license_expiry' => optionalString('license_expiry'),
+        'license_type'   => optionalString('license_type'),
+        'date_hired'     => optionalString('date_hired'),
     ];
 }
 
@@ -271,15 +221,11 @@ if ($action === 'add_employee') {
 
     $f = extractEmpFields();
     if ($err = validateEmpFields($f, false)) {
-        echo json_encode(['success' => false, 'message' => $err]);
-        exit;
+        jsonFail($err);
     }
 
-    $dup = $pdo->prepare("SELECT employee_id FROM employees WHERE employee_code = ?");
-    $dup->execute([$f['employee_code']]);
-    if ($dup->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Employee code already exists.']);
-        exit;
+    if (existsWhere($pdo, 'employees', 'employee_code', $f['employee_code'])) {
+        jsonFail('Employee code already exists.');
     }
 
     try {
@@ -302,44 +248,28 @@ if ($action === 'add_employee') {
             'position'      => $f['position'],
         ]);
 
-        echo json_encode(['success' => true, 'message' => 'Employee added successfully.', 'id' => $newId]);
+        jsonOk(['id' => $newId], 'Employee added successfully.');
     } catch (PDOException $e) {
         error_log('users_handler/add_employee: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Edit employee ─────────────────────────────────────────────────────────────
 if ($action === 'edit_employee') {
 
-    $empId    = (int)($_POST['employee_id'] ?? 0);
+    $empId    = requiredInt('employee_id', 'Employee', 1);
     $isActive = isset($_POST['is_active']) && $_POST['is_active'] === '1' ? 1 : 0;
     $f        = extractEmpFields();
 
-    if (!$empId) {
-        echo json_encode(['success' => false, 'message' => 'Invalid employee ID.']);
-        exit;
-    }
-
     if ($err = validateEmpFields($f, true)) {
-        echo json_encode(['success' => false, 'message' => $err]);
-        exit;
+        jsonFail($err);
     }
 
-    $old = $pdo->prepare("SELECT * FROM employees WHERE employee_id = ?");
-    $old->execute([$empId]);
-    $oldData = $old->fetch(PDO::FETCH_ASSOC);
-    if (!$oldData) {
-        echo json_encode(['success' => false, 'message' => 'Employee not found.']);
-        exit;
-    }
+    $oldData = findOrFail($pdo, 'employees', 'employee_id', $empId, 'Employee not found.');
 
-    $dup = $pdo->prepare("SELECT employee_id FROM employees WHERE employee_code = ? AND employee_id != ?");
-    $dup->execute([$f['employee_code'], $empId]);
-    if ($dup->fetch()) {
-        echo json_encode(['success' => false, 'message' => 'Employee code already in use.']);
-        exit;
+    if (existsWhere($pdo, 'employees', 'employee_code', $f['employee_code'], $empId, 'employee_id')) {
+        jsonFail('Employee code already in use.');
     }
 
     try {
@@ -362,13 +292,12 @@ if ($action === 'edit_employee') {
             ['full_name' => $f['full_name'], 'is_active' => $isActive]
         );
 
-        echo json_encode(['success' => true, 'message' => 'Employee updated successfully.']);
+        jsonOk([], 'Employee updated successfully.');
     } catch (PDOException $e) {
         error_log('users_handler/edit_employee: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 // ── Unknown action ────────────────────────────────────────────────────────────
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

@@ -12,24 +12,21 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 requireRole([ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]);
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
 $action = $_POST['action'] ?? '';
 
 if ($action === 'log') {
-    $tripId  = (int)($_POST['trip_id'] ?? 0);
-    $date    = trim($_POST['paid_date'] ?? '');
-    $notes   = trim($_POST['notes'] ?? '') ?: null;
+    $tripId = requiredInt('trip_id', 'Trip', 1);
+    $date   = requiredDate('paid_date', 'Paid date');
+    $notes  = optionalString('notes');
 
     // entries: [{employee_id, crew_role, amount}, ...] — one or two rows
     // (driver, and optionally helper) submitted together per trip.
@@ -46,13 +43,8 @@ if ($action === 'log') {
         }
     }
 
-    if (!$tripId || !$date || $entries === []) {
-        echo json_encode(['success' => false, 'message' => 'Trip, paid date, and at least one crew member are required.']);
-        exit;
-    }
-    if (!isValidDate($date)) {
-        echo json_encode(['success' => false, 'message' => 'Invalid paid date.']);
-        exit;
+    if ($entries === []) {
+        jsonFail('At least one crew member is required.');
     }
 
     // Look up who was ACTUALLY assigned to this trip, so pay can only be
@@ -67,8 +59,7 @@ if ($action === 'log') {
     $assignStmt->execute([$tripId]);
     $assignment = $assignStmt->fetch(PDO::FETCH_ASSOC);
     if (!$assignment) {
-        echo json_encode(['success' => false, 'message' => 'Trip not found.']);
-        exit;
+        jsonFail('Trip not found.', 404);
     }
 
     $validAssignments = [
@@ -80,17 +71,14 @@ if ($action === 'log') {
 
     foreach ($entries as $entry) {
         if ($entry['amount'] <= 0) {
-            echo json_encode(['success' => false, 'message' => 'Each pay amount must be greater than zero.']);
-            exit;
+            jsonFail('Each pay amount must be greater than zero.');
         }
         $expectedRole = $validAssignments[$entry['employee_id']] ?? null;
         if ($expectedRole === null) {
-            echo json_encode(['success' => false, 'message' => 'That employee was not assigned to this trip.']);
-            exit;
+            jsonFail('That employee was not assigned to this trip.');
         }
         if ($expectedRole !== $entry['crew_role']) {
-            echo json_encode(['success' => false, 'message' => 'Crew role does not match this trip\'s assignment.']);
-            exit;
+            jsonFail('Crew role does not match this trip\'s assignment.');
         }
     }
 
@@ -111,35 +99,28 @@ if ($action === 'log') {
                 'amount'      => $entry['amount'],
             ]);
         }
-        echo json_encode(['success' => true, 'message' => 'Crew pay logged.']);
+        jsonOk([], 'Crew pay logged.');
     } catch (PDOException $e) {
         error_log('trip_pay_handler/log: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
 if ($action === 'delete') {
     if (currentRoleId() !== ROLE_HEAD_MANAGEMENT) {
-        http_response_code(403);
-        echo json_encode(['success' => false, 'message' => 'Only Head Management can delete crew pay entries.']);
-        exit;
+        jsonFail('Only Head Management can delete crew pay entries.', 403);
     }
-    $tripPayId = (int)($_POST['trip_pay_id'] ?? 0);
-    if (!$tripPayId) {
-        echo json_encode(['success' => false, 'message' => 'Entry not found.']);
-        exit;
-    }
+    $tripPayId = requiredInt('trip_pay_id', 'Entry', 1);
+
     try {
         $stmt = $pdo->prepare("DELETE FROM trip_pay WHERE trip_pay_id = ?");
         $stmt->execute([$tripPayId]);
         auditLog('DELETE_TRIP_PAY', 'trip_pay', $tripPayId, null, null);
-        echo json_encode(['success' => true, 'message' => 'Crew pay entry deleted.']);
+        jsonOk([], 'Crew pay entry deleted.');
     } catch (PDOException $e) {
         error_log('trip_pay_handler/delete: ' . $e->getMessage());
-        echo json_encode(['success' => false, 'message' => 'A database error occurred. Please try again.']);
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    exit;
 }
 
-echo json_encode(['success' => false, 'message' => 'Unknown action.']);
+jsonFail('Unknown action.');

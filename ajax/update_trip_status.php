@@ -10,51 +10,26 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
-if (!isLoggedIn()) {
-    echo json_encode(['success' => false, 'message' => 'Not authenticated.']);
-    exit;
-}
-
-if (!in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER], true)) {
-    echo json_encode(['success' => false, 'message' => 'Access denied.']);
-    exit;
-}
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
-
+requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]);
+requirePostMethod();
 enforceCsrf();
 
-$tripId   = filter_input(INPUT_POST, 'trip_id', FILTER_VALIDATE_INT);
-$status   = trim($_POST['status']        ?? '');
-$location = trim($_POST['location_note'] ?? '');
-$notes    = trim($_POST['notes']         ?? '');
-
-$allowedStatuses = ['Loading', 'In Transit', 'Unloading', 'Completed', 'Cancelled'];
-
-if (!$tripId || !in_array($status, $allowedStatuses, true)) {
-    echo json_encode(['success' => false, 'message' => 'Invalid input.']);
-    exit;
-}
+$tripId   = requiredInt('trip_id', 'Trip ID', 1);
+$status   = requiredEnum('status', TRIP_STATUSES, 'Status');
+$location = optionalString('location_note');
+$notes    = optionalString('notes');
 
 $pdo = getDBConnection();
 
 // Verify trip exists
-$trip = $pdo->prepare("SELECT trip_id, status FROM trips WHERE trip_id = :id LIMIT 1");
-$trip->execute([':id' => $tripId]);
-$tripRow = $trip->fetch();
-
-if (!$tripRow) {
-    echo json_encode(['success' => false, 'message' => 'Trip not found.']);
-    exit;
-}
-
+$tripRow   = findOrFail($pdo, 'trips', 'trip_id', $tripId, 'Trip not found.');
 $oldStatus = $tripRow['status'];
 
 // ---- Update trips table -----------------------------------
@@ -86,10 +61,10 @@ $pdo->prepare(
     ':trip_id'  => $tripId,
     ':user_id'  => currentUserId(),
     ':status'   => $status,
-    ':location' => $location ?: null,
-    ':notes'    => $notes    ?: null,
+    ':location' => $location,
+    ':notes'    => $notes,
 ]);
 
 auditLog('UPDATE', 'trips', $tripId, ['status' => $oldStatus], ['status' => $status]);
 
-echo json_encode(['success' => true, 'message' => 'Trip updated.']);
+jsonOk([], 'Trip updated.');

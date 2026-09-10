@@ -7,39 +7,27 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/validate.php';
 
 header('Content-Type: application/json');
 
-if (!isLoggedIn() || currentRoleId() !== ROLE_DISPATCHER) {
-    echo json_encode(['success' => false, 'message' => 'Access denied.']);
-    exit;
-}
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['success' => false, 'message' => 'Invalid method.']);
-    exit;
-}
+requireRole([ROLE_DISPATCHER]);
+requirePostMethod();
 enforceCsrf();
 
-$truckId     = filter_input(INPUT_POST, 'truck_id',  FILTER_VALIDATE_INT);
-$routeId     = filter_input(INPUT_POST, 'route_id',  FILTER_VALIDATE_INT);
-$driverId    = filter_input(INPUT_POST, 'driver_id', FILTER_VALIDATE_INT);
+$truckId     = requiredInt('truck_id', 'Truck', 1);
+$routeId     = requiredInt('route_id', 'Route', 1);
+$driverId    = requiredInt('driver_id', 'Driver', 1);
 $helperId    = filter_input(INPUT_POST, 'helper_id', FILTER_VALIDATE_INT) ?: null;
-$scheduledAt = trim($_POST['scheduled_at'] ?? '');
-$remarks     = trim($_POST['remarks']      ?? '') ?: null;
-
-if (!$truckId || !$routeId || !$driverId || !$scheduledAt) {
-    echo json_encode(['success' => false, 'message' => 'Missing required fields.']);
-    exit;
-}
+$scheduledAt = requiredString('scheduled_at', 'Scheduled date/time');
+$remarks     = optionalString('remarks');
 
 // Validate scheduled_at is a valid datetime
 if (!strtotime($scheduledAt)) {
-    echo json_encode(['success' => false, 'message' => 'Invalid scheduled date.']);
-    exit;
+    jsonFail('Invalid scheduled date.');
 }
 if (strtotime($scheduledAt) < time()) {
-    echo json_encode(['success' => false, 'message' => 'New dispatches cannot use a passed date or time.']);
-    exit;
+    jsonFail('New dispatches cannot use a passed date or time.');
 }
 
 $pdo = getDBConnection();
@@ -70,11 +58,7 @@ if ($busy) {
     if (!$person) {
         $person = $busy['helper_name'];
     }
-    echo json_encode([
-        'success' => false,
-        'message' => $person . ' is already assigned to an active dispatch on that date.',
-    ]);
-    exit;
+    jsonFail($person . ' is already assigned to an active dispatch on that date.');
 }
 
 // Ensure truck is still Available
@@ -83,8 +67,7 @@ $truck->execute([':id' => $truckId]);
 $truckRow = $truck->fetch();
 
 if (!$truckRow || $truckRow['status'] !== 'Available') {
-    echo json_encode(['success' => false, 'message' => 'Selected truck is no longer available.']);
-    exit;
+    jsonFail('Selected truck is no longer available.');
 }
 
 $stmt = $pdo->prepare(
@@ -106,4 +89,4 @@ $stmt->execute([
 $newId = (int)$pdo->lastInsertId();
 auditLog('CREATE', 'dispatch_requests', $newId);
 
-echo json_encode(['success' => true, 'message' => 'Dispatch request submitted.']);
+jsonOk([], 'Dispatch request submitted.');

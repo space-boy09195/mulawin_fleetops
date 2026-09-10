@@ -21,7 +21,7 @@ header('Content-Type: application/json');
 // Uses the shared requireRole() helper (same one every other
 // handler uses) instead of a hand-rolled isLoggedIn() + role
 // check, so RBAC logic only lives in one place.
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]);
+requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE]);
 
 requirePostMethod();
 enforceCsrf();

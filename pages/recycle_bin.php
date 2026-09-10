@@ -1,14 +1,14 @@
 <?php
 // ============================================================
 // pages/recycle_bin.php
-// View and restore soft-deleted records — Head Management only.
+// View and restore soft-deleted records — Head Management and Accounting.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/soft_delete.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+requireRole([ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]);
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/recycle_bin.js';
 layoutHead('Recycle Bin', APP_BASE . '/assets/css/recycle_bin.css');

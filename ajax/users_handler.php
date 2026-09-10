@@ -209,11 +209,33 @@ function validateEmpFields(array $f, bool $allowPassedDates = false): ?string {
         return 'Invalid license expiry date.';
     if ($f['date_hired'] && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f['date_hired']))
         return 'Invalid date hired.';
+    if ($f['date_hired'] && $f['date_hired'] > date('Y-m-d'))
+        return 'Hire date cannot be in the future.';
     if (!$allowPassedDates && $f['license_expiry'] && isPassedDate($f['license_expiry']))
         return 'New employees cannot use a passed license expiry date.';
     if (!$allowPassedDates && $f['date_hired'] && isPassedDate($f['date_hired']))
         return 'New employees cannot use a passed hire date.';
     return null;
+}
+
+function duplicateEmployeeExists(PDO $pdo, array $f, ?int $selfId = null): bool {
+    $fullName = trim((string)($f['full_name'] ?? ''));
+    $contact  = trim((string)($f['contact_number'] ?? ''));
+
+    if ($fullName === '' || $contact === '') {
+        return false;
+    }
+
+    $sql = "SELECT employee_id FROM employees WHERE full_name = ? AND contact_number = ?";
+    $params = [$fullName, $contact];
+    if ($selfId !== null) {
+        $sql .= " AND employee_id != ?";
+        $params[] = $selfId;
+    }
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    return (bool)$stmt->fetchColumn();
 }
 
 // ── Add employee ──────────────────────────────────────────────────────────────
@@ -226,6 +248,9 @@ if ($action === 'add_employee') {
 
     if (existsWhere($pdo, 'employees', 'employee_code', $f['employee_code'])) {
         jsonFail('Employee code already exists.');
+    }
+    if (duplicateEmployeeExists($pdo, $f)) {
+        jsonFail('An employee with this name and contact number already exists.');
     }
 
     try {
@@ -270,6 +295,9 @@ if ($action === 'edit_employee') {
 
     if (existsWhere($pdo, 'employees', 'employee_code', $f['employee_code'], $empId, 'employee_id')) {
         jsonFail('Employee code already in use.');
+    }
+    if (duplicateEmployeeExists($pdo, $f, $empId)) {
+        jsonFail('An employee with this name and contact number already exists.');
     }
 
     try {

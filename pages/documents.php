@@ -289,21 +289,21 @@ function mimeIcon(?string $mime): string {
     <div class="modal-content doc-modal-content">
       <div class="modal-header doc-modal-header-danger">
         <h5 class="modal-title" id="deleteModalLabel">
-          <i class="bi bi-trash3 me-2"></i>Delete Document
+          <i class="bi bi-trash3 me-2"></i>Move to Recycle Bin
         </h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body doc-modal-body">
         <div id="deleteAlert" class="alert d-none" role="alert"></div>
         <p class="mb-0">
-          Permanently delete <strong id="deleteFileName"></strong>?
-          This cannot be undone.
+          Move <strong id="deleteFileName"></strong> to Recycle Bin?
+          <br><span class="text-muted">It can be restored later if needed.</span>
         </p>
       </div>
       <div class="modal-footer doc-modal-footer">
         <button type="button" class="btn btn-doc-cancel" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-doc-danger" id="confirmDeleteBtn">
-          <span id="deleteBtnText">Delete</span>
+          <span id="deleteBtnText">Move to Recycle Bin</span>
           <span id="deleteBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
         </button>
       </div>

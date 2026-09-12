@@ -477,7 +477,12 @@ function layoutFoot(): void {
     $base        = APP_BASE;
     $extraScript = '';
     if (!empty($GLOBALS['page_js'])) {
-        $extraScript = '<script src="' . $GLOBALS['page_js'] . '"></script>';
+        $scriptUrlPath = parse_url($GLOBALS['page_js'], PHP_URL_PATH);
+        $scriptRelativePath = ltrim(str_replace(rtrim(APP_BASE, '/') . '/', '', $scriptUrlPath), '/');
+        $scriptPath = __DIR__ . '/../' . $scriptRelativePath;
+        $scriptVersion = is_file($scriptPath) ? (string)filemtime($scriptPath) : (string)time();
+        $extraScript = '<script src="' . htmlspecialchars($GLOBALS['page_js'], ENT_QUOTES)
+            . '?v=' . $scriptVersion . '"></script>';
     }
     echo <<<HTML
 

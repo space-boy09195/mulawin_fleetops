@@ -180,69 +180,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const rrOrigin = document.getElementById('rr_origin');
   const rrDestination = document.getElementById('rr_destination');
   const rrMapPreview = wireMapPreview('rr', rrOrigin, rrDestination);
-  const rrDistance = document.getElementById('rr_distance');
-  const calculateDistanceBtn = document.getElementById('calculateRouteDistanceBtn');
-  const distanceStatus = document.getElementById('routeDistanceStatus');
-
-  function setDistanceStatus(message, type = 'muted') {
-    if (!distanceStatus) return;
-    distanceStatus.className = `form-text text-${type}`;
-    distanceStatus.textContent = message;
-  }
-
-  async function geocode(place) {
-    const response = await fetch(
-      'https://photon.komoot.io/api/?q=' + encodeURIComponent(place) + '&limit=1',
-      { headers: { Accept: 'application/json' } }
-    );
-    if (!response.ok) throw new Error('Could not locate one of the places.');
-    const data = await response.json();
-    const coordinates = data.features?.[0]?.geometry?.coordinates;
-    if (!Array.isArray(coordinates) || coordinates.length < 2) {
-      throw new Error('Could not find that place. Try adding a city or province.');
-    }
-    return coordinates;
-  }
-
-  async function calculateDistance() {
-    const origin = rrOrigin?.value.trim() ?? '';
-    const destination = rrDestination?.value.trim() ?? '';
-    if (origin.length < 3 || destination.length < 3) {
-      setDistanceStatus('Enter both an origin and destination first.', 'danger');
-      return;
-    }
-    if (!calculateDistanceBtn) return;
-    calculateDistanceBtn.disabled = true;
-    setDistanceStatus('Calculating road distance…', 'muted');
-    try {
-      const [from, to] = await Promise.all([geocode(origin), geocode(destination)]);
-      const routeResponse = await fetch(
-        `https://router.project-osrm.org/route/v1/driving/${from[0]},${from[1]};${to[0]},${to[1]}?overview=false`
-      );
-      if (!routeResponse.ok) throw new Error('The distance service is unavailable.');
-      const route = await routeResponse.json();
-      const meters = route.routes?.[0]?.distance;
-      if (!Number.isFinite(meters) || meters < 0) {
-        throw new Error('No drivable route was found between those places.');
-      }
-      if (rrDistance) rrDistance.value = (meters / 1000).toFixed(1);
-      setDistanceStatus('Distance calculated from the road route. You may adjust it if needed.', 'success');
-    } catch (error) {
-      setDistanceStatus(error.message || 'Distance calculation failed. You can enter it manually.', 'danger');
-    } finally {
-      calculateDistanceBtn.disabled = false;
-    }
-  }
-
-  calculateDistanceBtn?.addEventListener('click', calculateDistance);
-  [rrOrigin, rrDestination].forEach(input => {
-    input?.addEventListener('change', () => {
-      if ((rrOrigin?.value.trim().length ?? 0) >= 3 &&
-          (rrDestination?.value.trim().length ?? 0) >= 3) {
-        calculateDistance();
-      }
-    });
-  });
 
   routeRequestModal?.addEventListener('hidden.bs.modal', () => {
     ['rr_name', 'rr_origin', 'rr_destination', 'rr_distance', 'rr_notes'].forEach(id => {
@@ -250,11 +187,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (field) field.value = '';
     });
     hideAlert(document.getElementById('routeRequestAlert'));
-    setDistanceStatus('');
     rrMapPreview.reset();
   });
 
-  document.getElementById('submitRouteRequestBtn')?.addEventListener('click', async () => {
+  document.getElementById('submitRouteRequestBtn')?.addEventListener('click', async event => {
+    event.preventDefault();
     const alertEl = document.getElementById('routeRequestAlert');
     const name = document.getElementById('rr_name')?.value.trim() ?? '';
     const origin = document.getElementById('rr_origin')?.value.trim() ?? '';
@@ -274,7 +211,10 @@ document.addEventListener('DOMContentLoaded', () => {
       showAlert(alertEl, 'Distance must be a valid number between 0 and 100,000 km.');
       return;
     }
-    if (!window.confirm('Submit this route request to Head Management for approval?')) return;
+    const confirmed = window.confirm(
+      `Submit route request "${name}" from "${origin}" to "${destination}" to Head Management?`
+    );
+    if (!confirmed) return;
     const submitButton = document.getElementById('submitRouteRequestBtn');
     if (submitButton) submitButton.disabled = true;
     try {

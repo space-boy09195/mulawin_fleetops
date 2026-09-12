@@ -517,18 +517,16 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
         <input class="form-control disp-input mb-2" id="rr_origin" maxlength="150" placeholder="Origin" required>
         <label class="disp-label" for="rr_destination">Destination <span class="text-danger">*</span></label>
         <input class="form-control disp-input mb-2" id="rr_destination" maxlength="150" placeholder="Destination" required>
-        <label class="disp-label" for="rr_distance">Distance (km)</label>
-        <div class="input-group">
-          <input type="number" min="0" max="100000" step="0.1" class="form-control disp-input"
-                 id="rr_distance" placeholder="Calculated automatically; manual entry is allowed">
-          <button type="button" class="btn btn-outline-primary" id="calculateRouteDistanceBtn">
-            <i class="bi bi-calculator me-1"></i>Calculate
-          </button>
-        </div>
-        <div id="routeDistanceStatus" class="form-text"></div>
+        <label class="disp-label" for="rr_distance">Distance (km)
+          <span class="text-muted" style="font-weight:400;">(optional)</span>
+        </label>
+        <input type="number" min="0" max="100000" step="0.1"
+               class="form-control disp-input mb-3" id="rr_distance"
+               placeholder="e.g. 1180.5">
         <label class="disp-label mt-2" for="rr_notes">Side note <span class="text-muted">(optional)</span></label>
         <textarea class="form-control disp-input mb-3" id="rr_notes" rows="2" maxlength="500"
                   placeholder="Add context or special instructions for Head Management"></textarea>
+        <label class="disp-label">Map Preview</label>
         <div class="row g-2">
           <div class="col-md-6">
             <div class="route-map-wrap">
@@ -561,7 +559,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
       </div>
       <div class="modal-footer disp-modal-footer">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn btn-primary btn-sm" id="submitRouteRequestBtn">Submit Route Request</button>
+        <button type="button" class="btn btn-primary btn-sm" id="submitRouteRequestBtn">Submit Route Request</button>
       </div>
     </div>
   </div>

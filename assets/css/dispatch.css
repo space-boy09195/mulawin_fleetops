@@ -195,6 +195,7 @@ tr.hidden-row { display: none; }
   height: 100%;
   border: 0;
   display: block;
+  cursor: default;
 }
 
 .route-map-placeholder {

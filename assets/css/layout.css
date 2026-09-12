@@ -140,6 +140,22 @@ body {
   transition: background-color var(--transition), color var(--transition);
 }
 
+button,
+a,
+select,
+label,
+input[type="button"],
+input[type="submit"],
+input[type="checkbox"],
+input[type="radio"] {
+  cursor: pointer;
+}
+
+input,
+textarea {
+  cursor: text;
+}
+
 /* ---- Global dark mode form overrides --------------------- */
 /* Applied here once so individual page CSS files don't need to repeat it */
 [data-theme="dark"] .form-control,

@@ -292,6 +292,17 @@ $checklistItems = [
                 <label class="form-label mnt-label mt-3" for="inspectionNotes">Overall notes</label>
                 <textarea id="inspectionNotes" class="form-control mnt-input" rows="4" placeholder="Optional findings or recommendations"></textarea>
                 <div class="small text-muted mt-3"><i class="bi bi-info-circle me-1"></i>Select a vehicle view, then choose the condition and add notes for each listed part. The image is a reference only.</div>
+                <div class="mt-3">
+                  <label class="form-label mnt-label" for="customInspectionPart">Part not listed?</label>
+                  <div class="input-group">
+                    <input type="text" id="customInspectionPart" class="form-control mnt-input"
+                           maxlength="100" placeholder="Type the part name">
+                    <button type="button" class="btn btn-outline-primary" id="addInspectionPartBtn">
+                      <i class="bi bi-plus-lg me-1"></i>Add Part
+                    </button>
+                  </div>
+                  <div class="form-text">Add a custom part to the currently selected view.</div>
+                </div>
               </div>
               <div class="col-lg-8">
                 <div class="d-flex justify-content-between align-items-center mb-2">

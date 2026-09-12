@@ -57,6 +57,13 @@ $routes = $pdo->query("
     FROM routes WHERE is_active = 1 AND approval_status = 'Approved' ORDER BY route_name
 ")->fetchAll();
 
+$clients = $pdo->query("
+    SELECT DISTINCT TRIM(client_name) AS client_name
+    FROM billings
+    WHERE client_name IS NOT NULL AND TRIM(client_name) <> ''
+    ORDER BY client_name
+")->fetchAll(PDO::FETCH_COLUMN);
+
 // ── All routes for management tab ─────────────────────────────────────────────
 $allRoutes = $pdo->query("
     SELECT route_id, route_name, origin, destination,
@@ -73,6 +80,7 @@ $reqStmt = $pdo->prepare("
         dr.status,
         dr.scheduled_at,
         dr.remarks,
+        dr.client_name,
         dr.requested_at,
         dr.reviewed_at,
         tr.plate_number,
@@ -191,6 +199,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
               <th>Truck</th>
               <th>Driver</th>
               <th>Route</th>
+              <th>Client</th>
               <th>Scheduled</th>
               <th>Status</th>
               <th>Reviewed By</th>
@@ -202,7 +211,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
           <tbody id="dispatchBody">
             <?php if (empty($requests)): ?>
             <tr>
-              <td colspan="8" class="text-center text-muted py-4">
+              <td colspan="<?= $isHead ? 9 : 8 ?>" class="text-center text-muted py-4">
               
               </td>
             </tr>
@@ -243,6 +252,9 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                   <i class="bi bi-arrow-right"></i>
                   <?= htmlspecialchars($req['destination']) ?>
                 </div>
+              </td>
+              <td style="font-size:.82rem;">
+                <?= $req['client_name'] ? htmlspecialchars($req['client_name']) : '<span class="text-muted">—</span>' ?>
               </td>
               <td style="font-size:.82rem;">
                 <?= $req['scheduled_at']
@@ -437,15 +449,15 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
           </div>
           <div class="col-md-6">
             <label class="disp-label">Route <span class="text-danger">*</span></label>
-            <select class="form-select disp-input" id="d_route">
-              <option value="">— Select route —</option>
+            <input type="hidden" id="d_route_id">
+            <input class="form-control disp-input" id="d_route" list="approvedRoutesList"
+                   placeholder="Type to search approved routes" autocomplete="off">
+            <datalist id="approvedRoutesList">
               <?php foreach ($routes as $rt): ?>
-              <option value="<?= $rt['route_id'] ?>">
-                <?= htmlspecialchars($rt['route_name']) ?>
-                (<?= htmlspecialchars($rt['origin']) ?> → <?= htmlspecialchars($rt['destination']) ?>)
-              </option>
+              <option value="<?= htmlspecialchars($rt['route_name'] . ' — ' . $rt['origin'] . ' → ' . $rt['destination'], ENT_QUOTES) ?>"
+                      data-id="<?= (int)$rt['route_id'] ?>"></option>
               <?php endforeach; ?>
-            </select>
+            </datalist>
             <?php if (empty($routes)): ?>
             <div class="form-text text-warning">
               <i class="bi bi-exclamation-triangle me-1"></i>No active routes available. Contact Head Management.
@@ -454,27 +466,38 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
           </div>
           <div class="col-md-6">
             <label class="disp-label">Driver <span class="text-danger">*</span></label>
-            <select class="form-select disp-input" id="d_driver">
-              <option value="">— Select driver —</option>
+            <input type="hidden" id="d_driver_id">
+            <input class="form-control disp-input" id="d_driver" list="activeDriversList"
+                   placeholder="Type to search driver" autocomplete="off">
+            <datalist id="activeDriversList">
               <?php foreach ($drivers as $d): ?>
-              <option value="<?= $d['employee_id'] ?>"
-                      data-name="<?= htmlspecialchars($d['full_name'], ENT_QUOTES) ?>">
-                <?= htmlspecialchars($d['full_name'] . ' (' . $d['license_number'] . ')') ?>
-              </option>
+              <option value="<?= htmlspecialchars($d['full_name'] . ' (' . $d['license_number'] . ')', ENT_QUOTES) ?>"
+                      data-id="<?= (int)$d['employee_id'] ?>"></option>
               <?php endforeach; ?>
-            </select>
+            </datalist>
           </div>
           <div class="col-md-6">
             <label class="disp-label">Helper <span class="text-muted" style="font-weight:400;">(optional)</span></label>
-            <select class="form-select disp-input" id="d_helper">
-              <option value="">— None —</option>
+            <input type="hidden" id="d_helper_id">
+            <input class="form-control disp-input" id="d_helper" list="activeHelpersList"
+                   placeholder="Type to search helper (optional)" autocomplete="off">
+            <datalist id="activeHelpersList">
               <?php foreach ($helpers as $h): ?>
-              <option value="<?= $h['employee_id'] ?>"
-                      data-name="<?= htmlspecialchars($h['full_name'], ENT_QUOTES) ?>">
-                <?= htmlspecialchars($h['full_name']) ?>
-              </option>
+              <option value="<?= htmlspecialchars($h['full_name'], ENT_QUOTES) ?>"
+                      data-id="<?= (int)$h['employee_id'] ?>"></option>
               <?php endforeach; ?>
-            </select>
+            </datalist>
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label">Client <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <input class="form-control disp-input" id="d_client" list="billingClientsList"
+                   maxlength="150" placeholder="Type or select a client" autocomplete="off">
+            <datalist id="billingClientsList">
+              <?php foreach ($clients as $client): ?>
+              <option value="<?= htmlspecialchars($client, ENT_QUOTES) ?>"></option>
+              <?php endforeach; ?>
+            </datalist>
+            <div class="form-text">Suggestions come from clients previously added by Accounting.</div>
           </div>
           <div class="col-md-6">
             <label class="disp-label">Scheduled Departure <span class="text-danger">*</span></label>

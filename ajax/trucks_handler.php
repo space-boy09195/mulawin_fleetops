@@ -37,6 +37,7 @@ function storeTruckImage(?array $file, ?string $existingPath = null): ?string {
     if (!$file || ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
         return $existingPath;
     }
+
     if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || (int)$file['size'] > 10 * 1024 * 1024) {
         jsonFail('Truck image must be a valid file no larger than 10 MB.');
     }
@@ -56,10 +57,20 @@ function storeTruckImage(?array $file, ?string $existingPath = null): ?string {
     return 'uploads/trucks/' . $name;
 }
 
+function storeTruckViewImages(array $files, array $existing = []): array {
+    $paths = $existing;
+    foreach (['front', 'side', 'rear', 'top'] as $view) {
+        if (isset($files[$view])) {
+            $paths[$view] = storeTruckImage($files[$view], $paths[$view] ?? null);
+        }
+    }
+    return $paths;
+}
+
 // ── Add truck ─────────────────────────────────────────────────────────────────
 if ($action === 'add') {
     $f = extractTruckFields();
-    $imagePath = storeTruckImage($_FILES['truck_image'] ?? null);
+    $images = storeTruckViewImages($_FILES['truck_images'] ?? []);
 
     if ($f['capacity_tons'] !== null && $f['capacity_tons'] < 0) {
         jsonFail('Capacity cannot be negative.');
@@ -76,13 +87,16 @@ if ($action === 'add') {
         $stmt = $pdo->prepare("
             INSERT INTO trucks
                 (plate_number, chassis_number, engine_number, brand, model,
-                 year_model, body_type, fuel_type, capacity_tons, image_path, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Available')
+                 year_model, body_type, fuel_type, capacity_tons, image_path,
+                 image_front_path, image_side_path, image_rear_path, image_top_path, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Available')
         ");
         $stmt->execute([
             $f['plate_number'], $f['chassis_number'], $f['engine_number'],
             $f['brand'], $f['model'], $f['year_model'],
-            $f['body_type'], $f['fuel_type'], $f['capacity_tons'], $imagePath,
+            $f['body_type'], $f['fuel_type'], $f['capacity_tons'],
+            $images['front'] ?? null, $images['front'] ?? null, $images['side'] ?? null,
+            $images['rear'] ?? null, $images['top'] ?? null,
         ]);
         $newId = (int)$pdo->lastInsertId();
 
@@ -110,7 +124,12 @@ if ($action === 'edit') {
     }
 
     $oldData = findOrFail($pdo, 'trucks', 'truck_id', $truckId, 'Truck not found.');
-    $imagePath = storeTruckImage($_FILES['truck_image'] ?? null, $oldData['image_path'] ?? null);
+    $images = storeTruckViewImages($_FILES['truck_images'] ?? [], [
+        'front' => $oldData['image_front_path'] ?? $oldData['image_path'] ?? null,
+        'side'  => $oldData['image_side_path'] ?? null,
+        'rear'  => $oldData['image_rear_path'] ?? null,
+        'top'   => $oldData['image_top_path'] ?? null,
+    ]);
 
     if (existsWhere($pdo, 'trucks', 'plate_number', $f['plate_number'], $truckId, 'truck_id')) {
         jsonFail('Another truck already has that plate number.');
@@ -125,12 +144,14 @@ if ($action === 'edit') {
                 plate_number   = ?, chassis_number = ?, engine_number  = ?,
                 brand          = ?, model          = ?, year_model     = ?,
                 body_type      = ?, fuel_type      = ?, capacity_tons  = ?, image_path = ?,
+                image_front_path = ?, image_side_path = ?, image_rear_path = ?, image_top_path = ?,
                 status         = ?
             WHERE truck_id     = ?
         ")->execute([
             $f['plate_number'], $f['chassis_number'], $f['engine_number'],
             $f['brand'], $f['model'], $f['year_model'],
-            $f['body_type'], $f['fuel_type'], $f['capacity_tons'], $imagePath,
+            $f['body_type'], $f['fuel_type'], $f['capacity_tons'], $images['front'] ?? null,
+            $images['front'] ?? null, $images['side'] ?? null, $images['rear'] ?? null, $images['top'] ?? null,
             $status, $truckId,
         ]);
 

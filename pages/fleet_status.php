@@ -348,8 +348,15 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
                    placeholder="Optional">
           </div>
           <div class="col-12">
-             <label class="fleet-label" for="at_image">Truck Photo (JPG, PNG, or WebP; max 10 MB)</label>
-             <input type="file" class="form-control fleet-input" id="at_image" accept=".jpg,.jpeg,.png,.webp">
+             <label class="fleet-label">Inspection View Photos (JPG, PNG, or WebP; max 10 MB each)</label>
+             <div class="row g-2">
+               <?php foreach (['front' => 'Front View', 'side' => 'Side View', 'rear' => 'Rear View', 'top' => 'Top View'] as $key => $label): ?>
+               <div class="col-sm-6">
+                 <label class="small text-muted" for="at_image_<?= $key ?>"><?= $label ?></label>
+                 <input type="file" class="form-control fleet-input" id="at_image_<?= $key ?>" accept=".jpg,.jpeg,.png,.webp">
+               </div>
+               <?php endforeach; ?>
+             </div>
           </div>
         </div>
       </div>
@@ -424,8 +431,15 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
             <input type="text" class="form-control fleet-input" id="et_engine">
           </div>
           <div class="col-12">
-            <label class="fleet-label" for="et_image">Replace Truck Photo (optional)</label>
-            <input type="file" class="form-control fleet-input" id="et_image" accept=".jpg,.jpeg,.png,.webp">
+            <label class="fleet-label">Replace Inspection View Photos (optional)</label>
+            <div class="row g-2">
+              <?php foreach (['front' => 'Front View', 'side' => 'Side View', 'rear' => 'Rear View', 'top' => 'Top View'] as $key => $label): ?>
+              <div class="col-sm-6">
+                <label class="small text-muted" for="et_image_<?= $key ?>"><?= $label ?></label>
+                <input type="file" class="form-control fleet-input" id="et_image_<?= $key ?>" accept=".jpg,.jpeg,.png,.webp">
+              </div>
+              <?php endforeach; ?>
+            </div>
           </div>
           <div class="col-md-4">
             <label class="fleet-label">Status</label>

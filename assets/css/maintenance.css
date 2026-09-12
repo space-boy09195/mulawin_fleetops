@@ -41,7 +41,32 @@
 }
 
 .inspection-view {
-  border-radius: 0 !important;
+  border-radius: 8px !important;
+  min-width: 118px;
+  min-height: 48px;
+  margin: 0.2rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.inspection-view.active {
+  color: #fff;
+  background: #0d6efd;
+  border-color: #0d6efd;
+  box-shadow: 0 2px 6px rgba(13, 110, 253, 0.3);
+}
+
+.inspection-view:focus-visible {
+  outline: 3px solid rgba(13, 110, 253, 0.35);
+  outline-offset: 2px;
+}
+
+@media (max-width: 576px) {
+  .inspection-view {
+    flex: 1 1 45%;
+    min-width: 0;
+  }
 }
 
 .btn-mnt-primary:hover,

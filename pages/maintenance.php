@@ -110,8 +110,17 @@ $checklistSql = "
 $checklists = $pdo->query($checklistSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Dropdowns for forms ───────────────────────────────────────────────────────
+$hasTruckImageColumn = (bool)$pdo->query("
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'trucks'
+      AND column_name = 'truck_image_name'
+    LIMIT 1
+")->fetchColumn();
+$truckImageSelect = $hasTruckImageColumn ? 'truck_image_name' : 'NULL AS truck_image_name';
 $trucks = $pdo->query("
-    SELECT truck_id, plate_number, brand, model, truck_image_name,
+    SELECT truck_id, plate_number, brand, model, $truckImageSelect,
            COALESCE(body_type, 'Closed Van') AS body_type
     FROM trucks
     WHERE status != 'Inactive'

@@ -124,6 +124,7 @@ $truckImageSelect = $hasTruckImagePath
     : ($hasLegacyTruckImage ? "CONCAT('uploads/trucks/', truck_image_name) AS image_path" : 'NULL AS image_path');
 $trucks = $pdo->query("
     SELECT truck_id, plate_number, brand, model, $truckImageSelect,
+           image_front_path, image_side_path, image_rear_path, image_top_path,
            COALESCE(body_type, 'Closed Van') AS body_type
     FROM trucks
     WHERE status != 'Inactive'
@@ -132,8 +133,7 @@ $trucks = $pdo->query("
 
 $inspectionImageDir = __DIR__ . '/../assets/images/inspection';
 $inspectionImageUrl = $pageBase . '/assets/images/inspection';
-// Edit this set when replacing vehicle artwork. Each view accepts a local
-// filename from assets/images/inspection or a complete image URL.
+// Default artwork is used only when a truck has no uploaded photo for the view.
 $inspectionImageSets = [
     'Closed Van' => [
         'Front' => 'closed-van-front.png',
@@ -279,7 +279,10 @@ $checklistItems = [
                   <?php foreach ($trucks as $truck): ?>
                   <option value="<?= $truck['truck_id'] ?>"
                           data-body="<?= htmlspecialchars($truck['body_type']) ?>"
-                          data-image="<?= htmlspecialchars($truck['image_path'] ? APP_BASE . '/' . ltrim($truck['image_path'], '/') : '', ENT_QUOTES) ?>">
+                          data-image-front="<?= htmlspecialchars($truck['image_front_path'] ? APP_BASE . '/' . ltrim($truck['image_front_path'], '/') : '', ENT_QUOTES) ?>"
+                          data-image-side="<?= htmlspecialchars($truck['image_side_path'] ? APP_BASE . '/' . ltrim($truck['image_side_path'], '/') : '', ENT_QUOTES) ?>"
+                          data-image-rear="<?= htmlspecialchars($truck['image_rear_path'] ? APP_BASE . '/' . ltrim($truck['image_rear_path'], '/') : '', ENT_QUOTES) ?>"
+                          data-image-top="<?= htmlspecialchars($truck['image_top_path'] ? APP_BASE . '/' . ltrim($truck['image_top_path'], '/') : '', ENT_QUOTES) ?>">
                     <?= htmlspecialchars($truck['plate_number'] . ' — ' . $truck['brand'] . ' ' . $truck['model']) ?>
                   </option>
                   <?php endforeach; ?>
@@ -288,7 +291,7 @@ $checklistItems = [
                 <input type="date" id="inspectionDate" class="form-control mnt-input" value="<?= date('Y-m-d') ?>" min="<?= date('Y-m-d') ?>">
                 <label class="form-label mnt-label mt-3" for="inspectionNotes">Overall notes</label>
                 <textarea id="inspectionNotes" class="form-control mnt-input" rows="4" placeholder="Optional findings or recommendations"></textarea>
-                <div class="small text-muted mt-3"><i class="bi bi-info-circle me-1"></i>Choose a view, then click a part on the diagram to record its condition.</div>
+                <div class="small text-muted mt-3"><i class="bi bi-info-circle me-1"></i>Select a vehicle view, then choose the condition and add notes for each listed part. The image is a reference only.</div>
               </div>
               <div class="col-lg-8">
                 <div class="d-flex justify-content-between align-items-center mb-2">

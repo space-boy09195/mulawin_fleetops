@@ -350,8 +350,10 @@
     const shape = bodyParts[configuredBody];
     inspectionBodyLabel.textContent = body;
     inspectionDiagram.className = `inspection-diagram ${shape[view] || ''}`;
-    const imageUrl = inspectionImageMap[body]?.[view]
-      || inspectionTruck?.selectedOptions[0]?.dataset.image
+    const selected = inspectionTruck?.selectedOptions[0];
+    const viewKey = `image${view.charAt(0).toUpperCase()}${view.slice(1).toLowerCase()}`;
+    const imageUrl = selected?.dataset[viewKey]
+      || inspectionImageMap[body]?.[view]
       || '';
     inspectionDiagram.innerHTML = imageUrl
       ? `<img class="inspection-custom-image" src="${imageUrl}" alt="${body} ${view} view">`

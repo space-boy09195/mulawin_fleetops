@@ -54,13 +54,13 @@ $helpers = $pdo->query("
 
 $routes = $pdo->query("
     SELECT route_id, route_name, origin, destination
-    FROM routes WHERE is_active = 1 ORDER BY route_name
+    FROM routes WHERE is_active = 1 AND approval_status = 'Approved' ORDER BY route_name
 ")->fetchAll();
 
 // ── All routes for management tab ─────────────────────────────────────────────
 $allRoutes = $pdo->query("
     SELECT route_id, route_name, origin, destination,
-           distance_km, is_active
+           distance_km, is_active, approval_status
     FROM routes ORDER BY route_name
 ")->fetchAll();
 
@@ -123,7 +123,11 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
     <?php if ($isDispatcher): ?>
     <button class="btn btn-primary btn-sm d-flex align-items-center gap-2"
             data-bs-toggle="modal" data-bs-target="#newDispatchModal">
-      <i class="bi bi-plus-lg"></i> New Request
+     <i class="bi bi-plus-lg"></i> Dispatch
+    </button>
+    <button class="btn btn-outline-primary btn-sm d-flex align-items-center gap-2"
+           data-bs-toggle="modal" data-bs-target="#routeRequestModal">
+     <i class="bi bi-signpost-2"></i> New Route Request
     </button>
     <?php endif; ?>
     <?php if ($isHead): ?>
@@ -343,8 +347,8 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                   : '<span class="text-muted">—</span>' ?>
               </td>
               <td>
-                <span class="status-badge <?= $rt['is_active'] ? 'available' : 'inactive' ?>">
-                  <?= $rt['is_active'] ? '🟢 Active' : '⚫ Inactive' ?>
+                <span class="status-badge <?= $rt['approval_status'] === 'Approved' && $rt['is_active'] ? 'available' : ($rt['approval_status'] === 'Pending' ? 'maintenance' : 'inactive') ?>">
+                  <?= htmlspecialchars($rt['approval_status']) ?><?= $rt['approval_status'] === 'Approved' && $rt['is_active'] ? ' / Active' : '' ?>
                 </span>
               </td>
               <td>
@@ -360,6 +364,14 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
               <?php if ($isHead): ?>
               <td>
                 <div class="d-flex gap-1">
+                  <?php if ($rt['approval_status'] === 'Pending'): ?>
+                  <button class="btn btn-sm btn-outline-success btn-review-route" data-id="<?= $rt['route_id'] ?>" data-status="Approved" title="Approve route">
+                    <i class="bi bi-check-lg"></i>
+                  </button>
+                  <button class="btn btn-sm btn-outline-danger btn-review-route" data-id="<?= $rt['route_id'] ?>" data-status="Rejected" title="Reject route">
+                    <i class="bi bi-x-lg"></i>
+                  </button>
+                  <?php endif; ?>
                   <button class="btn btn-sm btn-outline-primary btn-edit-route"
                           title="Edit route"
                           data-id="<?= $rt['route_id'] ?>"
@@ -395,7 +407,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content disp-modal">
       <div class="modal-header disp-modal-header-blue">
-        <h5 class="modal-title"><i class="bi bi-send me-2"></i>New Dispatch Request</h5>
+        <h5 class="modal-title"><i class="bi bi-send me-2"></i>Dispatch</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body disp-modal-body">
@@ -472,11 +484,35 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
       <div class="modal-footer disp-modal-footer">
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
         <button type="button" class="btn btn-primary btn-sm" id="submitDispatchBtn">
-          <span id="dispatchBtnText"><i class="bi bi-send me-1"></i>Submit Request</span>
+          <span id="dispatchBtnText"><i class="bi bi-send me-1"></i>Confirm Dispatch</span>
           <span id="dispatchBtnSpinner" class="d-none">
             <span class="spinner-border spinner-border-sm"></span> Submitting…
           </span>
         </button>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
+<?php if ($isDispatcher): ?>
+<div class="modal fade" id="routeRequestModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content disp-modal">
+      <div class="modal-header disp-modal-header-blue">
+        <h5 class="modal-title"><i class="bi bi-signpost-2 me-2"></i>New Route Request</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body disp-modal-body">
+        <div id="routeRequestAlert" class="alert d-none"></div>
+        <input class="form-control disp-input mb-2" id="rr_name" placeholder="Route name" required>
+        <input class="form-control disp-input mb-2" id="rr_origin" placeholder="Origin" required>
+        <input class="form-control disp-input mb-2" id="rr_destination" placeholder="Destination" required>
+        <input type="number" min="0" step="0.1" class="form-control disp-input" id="rr_distance" placeholder="Distance (km, optional)">
+      </div>
+      <div class="modal-footer disp-modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="submitRouteRequestBtn">Submit Route Request</button>
       </div>
     </div>
   </div>

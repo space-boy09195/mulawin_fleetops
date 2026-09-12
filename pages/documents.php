@@ -28,7 +28,19 @@ $rangeStart = match ($period) {
     default => null,
 };
 $rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
-$docDateFilter = $rangeStartSql ? "AND d.uploaded_at >= :rangeStart" : '';
+$docDateFilter = $rangeStartSql ? "AND d.uploaded_at >= ?" : '';
+$visibilityScopes = match (currentRoleId()) {
+    ROLE_HEAD_MANAGEMENT => null,
+    ROLE_DISPATCHER      => ['operations'],
+    ROLE_ACCOUNTING      => ['operations', 'accounting'],
+    ROLE_MAINTENANCE     => ['maintenance'],
+    default              => [''],
+};
+$visibilityFilter = $visibilityScopes === null
+    ? ''
+    : "AND (d.visibility_scope = 'all' OR d.visibility_scope IN ("
+      . implode(',', array_fill(0, count($visibilityScopes), '?'))
+      . '))';
 
 // ── All documents ─────────────────────────────────────────────────────────────
 $docsSql = "
@@ -43,16 +55,22 @@ $docsSql = "
         d.description,
         d.uploaded_at,
         u.full_name  AS uploaded_by_name,
-        t.trip_number
+        t.trip_id, t.trip_number
     FROM documents d
     JOIN users u       ON d.uploaded_by = u.user_id
     LEFT JOIN trips t  ON d.trip_id     = t.trip_id
-    WHERE 1=1 $docDateFilter
+    WHERE 1=1 $docDateFilter $visibilityFilter
     ORDER BY d.uploaded_at DESC
 ";
 $docsStmt = $pdo->prepare($docsSql);
-if ($rangeStartSql) $docsStmt->bindValue(':rangeStart', $rangeStartSql);
-$docsStmt->execute();
+$params = [];
+if ($rangeStartSql) $params[] = $rangeStartSql;
+if ($visibilityScopes !== null) {
+    foreach ($visibilityScopes as $scope) {
+        $params[] = $scope;
+    }
+}
+$docsStmt->execute($params);
 $documents = $docsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Trips for optional trip link dropdown ─────────────────────────────────────
@@ -170,7 +188,11 @@ function mimeIcon(?string $mime): string {
       <div class="doc-card-meta">
         <span><i class="bi bi-person"></i> <?= htmlspecialchars($doc['uploaded_by_name']) ?></span>
         <?php if ($doc['trip_number']): ?>
-        <span><i class="bi bi-truck"></i> <?= htmlspecialchars($doc['trip_number']) ?></span>
+        <span><i class="bi bi-truck"></i>
+          <a href="<?= APP_BASE ?>/pages/trip_report.php?trip_id=<?= (int)$doc['trip_id'] ?>">
+            <?= htmlspecialchars($doc['trip_number']) ?>
+          </a>
+        </span>
         <?php endif; ?>
         <span><i class="bi bi-hdd"></i> <?= $size ?></span>
         <span><i class="bi bi-calendar3"></i> <?= date('M d, Y', strtotime($doc['uploaded_at'])) ?></span>
@@ -178,13 +200,13 @@ function mimeIcon(?string $mime): string {
 
       <!-- Actions -->
       <div class="doc-card-actions">
-        <a href="<?= APP_BASE . '/uploads/' . htmlspecialchars($doc['stored_name']) ?>"
+        <a href="<?= APP_BASE . '/ajax/document_download.php?id=' . (int)$doc['document_id'] ?>"
            class="btn btn-doc-action" download="<?= htmlspecialchars($doc['file_name']) ?>"
            title="Download">
           <i class="bi bi-download"></i>
         </a>
         <?php if ($canPreview): ?>
-        <a href="<?= APP_BASE . '/uploads/' . htmlspecialchars($doc['stored_name']) ?>"
+        <a href="<?= APP_BASE . '/ajax/document_download.php?id=' . (int)$doc['document_id'] ?>"
            class="btn btn-doc-action" target="_blank" rel="noopener" title="Preview">
           <i class="bi bi-eye"></i>
         </a>

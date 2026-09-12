@@ -32,19 +32,34 @@ $rangeStart = match ($period) {
 };
 $rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
 
+$audience = match (currentRoleId()) {
+    ROLE_MAINTENANCE => 'maintenance',
+    ROLE_ACCOUNTING  => 'accounting',
+    ROLE_DISPATCHER  => 'operations',
+    default          => null,
+};
+$audienceSql = $audience === null ? '' : "AND (a.audience = 'all' OR a.audience = :audience)";
+$periodSql = $rangeStartSql ? "AND (a.is_pinned = 1 OR a.created_at >= :rangeStart)" : '';
+
 $annStmt = $pdo->prepare(
-    "SELECT a.announcement_id, a.title, a.body, a.is_pinned, a.priority, a.created_at,
+    "SELECT a.announcement_id, a.title, a.body, a.is_pinned, a.priority,
+            a.audience, a.starts_at, a.ends_at, a.created_at,
             u.full_name AS author
        FROM announcements a
        JOIN users u ON a.created_by = u.user_id
-      WHERE a.is_pinned = 1 " . ($rangeStartSql ? "OR (a.is_pinned = 0 AND a.created_at >= :rangeStart)" : "OR a.is_pinned = 0") . "
+      WHERE a.starts_at <= NOW()
+        AND (a.ends_at IS NULL OR a.ends_at >= NOW())
+        {$audienceSql}
+        {$periodSql}
       ORDER BY a.is_pinned DESC, FIELD(a.priority, 'high', 'medium', 'low'), a.created_at DESC"
 );
 if ($rangeStartSql) $annStmt->bindValue(':rangeStart', $rangeStartSql);
+if ($audience !== null) $annStmt->bindValue(':audience', $audience);
 $annStmt->execute();
 $announcements = $annStmt->fetchAll();
 
 $isHead = currentRoleId() === ROLE_HEAD_MANAGEMENT;
+$minDateTime = date('Y-m-d\TH:i');
 
 layoutHead('Announcements', APP_BASE . '/assets/css/announcements.css');
 ?>
@@ -95,6 +110,16 @@ layoutHead('Announcements', APP_BASE . '/assets/css/announcements.css');
   ?>
   <?php foreach ($announcements as $a): ?>
   <?php $sev = $a['priority'] ?? 'medium'; ?>
+  <?php
+    $audienceKey = $a['audience'] ?? 'all';
+    $audienceLabels = [
+      'all' => 'Everyone', 'maintenance' => 'Maintenance',
+      'accounting' => 'Accounting', 'operations' => 'Operations',
+    ];
+    $audienceLabel = $audienceLabels[$audienceKey] ?? 'Everyone';
+    $startInput = date('Y-m-d\TH:i', strtotime($a['starts_at']));
+    $endInput = $a['ends_at'] ? date('Y-m-d\TH:i', strtotime($a['ends_at'])) : '';
+  ?>
   <div class="card ann-full-item mb-3" id="ann-full-<?= $a['announcement_id'] ?>"
        data-pinned="<?= (int)$a['is_pinned'] ?>"
        data-severity="<?= htmlspecialchars($sev) ?>"
@@ -120,12 +145,15 @@ layoutHead('Announcements', APP_BASE . '/assets/css/announcements.css');
             &nbsp;&middot;&nbsp;
             <i class="bi bi-clock"></i>
             <?= date('F j, Y \a\t g:i A', strtotime($a['created_at'])) ?>
+            &nbsp;&middot;&nbsp; <?= htmlspecialchars($audienceLabel) ?>
+            &nbsp;&middot;&nbsp; <?= date('M j, Y g:i A', strtotime($a['starts_at'])) ?>
+            – <?= $a['ends_at'] ? date('M j, Y g:i A', strtotime($a['ends_at'])) : 'No end' ?>
           </div>
         </div>
         <?php if ($isHead): ?>
         <div class="d-flex gap-2 flex-shrink-0">
           <button class="ann-edit-btn"
-                  onclick="openEditAnnouncement(<?= $a['announcement_id'] ?>, <?= htmlspecialchars(json_encode($a['title']), ENT_QUOTES) ?>, <?= htmlspecialchars(json_encode($a['body']), ENT_QUOTES) ?>, <?= (int)$a['is_pinned'] ?>, <?= htmlspecialchars(json_encode($sev), ENT_QUOTES) ?>)"
+                  onclick="openEditAnnouncement(<?= $a['announcement_id'] ?>, <?= htmlspecialchars(json_encode($a['title']), ENT_QUOTES) ?>, <?= htmlspecialchars(json_encode($a['body']), ENT_QUOTES) ?>, <?= (int)$a['is_pinned'] ?>, <?= htmlspecialchars(json_encode($sev), ENT_QUOTES) ?>, <?= htmlspecialchars(json_encode($audienceKey), ENT_QUOTES) ?>, <?= htmlspecialchars(json_encode($startInput), ENT_QUOTES) ?>, <?= htmlspecialchars(json_encode($endInput), ENT_QUOTES) ?>)"
                   title="Edit">
             <i class="bi bi-pencil"></i>
           </button>
@@ -160,6 +188,25 @@ layoutHead('Announcements', APP_BASE . '/assets/css/announcements.css');
         <div class="mb-3">
           <label class="form-label fw-600">Message <span class="text-danger">*</span></label>
           <textarea class="form-control" id="fullAnnBody" rows="4" placeholder="Write your announcement…"></textarea>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-6">
+            <label class="form-label fw-600" for="fullAnnStartsAt">Starts <span class="text-danger">*</span></label>
+            <input type="datetime-local" class="form-control" id="fullAnnStartsAt" min="<?= $minDateTime ?>" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-600" for="fullAnnEndsAt">Ends <span class="text-danger">*</span></label>
+            <input type="datetime-local" class="form-control" id="fullAnnEndsAt" min="<?= $minDateTime ?>" required>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-600" for="fullAnnAudience">Audience</label>
+          <select class="form-select" id="fullAnnAudience">
+            <option value="all">Everyone</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="accounting">Accounting</option>
+            <option value="operations">Operations</option>
+          </select>
         </div>
         <div class="mb-3">
           <label class="form-label fw-600">Priority Level</label>
@@ -213,6 +260,25 @@ layoutHead('Announcements', APP_BASE . '/assets/css/announcements.css');
         <div class="mb-3">
           <label class="form-label fw-600">Message <span class="text-danger">*</span></label>
           <textarea class="form-control" id="editAnnBody" rows="4" placeholder="Write your announcement…"></textarea>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-6">
+            <label class="form-label fw-600" for="editAnnStartsAt">Starts <span class="text-danger">*</span></label>
+            <input type="datetime-local" class="form-control" id="editAnnStartsAt" min="<?= $minDateTime ?>" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label fw-600" for="editAnnEndsAt">Ends <span class="text-danger">*</span></label>
+            <input type="datetime-local" class="form-control" id="editAnnEndsAt" min="<?= $minDateTime ?>" required>
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-600" for="editAnnAudience">Audience</label>
+          <select class="form-select" id="editAnnAudience">
+            <option value="all">Everyone</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="accounting">Accounting</option>
+            <option value="operations">Operations</option>
+          </select>
         </div>
         <div class="mb-3">
           <label class="form-label fw-600">Priority Level</label>

@@ -181,6 +181,9 @@ async function submitAnnouncement() {
   const title   = document.getElementById('annTitle').value.trim();
   const body    = document.getElementById('annBody').value.trim();
   const pinned  = document.getElementById('annPinned').checked ? 1 : 0;
+  const audience = document.getElementById('annAudience').value;
+  const startsAt = document.getElementById('annStartsAt').value;
+  const endsAt   = document.getElementById('annEndsAt').value;
   const errEl   = document.getElementById('annError');
 
   errEl.style.display = 'none';
@@ -191,10 +194,25 @@ async function submitAnnouncement() {
     return;
   }
 
+  const start = new Date(startsAt);
+  const end = new Date(endsAt);
+  const now = new Date();
+  if (!startsAt || !endsAt || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())
+      || start < now || end < now || end <= start) {
+    errEl.textContent = !startsAt || !endsAt
+      ? 'Start and end date/time are required.'
+      : 'Use future dates, with the end after the start.';
+    errEl.style.display = 'block';
+    return;
+  }
+
   const fd = new FormData();
   fd.append('title',     title);
   fd.append('body',      body);
   fd.append('is_pinned', pinned);
+  fd.append('audience',  audience);
+  fd.append('starts_at', startsAt);
+  fd.append('ends_at',   endsAt);
   fd.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
 
   try {

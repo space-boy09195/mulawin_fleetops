@@ -40,16 +40,58 @@ function readPriority(array $post): string {
     return in_array($raw, ANNOUNCEMENT_PRIORITIES, true) ? $raw : 'medium';
 }
 
+function readAudience(array $post): string {
+    $raw = strtolower(trim($post['audience'] ?? 'all'));
+    if (!in_array($raw, ANNOUNCEMENT_AUDIENCES, true)) {
+        jsonFail('Audience must be one of: ' . implode(', ', ANNOUNCEMENT_AUDIENCES) . '.');
+    }
+    return $raw;
+}
+
+/**
+ * Parse the datetime-local value sent by the browser and reject invalid or
+ * already elapsed values. SQL receives a consistent DATETIME string.
+ */
+function readAnnouncementDateTime(array $post, string $key, string $label): string {
+    $raw = trim($post[$key] ?? '');
+    $date = DateTime::createFromFormat('!Y-m-d\TH:i', $raw);
+    $errors = DateTime::getLastErrors();
+    if (
+        $raw === ''
+        || $date === false
+        || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
+        || $date->format('Y-m-d\TH:i') !== $raw
+    ) {
+        jsonFail($label . ' must be a valid date and time.');
+    }
+    if ($date < new DateTime()) {
+        jsonFail($label . ' cannot be in the past.');
+    }
+    return $date->format('Y-m-d H:i:s');
+}
+
+function readAnnouncementWindow(array $post): array {
+    $startsAt = readAnnouncementDateTime($post, 'starts_at', 'Start date and time');
+    $endsAt   = readAnnouncementDateTime($post, 'ends_at', 'End date and time');
+    if (strtotime($endsAt) <= strtotime($startsAt)) {
+        jsonFail('End date and time must be after the start date and time.');
+    }
+    return [$startsAt, $endsAt];
+}
+
 // ---- ADD --------------------------------------------------
 if ($action === 'add') {
     $title    = requiredString('title', 'Title', 200);
     $body     = requiredString('body', 'Message');
     $priority = readPriority($_POST);
     $isPinned = readPinnedFlag($_POST);
+    $audience = readAudience($_POST);
+    [$startsAt, $endsAt] = readAnnouncementWindow($_POST);
 
     $stmt = $pdo->prepare(
-        "INSERT INTO announcements (created_by, title, body, priority, is_pinned)
-         VALUES (:user, :title, :body, :priority, :pinned)"
+        "INSERT INTO announcements
+            (created_by, title, body, priority, is_pinned, audience, starts_at, ends_at)
+         VALUES (:user, :title, :body, :priority, :pinned, :audience, :starts_at, :ends_at)"
     );
     $stmt->execute([
         ':user'     => currentUserId(),
@@ -57,6 +99,9 @@ if ($action === 'add') {
         ':body'     => $body,
         ':priority' => $priority,
         ':pinned'   => $isPinned,
+        ':audience' => $audience,
+        ':starts_at' => $startsAt,
+        ':ends_at'   => $endsAt,
     ]);
     $newId = (int)$pdo->lastInsertId();
     auditLog('CREATE', 'announcements', $newId);
@@ -71,18 +116,24 @@ if ($action === 'edit') {
     $body     = requiredString('body', 'Message');
     $priority = readPriority($_POST);
     $isPinned = readPinnedFlag($_POST);
+    $audience = readAudience($_POST);
+    [$startsAt, $endsAt] = readAnnouncementWindow($_POST);
 
     $oldData = findOrFail($pdo, 'announcements', 'announcement_id', $id, 'Announcement not found.');
 
     $pdo->prepare(
         "UPDATE announcements
-            SET title = :title, body = :body, priority = :priority, is_pinned = :pinned
+            SET title = :title, body = :body, priority = :priority, is_pinned = :pinned,
+                audience = :audience, starts_at = :starts_at, ends_at = :ends_at
           WHERE announcement_id = :id"
     )->execute([
         ':title'    => $title,
         ':body'     => $body,
         ':priority' => $priority,
         ':pinned'   => $isPinned,
+        ':audience' => $audience,
+        ':starts_at' => $startsAt,
+        ':ends_at'   => $endsAt,
         ':id'       => $id,
     ]);
 
@@ -91,6 +142,9 @@ if ($action === 'edit') {
         'body'      => $body,
         'priority'  => $priority,
         'is_pinned' => $isPinned,
+        'audience'  => $audience,
+        'starts_at' => $startsAt,
+        'ends_at'   => $endsAt,
     ]);
 
     jsonOk([], 'Announcement updated.');

@@ -33,9 +33,33 @@ function extractTruckFields(): array {
     ];
 }
 
+function storeTruckImage(?array $file, ?string $existingPath = null): ?string {
+    if (!$file || ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+        return $existingPath;
+    }
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || (int)$file['size'] > 10 * 1024 * 1024) {
+        jsonFail('Truck image must be a valid file no larger than 10 MB.');
+    }
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
+    $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+    if (!isset($extensions[$mime])) {
+        jsonFail('Truck image must be a JPG, PNG, or WebP file.');
+    }
+    $directory = dirname(__DIR__) . '/uploads/trucks/';
+    if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
+        jsonFail('Truck image directory could not be created.', 500);
+    }
+    $name = bin2hex(random_bytes(16)) . '.' . $extensions[$mime];
+    if (!move_uploaded_file($file['tmp_name'], $directory . $name)) {
+        jsonFail('Truck image could not be saved.', 500);
+    }
+    return 'uploads/trucks/' . $name;
+}
+
 // ── Add truck ─────────────────────────────────────────────────────────────────
 if ($action === 'add') {
     $f = extractTruckFields();
+    $imagePath = storeTruckImage($_FILES['truck_image'] ?? null);
 
     if ($f['capacity_tons'] !== null && $f['capacity_tons'] < 0) {
         jsonFail('Capacity cannot be negative.');
@@ -52,13 +76,13 @@ if ($action === 'add') {
         $stmt = $pdo->prepare("
             INSERT INTO trucks
                 (plate_number, chassis_number, engine_number, brand, model,
-                 year_model, body_type, fuel_type, capacity_tons, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Available')
+                 year_model, body_type, fuel_type, capacity_tons, image_path, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Available')
         ");
         $stmt->execute([
             $f['plate_number'], $f['chassis_number'], $f['engine_number'],
             $f['brand'], $f['model'], $f['year_model'],
-            $f['body_type'], $f['fuel_type'], $f['capacity_tons'],
+            $f['body_type'], $f['fuel_type'], $f['capacity_tons'], $imagePath,
         ]);
         $newId = (int)$pdo->lastInsertId();
 
@@ -86,6 +110,7 @@ if ($action === 'edit') {
     }
 
     $oldData = findOrFail($pdo, 'trucks', 'truck_id', $truckId, 'Truck not found.');
+    $imagePath = storeTruckImage($_FILES['truck_image'] ?? null, $oldData['image_path'] ?? null);
 
     if (existsWhere($pdo, 'trucks', 'plate_number', $f['plate_number'], $truckId, 'truck_id')) {
         jsonFail('Another truck already has that plate number.');
@@ -99,13 +124,13 @@ if ($action === 'edit') {
             UPDATE trucks SET
                 plate_number   = ?, chassis_number = ?, engine_number  = ?,
                 brand          = ?, model          = ?, year_model     = ?,
-                body_type      = ?, fuel_type      = ?, capacity_tons  = ?,
+                body_type      = ?, fuel_type      = ?, capacity_tons  = ?, image_path = ?,
                 status         = ?
             WHERE truck_id     = ?
         ")->execute([
             $f['plate_number'], $f['chassis_number'], $f['engine_number'],
             $f['brand'], $f['model'], $f['year_model'],
-            $f['body_type'], $f['fuel_type'], $f['capacity_tons'],
+            $f['body_type'], $f['fuel_type'], $f['capacity_tons'], $imagePath,
             $status, $truckId,
         ]);
 

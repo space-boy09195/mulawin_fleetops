@@ -74,6 +74,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const confirmBtn     = document.getElementById('confirmUpdateBtn');
   const btnText        = document.getElementById('updateBtnText');
   const btnSpinner     = document.getElementById('updateBtnSpinner');
+  const attachments    = document.getElementById('completedReportAttachments');
+  const deliveryReceipt = document.getElementById('modalDeliveryReceipt');
+  const waybill         = document.getElementById('modalWaybill');
 
   let bsModal = null;
   if (modal) bsModal = new bootstrap.Modal(modal);
@@ -84,6 +87,9 @@ document.addEventListener('DOMContentLoaded', () => {
     modalTripId.value         = tripId;
     modalStatus.value         = currentStatus;
     if (modalNotes)    modalNotes.value    = '';
+    attachments?.classList.toggle('d-none', currentStatus === 'Completed');
+    if (deliveryReceipt) deliveryReceipt.value = '';
+    if (waybill) waybill.value = '';
     bsModal.show();
   };
 
@@ -104,6 +110,10 @@ document.addEventListener('DOMContentLoaded', () => {
         fd.append('trip_id',       tripId);
         fd.append('status',        status);
         fd.append('notes',         notes);
+        if (status === 'Completed') {
+          if (deliveryReceipt?.files?.[0]) fd.append('delivery_receipt', deliveryReceipt.files[0]);
+          if (waybill?.files?.[0]) fd.append('waybill', waybill.files[0]);
+        }
         fd.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
 
         const res    = await fetch(window.APP_BASE + '/ajax/update_trip_status.php', { method: 'POST', body: fd });

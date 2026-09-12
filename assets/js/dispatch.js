@@ -169,19 +169,35 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  const routeRequestModal = document.getElementById('routeRequestModal');
+  const rrOrigin = document.getElementById('rr_origin');
+  const rrDestination = document.getElementById('rr_destination');
+  const rrMapPreview = wireMapPreview('rr', rrOrigin, rrDestination);
+
+  routeRequestModal?.addEventListener('hidden.bs.modal', () => {
+    const fields = ['rr_name', 'rr_origin', 'rr_destination', 'rr_distance', 'rr_notes'];
+    fields.forEach(id => {
+      const field = document.getElementById(id);
+      if (field) field.value = '';
+    });
+    hideAlert(document.getElementById('routeRequestAlert'));
+    rrMapPreview.reset();
+  });
+
   document.getElementById('submitRouteRequestBtn')?.addEventListener('click', async () => {
     const alertEl = document.getElementById('routeRequestAlert');
     const name = document.getElementById('rr_name')?.value.trim() ?? '';
     const origin = document.getElementById('rr_origin')?.value.trim() ?? '';
     const destination = document.getElementById('rr_destination')?.value.trim() ?? '';
     const distance = document.getElementById('rr_distance')?.value ?? '';
+    const notes = document.getElementById('rr_notes')?.value.trim() ?? '';
     if (!name || !origin || !destination) {
       showAlert(alertEl, 'Route name, origin, and destination are required.');
       return;
     }
     try {
       const result = await postAjax(ROUTE_REQUEST_URL, {
-        action: 'request', route_name: name, origin, destination, distance_km: distance
+        action: 'request', route_name: name, origin, destination, distance_km: distance, request_notes: notes
       });
       if (result.success) window.location.reload();
       else showAlert(alertEl, result.message || 'Could not submit route request.');

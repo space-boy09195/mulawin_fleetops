@@ -19,6 +19,7 @@ if ($action === 'request') {
     $origin = requiredString('origin', 'Origin', 150);
     $destination = requiredString('destination', 'Destination', 150);
     $distance = optionalFloat('distance_km');
+    $requestNotes = optionalString('request_notes');
     if ($distance !== null && $distance < 0) {
         jsonFail('Distance cannot be negative.');
     }
@@ -26,10 +27,10 @@ if ($action === 'request') {
         jsonFail('A route with that name already exists.');
     }
     $stmt = $pdo->prepare("
-        INSERT INTO routes (route_name, origin, destination, distance_km, is_active, approval_status, requested_by)
-        VALUES (?, ?, ?, ?, 0, 'Pending', ?)
+        INSERT INTO routes (route_name, origin, destination, distance_km, request_notes, is_active, approval_status, requested_by)
+        VALUES (?, ?, ?, ?, ?, 0, 'Pending', ?)
     ");
-    $stmt->execute([$name, $origin, $destination, $distance, currentUserId()]);
+    $stmt->execute([$name, $origin, $destination, $distance, $requestNotes, currentUserId()]);
     $id = (int)$pdo->lastInsertId();
     auditLog('REQUEST_ROUTE', 'routes', $id, null, ['route_name' => $name]);
     jsonOk(['id' => $id], 'Route request submitted for Head Management approval.');

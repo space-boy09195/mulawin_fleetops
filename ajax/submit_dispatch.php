@@ -20,7 +20,7 @@ $truckId     = requiredInt('truck_id', 'Truck', 1);
 $routeId     = requiredInt('route_id', 'Route', 1);
 $driverId    = requiredInt('driver_id', 'Driver', 1);
 $helperId    = filter_input(INPUT_POST, 'helper_id', FILTER_VALIDATE_INT) ?: null;
-$clientName  = optionalString('client_name', null, 150);
+$clientName  = requiredString('client_name', 'Client', 150);
 $scheduledAt = requiredString('scheduled_at', 'Scheduled date/time');
 $remarks     = optionalString('remarks');
 
@@ -33,6 +33,12 @@ if (strtotime($scheduledAt) < time()) {
 }
 
 $pdo = getDBConnection();
+
+$clientStmt = $pdo->prepare('SELECT client_id FROM clients WHERE client_name = ? AND is_active = 1');
+$clientStmt->execute([$clientName]);
+if (!$clientStmt->fetchColumn()) {
+    jsonFail('Select a registered active client.');
+}
 
 $driverStmt = $pdo->prepare("SELECT full_name FROM employees WHERE employee_id = ? AND is_active = 1 AND license_number IS NOT NULL");
 $driverStmt->execute([$driverId]);

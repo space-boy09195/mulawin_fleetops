@@ -57,12 +57,7 @@ $routes = $pdo->query("
     FROM routes WHERE is_active = 1 AND approval_status = 'Approved' ORDER BY route_name
 ")->fetchAll();
 
-$clients = $pdo->query("
-    SELECT DISTINCT TRIM(client_name) AS client_name
-    FROM billings
-    WHERE client_name IS NOT NULL AND TRIM(client_name) <> ''
-    ORDER BY client_name
-")->fetchAll(PDO::FETCH_COLUMN);
+$clients = $pdo->query("SELECT client_name FROM clients WHERE is_active = 1 ORDER BY client_name")->fetchAll(PDO::FETCH_COLUMN);
 
 // ── All routes for management tab ─────────────────────────────────────────────
 $allRoutes = $pdo->query("
@@ -489,9 +484,9 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             </datalist>
           </div>
           <div class="col-md-6">
-            <label class="disp-label">Client <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <label class="disp-label">Client <span class="text-danger">*</span></label>
             <input class="form-control disp-input" id="d_client" list="billingClientsList"
-                   maxlength="150" placeholder="Type or select a client" autocomplete="off">
+                   maxlength="150" placeholder="Type or select a registered client" autocomplete="off" required>
             <datalist id="billingClientsList">
               <?php foreach ($clients as $client): ?>
               <option value="<?= htmlspecialchars($client, ENT_QUOTES) ?>"></option>

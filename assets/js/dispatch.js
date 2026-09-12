@@ -164,8 +164,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const scheduled = document.getElementById('d_scheduled')?.value  ?? '';
     const remarks   = document.getElementById('d_remarks')?.value.trim() ?? '';
 
-    if (!truck || !route || !driver || !scheduled) {
-      showAlert(dispatchFormError, 'Please choose an approved route, an active driver, a truck, and a scheduled departure.');
+    if (!truck || !route || !driver || !scheduled || !client) {
+      showAlert(dispatchFormError, 'Please choose a registered client, approved route, active driver, truck, and scheduled departure.');
       return;
     }
     if (client.length > 150) {

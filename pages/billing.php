@@ -11,6 +11,7 @@ $GLOBALS['page_js'] = APP_BASE . '/assets/js/billing.js';
 layoutHead('Billing & Collections', APP_BASE . '/assets/css/billing.css');
 
 $pdo = getDBConnection();
+$clients = $pdo->query("SELECT client_name FROM clients WHERE is_active = 1 ORDER BY client_name")->fetchAll(PDO::FETCH_COLUMN);
 
 // ── Period filter (scopes the summary cards + both lists below) ──────────────
 $periods = [
@@ -772,9 +773,14 @@ function isOverdue(string $dueDate, string $status): bool {
             </select>
           </div>
           <div class="col-md-6">
-            <label class="form-label bil-label" for="bilClientName">Client Name</label>
+            <label class="form-label bil-label" for="bilClientName">Client Name *</label>
             <input type="text" class="form-control bil-input" id="bilClientName"
-                   placeholder="Bill-to name (optional)">
+                   list="billingClientsList" maxlength="150" placeholder="Select a registered client" required>
+            <datalist id="billingClientsList">
+              <?php foreach ($clients as $client): ?>
+              <option value="<?= htmlspecialchars($client, ENT_QUOTES) ?>"></option>
+              <?php endforeach; ?>
+            </datalist>
           </div>
           <div class="col-md-4">
             <label class="form-label bil-label" for="bilAmount">Amount (₱)</label>

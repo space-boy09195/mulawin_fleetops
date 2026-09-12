@@ -139,6 +139,11 @@
       showAlert(billingFormAlert, 'Please fill in all required fields.');
       return;
     }
+    if (!clientName || !Array.from(document.querySelectorAll('#billingClientsList option')).some(option => option.value === clientName)) {
+      showAlert(billingFormAlert, 'Select a registered active client.');
+      return;
+    }
+    if (!window.confirm('Create this billing record?')) return;
 
     if (parseFloat(amount) <= 0) {
       showAlert(billingFormAlert, 'Amount must be greater than zero.');

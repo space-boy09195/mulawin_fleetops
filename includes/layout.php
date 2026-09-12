@@ -38,6 +38,7 @@ function getNavItems(): array {
         ['label' => 'Parts Inventory',     'href' => '/pages/parts.php',        'icon' => 'bi-box-seam',            'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]],
         ['section' => 'Accounting'],
         ['label' => 'Billing',             'href' => '/pages/billing.php',      'icon' => 'bi-receipt',             'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
+        ['label' => 'Clients',             'href' => '/pages/clients.php',      'icon' => 'bi-person-vcard',         'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
         ['label' => 'Trip Costs',           'href' => '/pages/trip_costs.php',    'icon' => 'bi-fuel-pump',            'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
         //['label' => 'Collections',         'href' => '/pages/collections.php',  'icon' => 'bi-cash-stack',          'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
         ['section' => 'Repository'],

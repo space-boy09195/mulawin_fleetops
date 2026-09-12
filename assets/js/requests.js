@@ -76,6 +76,11 @@ document.addEventListener('DOMContentLoaded', () => {
         showMessage('A rejection reason is required.');
         return;
       }
+      if (remarks.trim().length > 255) {
+        showMessage('The rejection reason must be 255 characters or fewer.');
+        return;
+      }
+      if (!window.confirm('Reject this dispatch request with the provided reason?')) return;
       review(button, dispatchUrl, {
         dispatch_id: button.dataset.id,
         status: 'Rejected',

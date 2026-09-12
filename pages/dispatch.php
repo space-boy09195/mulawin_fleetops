@@ -511,10 +511,21 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
       </div>
       <div class="modal-body disp-modal-body">
         <div id="routeRequestAlert" class="alert d-none"></div>
-        <input class="form-control disp-input mb-2" id="rr_name" placeholder="Route name" required>
-        <input class="form-control disp-input mb-2" id="rr_origin" placeholder="Origin" required>
-        <input class="form-control disp-input mb-2" id="rr_destination" placeholder="Destination" required>
-        <input type="number" min="0" step="0.1" class="form-control disp-input" id="rr_distance" placeholder="Distance (km, optional)">
+        <label class="disp-label" for="rr_name">Route name <span class="text-danger">*</span></label>
+        <input class="form-control disp-input mb-2" id="rr_name" maxlength="150" placeholder="Route name" required>
+        <label class="disp-label" for="rr_origin">Origin <span class="text-danger">*</span></label>
+        <input class="form-control disp-input mb-2" id="rr_origin" maxlength="150" placeholder="Origin" required>
+        <label class="disp-label" for="rr_destination">Destination <span class="text-danger">*</span></label>
+        <input class="form-control disp-input mb-2" id="rr_destination" maxlength="150" placeholder="Destination" required>
+        <label class="disp-label" for="rr_distance">Distance (km)</label>
+        <div class="input-group">
+          <input type="number" min="0" max="100000" step="0.1" class="form-control disp-input"
+                 id="rr_distance" placeholder="Calculated automatically; manual entry is allowed">
+          <button type="button" class="btn btn-outline-primary" id="calculateRouteDistanceBtn">
+            <i class="bi bi-calculator me-1"></i>Calculate
+          </button>
+        </div>
+        <div id="routeDistanceStatus" class="form-text"></div>
         <label class="disp-label mt-2" for="rr_notes">Side note <span class="text-muted">(optional)</span></label>
         <textarea class="form-control disp-input mb-3" id="rr_notes" rows="2" maxlength="500"
                   placeholder="Add context or special instructions for Head Management"></textarea>

@@ -23,6 +23,9 @@ if ($action === 'request') {
     if ($distance !== null && $distance < 0) {
         jsonFail('Distance cannot be negative.');
     }
+    if ($distance !== null && $distance > 100000) {
+        jsonFail('Distance is outside the allowed range.');
+    }
     if (existsWhere($pdo, 'routes', 'route_name', $name)) {
         jsonFail('A route with that name already exists.');
     }
@@ -41,6 +44,9 @@ if ($action === 'review') {
     $routeId = requiredInt('route_id', 'Route', 1);
     $status = requiredEnum('status', ['Approved', 'Rejected'], 'Status');
     $route = findOrFail($pdo, 'routes', 'route_id', $routeId, 'Route not found.');
+    if (($route['approval_status'] ?? '') !== 'Pending') {
+        jsonFail('This route request has already been reviewed.', 409);
+    }
     $pdo->prepare("UPDATE routes SET approval_status = ?, is_active = ? WHERE route_id = ?")
         ->execute([$status, $status === 'Approved' ? 1 : 0, $routeId]);
     auditLog('REVIEW_ROUTE_REQUEST', 'routes', $routeId, ['approval_status' => $route['approval_status']], ['approval_status' => $status]);

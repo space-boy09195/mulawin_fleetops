@@ -140,6 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const at_capacity   = document.getElementById('at_capacity');
   const at_chassis    = document.getElementById('at_chassis');
   const at_engine     = document.getElementById('at_engine');
+  const at_image      = document.getElementById('at_image');
   const submitAddBtn  = document.getElementById('submitAddTruckBtn');
   const atBtnText     = document.getElementById('atBtnText');
   const atBtnSpinner  = document.getElementById('atBtnSpinner');
@@ -169,18 +170,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setBusy(atBtnText, atBtnSpinner, true);
 
-    postAjax({
-      action:          'add',
-      plate_number:    plate,
-      brand,
-      model,
-      year_model:      year,
-      body_type:       at_body?.value.trim()     ?? '',
-      fuel_type:       at_fuel?.value            ?? 'Diesel',
-      capacity_tons:   at_capacity?.value        ?? '',
-      chassis_number:  at_chassis?.value.trim()  ?? '',
-      engine_number:   at_engine?.value.trim()   ?? '',
-    })
+    const formData = new FormData();
+    Object.entries({
+      action: 'add', plate_number: plate, brand, model, year_model: year,
+      body_type: at_body?.value.trim() ?? '', fuel_type: at_fuel?.value ?? 'Diesel',
+      capacity_tons: at_capacity?.value ?? '', chassis_number: at_chassis?.value.trim() ?? '',
+      engine_number: at_engine?.value.trim() ?? ''
+    }).forEach(([key, value]) => formData.append(key, value));
+    if (at_image?.files?.[0]) formData.append('truck_image', at_image.files[0]);
+    formData.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
+    fetch(AJAX_URL, { method: 'POST', body: formData }).then(r => r.json())
       .then(res => {
         setBusy(atBtnText, atBtnSpinner, false);
         if (res.success) {
@@ -208,6 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const et_capacity   = document.getElementById('et_capacity');
   const et_chassis    = document.getElementById('et_chassis');
   const et_engine     = document.getElementById('et_engine');
+  const et_image      = document.getElementById('et_image');
   const et_status     = document.getElementById('et_status');
   const submitEditBtn = document.getElementById('submitEditTruckBtn');
   const etBtnText     = document.getElementById('etBtnText');
@@ -257,20 +257,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setBusy(etBtnText, etBtnSpinner, true);
 
-    postAjax({
-      action:          'edit',
-      truck_id:        et_id?.value          ?? '',
-      plate_number:    plate,
-      brand,
-      model,
-      year_model:      year,
-      body_type:       et_body?.value.trim()     ?? '',
-      fuel_type:       et_fuel?.value            ?? 'Diesel',
-      capacity_tons:   et_capacity?.value        ?? '',
-      chassis_number:  et_chassis?.value.trim()  ?? '',
-      engine_number:   et_engine?.value.trim()   ?? '',
-      status:          et_status?.value          ?? 'Available',
-    })
+    const formData = new FormData();
+    Object.entries({
+      action: 'edit', truck_id: et_id?.value ?? '', plate_number: plate, brand, model,
+      year_model: year, body_type: et_body?.value.trim() ?? '',
+      fuel_type: et_fuel?.value ?? 'Diesel', capacity_tons: et_capacity?.value ?? '',
+      chassis_number: et_chassis?.value.trim() ?? '', engine_number: et_engine?.value.trim() ?? '',
+      status: et_status?.value ?? 'Available'
+    }).forEach(([key, value]) => formData.append(key, value));
+    if (et_image?.files?.[0]) formData.append('truck_image', et_image.files[0]);
+    formData.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
+    fetch(AJAX_URL, { method: 'POST', body: formData }).then(r => r.json())
       .then(res => {
         setBusy(etBtnText, etBtnSpinner, false);
         if (res.success) {

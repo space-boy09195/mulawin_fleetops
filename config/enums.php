@@ -32,6 +32,9 @@ define('TRIP_TERMINAL_STATUSES', ['Completed', 'Cancelled']);
 // Announcement priority levels (announcement_handler.php).
 define('ANNOUNCEMENT_PRIORITIES', ['high', 'medium', 'low']);
 
+// Announcement audiences (announcement_handler.php).
+define('ANNOUNCEMENT_AUDIENCES', ['all', 'maintenance', 'accounting', 'operations']);
+
 // Budget planning categories (budgets_handler.php).
 define('BUDGET_CATEGORIES', ['Revenue', 'Maintenance', 'Fuel', 'Toll', 'Driver Allowance', 'Other', 'Payroll']);
 

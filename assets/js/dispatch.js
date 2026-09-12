@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const DISPATCH_URL  = BASE + '/ajax/submit_dispatch.php';
   const REVIEW_URL    = BASE + '/ajax/review_dispatch.php';
   const ROUTES_URL    = BASE + '/ajax/routes_handler.php';
+  const ROUTE_REQUEST_URL = BASE + '/ajax/route_request_handler.php';
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
   function postAjax(url, data) {
@@ -166,6 +167,38 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       setBusy(btnText, btnSpinner, false);
     }
+  });
+
+  document.getElementById('submitRouteRequestBtn')?.addEventListener('click', async () => {
+    const alertEl = document.getElementById('routeRequestAlert');
+    const name = document.getElementById('rr_name')?.value.trim() ?? '';
+    const origin = document.getElementById('rr_origin')?.value.trim() ?? '';
+    const destination = document.getElementById('rr_destination')?.value.trim() ?? '';
+    const distance = document.getElementById('rr_distance')?.value ?? '';
+    if (!name || !origin || !destination) {
+      showAlert(alertEl, 'Route name, origin, and destination are required.');
+      return;
+    }
+    try {
+      const result = await postAjax(ROUTE_REQUEST_URL, {
+        action: 'request', route_name: name, origin, destination, distance_km: distance
+      });
+      if (result.success) window.location.reload();
+      else showAlert(alertEl, result.message || 'Could not submit route request.');
+    } catch {
+      showAlert(alertEl, 'Network error. Please try again.');
+    }
+  });
+
+  document.querySelectorAll('.btn-review-route').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm(`${btn.dataset.status} this route request?`)) return;
+      const result = await postAjax(ROUTE_REQUEST_URL, {
+        action: 'review', route_id: btn.dataset.id, status: btn.dataset.status
+      });
+      if (result.success) window.location.reload();
+      else alert(result.message || 'Could not review route request.');
+    });
   });
 
   // ── Approve dispatch ─────────────────────────────────────────────────────────

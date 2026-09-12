@@ -40,6 +40,7 @@ $trucks = $pdo->query("
         t.body_type,
         t.fuel_type,
         t.capacity_tons,
+        t.image_path,
         t.status,
         cur.trip_number,
         cur.driver_name,
@@ -200,6 +201,9 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
             </span>
           </td>
           <td>
+            <?php if (!empty($truck['image_path'])): ?>
+            <img src="<?= APP_BASE . '/' . htmlspecialchars($truck['image_path']) ?>" alt="" style="width:42px;height:32px;object-fit:cover;border-radius:4px;" class="me-2">
+            <?php endif; ?>
             <div style="font-weight:600;"><?= htmlspecialchars($truck['brand'] . ' ' . $truck['model']) ?></div>
             <div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars($truck['year_model']) ?></div>
           </td>
@@ -343,6 +347,10 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
             <input type="text" class="form-control fleet-input" id="at_engine"
                    placeholder="Optional">
           </div>
+          <div class="col-12">
+             <label class="fleet-label" for="at_image">Truck Photo (JPG, PNG, or WebP; max 10 MB)</label>
+             <input type="file" class="form-control fleet-input" id="at_image" accept=".jpg,.jpeg,.png,.webp">
+          </div>
         </div>
       </div>
       <div class="modal-footer fleet-modal-footer">
@@ -414,6 +422,10 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
           <div class="col-md-6">
             <label class="fleet-label">Engine Number</label>
             <input type="text" class="form-control fleet-input" id="et_engine">
+          </div>
+          <div class="col-12">
+            <label class="fleet-label" for="et_image">Replace Truck Photo (optional)</label>
+            <input type="file" class="form-control fleet-input" id="et_image" accept=".jpg,.jpeg,.png,.webp">
           </div>
           <div class="col-md-4">
             <label class="fleet-label">Status</label>

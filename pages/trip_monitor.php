@@ -342,6 +342,15 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
           <textarea class="form-control" id="modalNotes" rows="2"
                     placeholder="Any remarks for this update…"></textarea>
         </div>
+        <div id="completedReportAttachments" class="mt-3 d-none">
+          <label class="form-label fw-600">Delivery Receipt <span class="text-muted fw-400">(PDF or image, optional)</span></label>
+          <input type="file" class="form-control mb-2" id="modalDeliveryReceipt"
+                 accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx">
+          <label class="form-label fw-600">Waybill <span class="text-muted fw-400">(PDF or image, optional)</span></label>
+          <input type="file" class="form-control" id="modalWaybill"
+                 accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx">
+          <div class="form-text">These files will be linked to this completed trip in Documents.</div>
+        </div>
       </div>
       <div class="modal-footer" style="border-color:var(--card-border);">
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>

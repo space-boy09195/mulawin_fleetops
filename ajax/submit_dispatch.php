@@ -8,6 +8,7 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
@@ -61,6 +62,12 @@ if ($busy) {
     jsonFail($person . ' is already assigned to an active dispatch on that date.');
 }
 
+// Ensure the selected route is approved and still available.
+$route = findOrFail($pdo, 'routes', 'route_id', $routeId, 'Route not found.');
+if ((string)($route['approval_status'] ?? 'Approved') !== 'Approved' || !(int)$route['is_active']) {
+    jsonFail('The selected route is not approved for dispatch.');
+}
+
 // Ensure truck is still Available
 $truck = $pdo->prepare("SELECT status FROM trucks WHERE truck_id = :id LIMIT 1");
 $truck->execute([':id' => $truckId]);
@@ -70,23 +77,46 @@ if (!$truckRow || $truckRow['status'] !== 'Available') {
     jsonFail('Selected truck is no longer available.');
 }
 
-$stmt = $pdo->prepare(
-    "INSERT INTO dispatch_requests
-       (truck_id, driver_id, helper_id, route_id, requested_by, scheduled_at, remarks)
-     VALUES
-       (:truck, :driver, :helper, :route, :user, :scheduled, :remarks)"
-);
-$stmt->execute([
-    ':truck'     => $truckId,
-    ':driver'    => $driverId,
-    ':helper'    => $helperId,
-    ':route'     => $routeId,
-    ':user'      => currentUserId(),
-    ':scheduled' => $scheduledAt,
-    ':remarks'   => $remarks,
-]);
+$pdo->beginTransaction();
+try {
+    $stmt = $pdo->prepare(
+        "INSERT INTO dispatch_requests
+           (truck_id, driver_id, helper_id, route_id, requested_by, approved_by, scheduled_at, status, remarks, reviewed_at)
+         VALUES
+           (:truck, :driver, :helper, :route, :user, :user, :scheduled, 'Approved', :remarks, NOW())"
+    );
+    $stmt->execute([
+        ':truck' => $truckId, ':driver' => $driverId, ':helper' => $helperId,
+        ':route' => $routeId, ':user' => currentUserId(),
+        ':scheduled' => $scheduledAt, ':remarks' => $remarks,
+    ]);
+    $newId = (int)$pdo->lastInsertId();
+    $year = date('Y');
+    $countStmt = $pdo->query("SELECT COUNT(*) FROM trips WHERE YEAR(created_at) = " . (int)$year);
+    $tripNumber = 'TRP-' . $year . '-' . str_pad((int)$countStmt->fetchColumn() + 1, 4, '0', STR_PAD_LEFT);
+    $pdo->prepare("INSERT INTO trips (dispatch_id, trip_number, status) VALUES (?, ?, 'Loading')")
+        ->execute([$newId, $tripNumber]);
+    $tripId = (int)$pdo->lastInsertId();
+    $pdo->prepare("UPDATE trucks SET status = 'Deployed' WHERE truck_id = ?")->execute([$truckId]);
 
-$newId = (int)$pdo->lastInsertId();
-auditLog('CREATE', 'dispatch_requests', $newId);
+    $driverUser = $pdo->prepare("SELECT user_id FROM employees WHERE employee_id = ?");
+    $driverUser->execute([$driverId]);
+    if ($userId = $driverUser->fetchColumn()) {
+        $pdo->prepare("INSERT INTO notifications (user_id, title, message, link) VALUES (?, ?, ?, ?)")
+            ->execute([
+                (int)$userId,
+                'Dispatch confirmed',
+                "You have been assigned to trip {$tripNumber}.",
+                APP_BASE . '/pages/trip_monitor.php',
+            ]);
+    }
+    $pdo->commit();
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
+    error_log('submit_dispatch: ' . $e->getMessage());
+    jsonFail('Could not confirm the dispatch.', 500);
+}
 
-jsonOk([], 'Dispatch request submitted.');
+auditLog('CREATE', 'dispatch_requests', $newId, null, ['status' => 'Approved', 'trip_id' => $tripId]);
+auditLog('CREATE', 'trips', $tripId, null, ['trip_number' => $tripNumber]);
+jsonOk(['trip_id' => $tripId], 'Dispatch confirmed and driver notified.');

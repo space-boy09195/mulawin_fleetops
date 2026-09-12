@@ -110,15 +110,18 @@ $checklistSql = "
 $checklists = $pdo->query($checklistSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Dropdowns for forms ───────────────────────────────────────────────────────
-$hasTruckImageColumn = (bool)$pdo->query("
-    SELECT 1
+$imageColumns = $pdo->query("
+    SELECT column_name
     FROM information_schema.columns
     WHERE table_schema = DATABASE()
       AND table_name = 'trucks'
-      AND column_name = 'truck_image_name'
-    LIMIT 1
-")->fetchColumn();
-$truckImageSelect = $hasTruckImageColumn ? 'truck_image_name' : 'NULL AS truck_image_name';
+      AND column_name IN ('truck_image_name', 'image_path')
+")->fetchAll(PDO::FETCH_COLUMN);
+$hasLegacyTruckImage = in_array('truck_image_name', $imageColumns, true);
+$hasTruckImagePath = in_array('image_path', $imageColumns, true);
+$truckImageSelect = $hasTruckImagePath
+    ? 'image_path'
+    : ($hasLegacyTruckImage ? "CONCAT('uploads/trucks/', truck_image_name) AS image_path" : 'NULL AS image_path');
 $trucks = $pdo->query("
     SELECT truck_id, plate_number, brand, model, $truckImageSelect,
            COALESCE(body_type, 'Closed Van') AS body_type
@@ -276,7 +279,7 @@ $checklistItems = [
                   <?php foreach ($trucks as $truck): ?>
                   <option value="<?= $truck['truck_id'] ?>"
                           data-body="<?= htmlspecialchars($truck['body_type']) ?>"
-                          data-image="<?= htmlspecialchars($truck['truck_image_name'] ? APP_BASE . '/uploads/trucks/' . rawurlencode($truck['truck_image_name']) : '', ENT_QUOTES) ?>">
+                          data-image="<?= htmlspecialchars($truck['image_path'] ? APP_BASE . '/' . ltrim($truck['image_path'], '/') : '', ENT_QUOTES) ?>">
                     <?= htmlspecialchars($truck['plate_number'] . ' — ' . $truck['brand'] . ' ' . $truck['model']) ?>
                   </option>
                   <?php endforeach; ?>

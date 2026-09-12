@@ -42,6 +42,15 @@
     return '₱' + parseFloat(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  // Billing is server-rendered PHP, so poll the page to reflect another
+  // accountant's collection without requiring a manual refresh.
+  setInterval(() => {
+    const modalOpen = document.querySelector('.modal.show');
+    if (!modalOpen && document.visibilityState === 'visible') {
+      window.location.reload();
+    }
+  }, 20000);
+
   // ── Billings filter ───────────────────────────────────────────────────────
   const filterBilStatus = document.getElementById('filterBilStatus');
   const filterBilSearch = document.getElementById('filterBilSearch');

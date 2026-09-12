@@ -112,18 +112,55 @@ function buildSidebarNav(): string {
     return $html;
 }
 
-// ---- Fetch latest announcements (max 3, pinned first) ----
+// ---- Fetch latest active announcements for the current audience (max 3) ----
 function getLatestAnnouncements(): array {
     try {
         $pdo  = getDBConnection();
-        $stmt = $pdo->query(
-            "SELECT a.announcement_id, a.title, a.body, a.is_pinned, a.created_at,
+        $where = [
+            'a.starts_at <= NOW()',
+            '(a.ends_at IS NULL OR a.ends_at >= NOW())',
+        ];
+        $params = [];
+        $role = currentRoleId();
+        if ($role !== ROLE_HEAD_MANAGEMENT) {
+            $audience = match ($role) {
+                ROLE_MAINTENANCE => 'maintenance',
+                ROLE_ACCOUNTING  => 'accounting',
+                ROLE_DISPATCHER  => 'operations',
+                default          => 'all',
+            };
+            $where[] = "(a.audience = 'all' OR a.audience = :audience)";
+            $params[':audience'] = $audience;
+        }
+
+        function getLatestNotifications(): array {
+            try {
+                $stmt = getDBConnection()->prepare("
+                    SELECT notification_id, title, message, link, created_at
+                    FROM notifications
+                    WHERE user_id = ? AND is_read = 0
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                ");
+                $stmt->execute([currentUserId()]);
+                return $stmt->fetchAll(PDO::FETCH_ASSOC);
+            } catch (PDOException $e) {
+                error_log('Unable to load notifications: ' . $e->getMessage());
+                return [];
+            }
+        }
+
+        $stmt = $pdo->prepare(
+            "SELECT a.announcement_id, a.title, a.body, a.is_pinned, a.priority,
+                    a.audience, a.starts_at, a.ends_at, a.created_at,
                     u.full_name AS author
                FROM announcements a
                JOIN users u ON a.created_by = u.user_id
-              ORDER BY a.is_pinned DESC, a.created_at DESC
+              WHERE " . implode(' AND ', $where) . "
+              ORDER BY a.is_pinned DESC, FIELD(a.priority, 'high', 'medium', 'low'), a.created_at DESC
               LIMIT 3"
         );
+        $stmt->execute($params);
         return $stmt->fetchAll();
     } catch (Exception $e) {
         return [];
@@ -152,6 +189,23 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     $unreadCount    = count($announcements);
     $badgeClass     = $unreadCount > 0 ? '' : 'd-none';
     $isHead         = currentRoleId() === ROLE_HEAD_MANAGEMENT ? 'true' : 'false';
+    $notifications  = getLatestNotifications();
+    $notificationCount = count($notifications);
+    $notificationItems = '';
+    foreach ($notifications as $notification) {
+        $notificationItems .= '<a class="dropdown-item small" href="'
+            . htmlspecialchars($notification['link'] ?: '#')
+            . '"><strong>' . htmlspecialchars($notification['title']) . '</strong><br>'
+            . htmlspecialchars($notification['message']) . '</a>';
+    }
+    $notificationHtml = '<div class="dropdown">'
+        . '<button class="notif-btn" type="button" title="Notifications" data-bs-toggle="dropdown">'
+        . '<i class="bi bi-bell"></i><span class="notif-badge ' . ($notificationCount ? '' : 'd-none') . '">'
+        . $notificationCount . '</span></button>'
+        . '<div class="dropdown-menu dropdown-menu-end p-2" style="min-width:300px;">'
+        . '<div class="fw-semibold px-2 py-1">Notifications</div>'
+        . ($notificationItems ?: '<div class="text-muted small px-2 py-2">No new notifications.</div>')
+        . '</div></div>';
 
     echo <<<HTML
 <!DOCTYPE html>
@@ -273,6 +327,7 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
       </div>
 
       <div class="topnav-actions">
+        {$notificationHtml}
         <!-- Announcements bell -->
         <button class="notif-btn" type="button" title="Announcements"
                 data-bs-toggle="offcanvas" data-bs-target="#announcementsPanel">
@@ -300,6 +355,7 @@ HTML;
 function self_announcements_panel(array $announcements): void {
     $isHead  = currentRoleId() === ROLE_HEAD_MANAGEMENT;
     $base    = APP_BASE;
+    $minDateTime = date('Y-m-d\TH:i');
 
     $itemsHtml = '';
     if (empty($announcements)) {
@@ -312,6 +368,12 @@ function self_announcements_panel(array $announcements): void {
             $author  = htmlspecialchars($a['author']);
             $date    = date('M j, Y', strtotime($a['created_at']));
             $id      = (int)$a['announcement_id'];
+            $audienceLabel = [
+                'all' => 'Everyone',
+                'maintenance' => 'Maintenance',
+                'accounting' => 'Accounting',
+                'operations' => 'Operations',
+            ][$a['audience'] ?? 'all'] ?? 'Everyone';
             $deleteBtn = $isHead
                 ? "<button class='ann-delete-btn' onclick='deleteAnnouncement({$id})' title='Delete'><i class='bi bi-trash'></i></button>"
                 : '';
@@ -326,7 +388,7 @@ function self_announcements_panel(array $announcements): void {
     {$deleteBtn}
   </div>
   <div class="ann-body">{$body}</div>
-  <div class="ann-meta">{$author} &middot; {$date}</div>
+  <div class="ann-meta">{$author} &middot; {$date} &middot; {$audienceLabel}</div>
 </div>
 ITEM;
         }
@@ -341,6 +403,27 @@ ITEM;
   </div>
   <div class="mb-2">
     <textarea class="form-control form-control-sm" id="annBody" rows="3" placeholder="Message *"></textarea>
+  </div>
+  <div class="row g-2 mb-2">
+    <div class="col-6">
+      <label class="form-label mb-1" for="annStartsAt" style="font-size:.75rem;">Starts</label>
+      <input type="datetime-local" class="form-control form-control-sm" id="annStartsAt"
+             min="{$minDateTime}" required>
+    </div>
+    <div class="col-6">
+      <label class="form-label mb-1" for="annEndsAt" style="font-size:.75rem;">Ends</label>
+      <input type="datetime-local" class="form-control form-control-sm" id="annEndsAt"
+             min="{$minDateTime}" required>
+    </div>
+  </div>
+  <div class="mb-2">
+    <label class="form-label mb-1" for="annAudience" style="font-size:.75rem;">Audience</label>
+    <select class="form-select form-select-sm" id="annAudience">
+      <option value="all">Everyone</option>
+      <option value="maintenance">Maintenance</option>
+      <option value="accounting">Accounting</option>
+      <option value="operations">Operations</option>
+    </select>
   </div>
   <div class="mb-2 d-flex align-items-center gap-2">
     <input type="checkbox" id="annPinned" class="form-check-input">

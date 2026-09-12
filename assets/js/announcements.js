@@ -5,6 +5,18 @@
 
 document.addEventListener('DOMContentLoaded', () => {
 
+  function validateWindow(startsAt, endsAt) {
+    if (!startsAt || !endsAt) return 'Start and end date/time are required.';
+    const start = new Date(startsAt);
+    const end = new Date(endsAt);
+    const now = new Date();
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 'Enter valid start and end date/times.';
+    if (start < now) return 'Start date/time cannot be in the past.';
+    if (end < now) return 'End date/time cannot be in the past.';
+    if (end <= start) return 'End date/time must be after the start date/time.';
+    return '';
+  }
+
   // ── Add Announcement ────────────────────────────────────────────────────
   const submitBtn = document.getElementById('submitFullAnnBtn');
 
@@ -13,12 +25,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const body     = document.getElementById('fullAnnBody').value.trim();
     const priority = document.querySelector('input[name="fullAnnPriority"]:checked')?.value ?? 'medium';
     const pinned   = document.getElementById('fullAnnPinned').checked ? '1' : '0';
+    const audience = document.getElementById('fullAnnAudience').value;
+    const startsAt = document.getElementById('fullAnnStartsAt').value;
+    const endsAt   = document.getElementById('fullAnnEndsAt').value;
     const errEl    = document.getElementById('fullAnnError');
 
     errEl.classList.add('d-none');
 
     if (!title || !body) {
       errEl.textContent = 'Title and message are required.';
+      errEl.classList.remove('d-none');
+      return;
+    }
+    const windowError = validateWindow(startsAt, endsAt);
+    if (windowError) {
+      errEl.textContent = windowError;
       errEl.classList.remove('d-none');
       return;
     }
@@ -30,6 +51,9 @@ document.addEventListener('DOMContentLoaded', () => {
     fd.append('body',      body);
     fd.append('priority',  priority);
     fd.append('is_pinned', pinned);
+    fd.append('audience',  audience);
+    fd.append('starts_at', startsAt);
+    fd.append('ends_at',   endsAt);
     fd.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
 
     try {
@@ -60,12 +84,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const body     = document.getElementById('editAnnBody').value.trim();
     const priority = document.querySelector('input[name="editAnnPriority"]:checked')?.value ?? 'medium';
     const pinned   = document.getElementById('editAnnPinned').checked ? '1' : '0';
+    const audience = document.getElementById('editAnnAudience').value;
+    const startsAt = document.getElementById('editAnnStartsAt').value;
+    const endsAt   = document.getElementById('editAnnEndsAt').value;
     const errEl    = document.getElementById('editAnnError');
 
     errEl.classList.add('d-none');
 
     if (!title || !body) {
       errEl.textContent = 'Title and message are required.';
+      errEl.classList.remove('d-none');
+      return;
+    }
+    const windowError = validateWindow(startsAt, endsAt);
+    if (windowError) {
+      errEl.textContent = windowError;
       errEl.classList.remove('d-none');
       return;
     }
@@ -78,6 +111,9 @@ document.addEventListener('DOMContentLoaded', () => {
     fd.append('body',            body);
     fd.append('priority',        priority);
     fd.append('is_pinned',       pinned);
+    fd.append('audience',        audience);
+    fd.append('starts_at',       startsAt);
+    fd.append('ends_at',         endsAt);
     fd.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
 
     try {
@@ -97,11 +133,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  window.openEditAnnouncement = function (id, title, body, isPinned, priority) {
+  window.openEditAnnouncement = function (id, title, body, isPinned, priority, audience, startsAt, endsAt) {
     document.getElementById('editAnnId').value      = id;
     document.getElementById('editAnnTitle').value    = title;
     document.getElementById('editAnnBody').value     = body;
     document.getElementById('editAnnPinned').checked = !!isPinned;
+    document.getElementById('editAnnAudience').value  = audience || 'all';
+    document.getElementById('editAnnStartsAt').value  = startsAt || '';
+    document.getElementById('editAnnEndsAt').value    = endsAt || '';
 
     const priorityVal = priority || 'medium';
     const radio = document.querySelector(`input[name="editAnnPriority"][value="${priorityVal}"]`);

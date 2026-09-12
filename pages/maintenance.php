@@ -111,7 +111,8 @@ $checklists = $pdo->query($checklistSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Dropdowns for forms ───────────────────────────────────────────────────────
 $trucks = $pdo->query("
-    SELECT truck_id, plate_number, brand, model, COALESCE(body_type, 'Closed Van') AS body_type
+    SELECT truck_id, plate_number, brand, model, truck_image_name,
+           COALESCE(body_type, 'Closed Van') AS body_type
     FROM trucks
     WHERE status != 'Inactive'
     ORDER BY plate_number
@@ -264,7 +265,9 @@ $checklistItems = [
                 <select id="inspectionTruck" class="form-select mnt-input" required>
                   <option value="">— Select vehicle —</option>
                   <?php foreach ($trucks as $truck): ?>
-                  <option value="<?= $truck['truck_id'] ?>" data-body="<?= htmlspecialchars($truck['body_type']) ?>">
+                  <option value="<?= $truck['truck_id'] ?>"
+                          data-body="<?= htmlspecialchars($truck['body_type']) ?>"
+                          data-image="<?= htmlspecialchars($truck['truck_image_name'] ? APP_BASE . '/uploads/trucks/' . rawurlencode($truck['truck_image_name']) : '', ENT_QUOTES) ?>">
                     <?= htmlspecialchars($truck['plate_number'] . ' — ' . $truck['brand'] . ' ' . $truck['model']) ?>
                   </option>
                   <?php endforeach; ?>
@@ -278,10 +281,18 @@ $checklistItems = [
               <div class="col-lg-8">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <div class="btn-group" role="group" aria-label="Vehicle view">
-                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view active" data-view="Front">Front</button>
-                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Side">Side</button>
-                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Rear">Rear</button>
-                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Top">Top</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view active" data-view="Front" aria-pressed="true">
+                      <i class="bi bi-truck-front me-1"></i>Front View
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Side" aria-pressed="false">
+                      <i class="bi bi-truck me-1"></i>Side View
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Rear" aria-pressed="false">
+                      <i class="bi bi-truck-rear me-1"></i>Rear View
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Top" aria-pressed="false">
+                      <i class="bi bi-bounding-box me-1"></i>Top View
+                    </button>
                   </div>
                   <span class="small text-muted" id="inspectionBodyLabel">Closed Van</span>
                 </div>
@@ -416,7 +427,7 @@ $checklistItems = [
                           'inspected_by' => $inspection['inspected_by'] ?? '',
                           'findings' => $findingsByInspection[(int)$rec['inspection_id']],
                         ]), ENT_QUOTES, 'UTF-8') ?>">
-                  View findings
+                  <i class="bi bi-eye me-1"></i>View inspection
                 </button>
                 <?php else: ?><span class="text-muted">—</span><?php endif; ?>
               </td>

@@ -597,7 +597,7 @@ $alertCount  = count($alerts);
             <label class="form-label usr-label" for="aeDateHired">
               Date Hired <span class="text-danger d-none" id="aeDateHiredReq">*</span>
             </label>
-            <input type="date" class="form-control usr-input" id="aeDateHired" min="<?= date('Y-m-d') ?>" max="<?= date('Y-m-d') ?>">
+            <input type="date" class="form-control usr-input" id="aeDateHired" max="<?= date('Y-m-d') ?>">
           </div>
         </div>
       </div>

@@ -207,20 +207,18 @@ function validateEmpFields(array $f, bool $allowPassedDates = false): ?string {
 
     if ($f['license_expiry'] && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f['license_expiry']))
         return 'Invalid license expiry date.';
-    if ($f['date_hired'] && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f['date_hired']))
+    if ($f['date_hired'] && !isValidDate($f['date_hired']))
         return 'Invalid date hired.';
     if ($f['date_hired'] && $f['date_hired'] > date('Y-m-d'))
         return 'Hire date cannot be in the future.';
     if (!$allowPassedDates && $f['license_expiry'] && isPassedDate($f['license_expiry']))
         return 'New employees cannot use a passed license expiry date.';
-    if (!$allowPassedDates && $f['date_hired'] && isPassedDate($f['date_hired']))
-        return 'New employees cannot use a passed hire date.';
     return null;
 }
 
 function duplicateEmployeeExists(PDO $pdo, array $f, ?int $selfId = null): bool {
-    $fullName = trim((string)($f['full_name'] ?? ''));
-    $contact  = trim((string)($f['contact_number'] ?? ''));
+    $fullName = preg_replace('/\s+/', ' ', trim((string)($f['full_name'] ?? '')));
+    $contact  = preg_replace('/\s+/', ' ', trim((string)($f['contact_number'] ?? '')));
 
     if ($fullName === '' || $contact === '') {
         return false;

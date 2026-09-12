@@ -350,7 +350,9 @@
     const shape = bodyParts[configuredBody];
     inspectionBodyLabel.textContent = body;
     inspectionDiagram.className = `inspection-diagram ${shape[view] || ''}`;
-    const imageUrl = inspectionImageMap[body]?.[view] || '';
+    const imageUrl = inspectionImageMap[body]?.[view]
+      || inspectionTruck?.selectedOptions[0]?.dataset.image
+      || '';
     inspectionDiagram.innerHTML = imageUrl
       ? `<img class="inspection-custom-image" src="${imageUrl}" alt="${body} ${view} view">`
       : vehicleIllustration(view, body);
@@ -371,7 +373,10 @@
         condition: card.querySelector('.inspection-condition').value,
         notes: card.querySelector('.inspection-part-notes').value.trim(),
       });
-      card.querySelector('.inspection-part-btn').addEventListener('click', () => card.classList.toggle('selected'));
+      card.querySelector('.inspection-part-btn').addEventListener('click', () => {
+        save();
+        card.classList.toggle('selected');
+      });
       card.querySelector('.inspection-condition').addEventListener('change', save);
       card.querySelector('.inspection-part-notes').addEventListener('input', save);
     });
@@ -380,6 +385,9 @@
   document.querySelectorAll('.inspection-view').forEach(button => button.addEventListener('click', () => {
     document.querySelectorAll('.inspection-view').forEach(item => item.classList.remove('active'));
     button.classList.add('active');
+    document.querySelectorAll('.inspection-view').forEach(item => {
+      item.setAttribute('aria-pressed', item === button ? 'true' : 'false');
+    });
     renderInspection();
   }));
   document.getElementById('inspectionModal')?.addEventListener('show.bs.modal', renderInspection);
@@ -394,6 +402,10 @@
       const separator = key.indexOf(':');
       findings.push({ view: key.slice(0, separator), part: key.slice(separator + 1), ...finding });
     });
+    if (!findings.length) {
+      showAlert(inspectionAlert, 'Select or update at least one inspection part before saving.');
+      return;
+    }
     postAjax({
       action: 'save_inspection',
       truck_id: inspectionTruck.value,

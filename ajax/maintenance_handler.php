@@ -36,6 +36,15 @@ if ($action === 'log_record') {
     // Verify truck exists
     findOrFail($pdo, 'trucks', 'truck_id', $truckId, 'Truck not found.');
 
+    // Verify any linked records belong to this truck.
+    if ($inspectionId) {
+        $inspectionCheck = $pdo->prepare("SELECT inspection_id FROM vehicle_inspections WHERE inspection_id = ? AND truck_id = ?");
+        $inspectionCheck->execute([$inspectionId, $truckId]);
+        if (!$inspectionCheck->fetch()) {
+            jsonFail('Inspection does not belong to the selected truck.');
+        }
+    }
+
     // Verify incident belongs to this truck if provided
     if ($incidentId) {
         $incCheck = $pdo->prepare("
@@ -49,13 +58,6 @@ if ($action === 'log_record') {
             jsonFail('Incident does not belong to the selected truck.');
         }
 
-        if ($inspectionId) {
-            $inspectionCheck = $pdo->prepare("SELECT inspection_id FROM vehicle_inspections WHERE inspection_id = ? AND truck_id = ?");
-            $inspectionCheck->execute([$inspectionId, $truckId]);
-            if (!$inspectionCheck->fetch()) {
-                jsonFail('Inspection does not belong to the selected truck.');
-            }
-        }
     }
 
     try {
@@ -118,7 +120,7 @@ if ($action === 'save_inspection') {
     $notes    = optionalString('notes');
     $findings = json_decode($_POST['findings'] ?? '[]', true);
 
-    if (!is_array($findings)) {
+    if (!is_array($findings) || !$findings) {
         jsonFail('Valid inspection findings are required.');
     }
 
@@ -134,6 +136,9 @@ if ($action === 'save_inspection') {
             VALUES (?, ?, ?, ?, ?)
         ");
         foreach ($findings as $finding) {
+            if (!is_array($finding)) {
+                throw new InvalidArgumentException('Invalid inspection finding.');
+            }
             $view = $finding['view'] ?? '';
             $part = trim($finding['part'] ?? '');
             $condition = $finding['condition'] ?? 'Not Checked';

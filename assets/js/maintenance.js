@@ -282,8 +282,11 @@
   const inspectionParts = document.getElementById('inspectionParts');
   const inspectionAlert = document.getElementById('inspectionFormAlert');
   const inspectionBodyLabel = document.getElementById('inspectionBodyLabel');
+  const customInspectionPart = document.getElementById('customInspectionPart');
+  const addInspectionPartBtn = document.getElementById('addInspectionPartBtn');
   const inspectionImageMap = JSON.parse(inspectionDiagram?.dataset.imageMap || '{}');
   const inspectionState = new Map();
+  const customPartsByView = { Front: [], Side: [], Rear: [], Top: [] };
   const inspectionConditions = ['Not Checked', 'Good', 'Needs Attention', 'Damaged', 'Missing', 'Leaking', 'Worn'];
   const inspectionPartsByView = {
     Front: ['Windshield', 'Left Headlight', 'Right Headlight', 'Front Bumper', 'Left Front Tire', 'Right Front Tire'],
@@ -300,6 +303,11 @@
   };
 
   function inspectionKey(view, part) { return `${view}:${part}`; }
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, character => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;',
+    }[character]));
+  }
   function vehicleIllustration(view, body) {
     const cargo = body === 'Flatbed'
       ? '<rect x="360" y="145" width="300" height="82" rx="8" class="vector-deck"/><path d="M370 145h280" class="vector-rail"/>'
@@ -358,10 +366,12 @@
     inspectionDiagram.innerHTML = imageUrl
       ? `<img class="inspection-custom-image" src="${imageUrl}" alt="${body} ${view} view">`
       : vehicleIllustration(view, body);
-    inspectionParts.innerHTML = inspectionPartsByView[view].map(part => {
+    const parts = [...inspectionPartsByView[view], ...customPartsByView[view]];
+    inspectionParts.innerHTML = parts.map(part => {
       const state = inspectionState.get(inspectionKey(view, part)) || { condition: 'Not Checked', notes: '' };
-      return `<div class="inspection-part-card" data-part="${part}">
-        <button type="button" class="inspection-part-btn"><i class="bi bi-geo-alt me-1"></i>${part}</button>
+      const safePart = escapeHtml(part);
+      return `<div class="inspection-part-card" data-part="${safePart}">
+        <button type="button" class="inspection-part-btn"><i class="bi bi-clipboard-check me-1"></i>${safePart}</button>
         <select class="form-select form-select-sm inspection-condition">
           ${inspectionConditions.map(value => `<option ${value === state.condition ? 'selected' : ''}>${value}</option>`).join('')}
         </select>
@@ -383,6 +393,31 @@
       card.querySelector('.inspection-part-notes').addEventListener('input', save);
     });
   }
+  addInspectionPartBtn?.addEventListener('click', () => {
+    const view = document.querySelector('.inspection-view.active')?.dataset.view || 'Front';
+    const part = customInspectionPart?.value.trim() || '';
+    if (!part) {
+      showAlert(inspectionAlert, 'Enter a part name before adding it.');
+      customInspectionPart?.focus();
+      return;
+    }
+    if ([...inspectionPartsByView[view], ...customPartsByView[view]]
+      .some(existing => existing.toLowerCase() === part.toLowerCase())) {
+      showAlert(inspectionAlert, 'That part is already listed for this view.');
+      customInspectionPart?.focus();
+      return;
+    }
+    customPartsByView[view].push(part);
+    if (customInspectionPart) customInspectionPart.value = '';
+    hideAlert(inspectionAlert);
+    renderInspection();
+  });
+  customInspectionPart?.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      addInspectionPartBtn?.click();
+    }
+  });
   inspectionTruck?.addEventListener('change', renderInspection);
   document.querySelectorAll('.inspection-view').forEach(button => button.addEventListener('click', () => {
     document.querySelectorAll('.inspection-view').forEach(item => item.classList.remove('active'));

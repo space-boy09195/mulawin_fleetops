@@ -212,7 +212,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const rrMapPreview = wireMapPreview('rr', rrOrigin, rrDestination);
 
   routeRequestModal?.addEventListener('hidden.bs.modal', () => {
-    ['rr_name', 'rr_origin', 'rr_destination', 'rr_distance', 'rr_notes'].forEach(id => {
+    const fields = ['rr_name', 'rr_origin', 'rr_destination', 'rr_distance', 'rr_notes'];
+    fields.forEach(id => {
       const field = document.getElementById(id);
       if (field) field.value = '';
     });
@@ -220,8 +221,7 @@ document.addEventListener('DOMContentLoaded', () => {
     rrMapPreview.reset();
   });
 
-  document.getElementById('submitRouteRequestBtn')?.addEventListener('click', async event => {
-    event.preventDefault();
+  document.getElementById('submitRouteRequestBtn')?.addEventListener('click', async () => {
     const alertEl = document.getElementById('routeRequestAlert');
     const name = document.getElementById('rr_name')?.value.trim() ?? '';
     const origin = document.getElementById('rr_origin')?.value.trim() ?? '';
@@ -249,8 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (submitButton) submitButton.disabled = true;
     try {
       const result = await postAjax(ROUTE_REQUEST_URL, {
-        action: 'request', route_name: name, origin, destination,
-        distance_km: distance, request_notes: notes
+        action: 'request', route_name: name, origin, destination, distance_km: distance, request_notes: notes
       });
       if (result.success) window.location.reload();
       else showAlert(alertEl, result.message || 'Could not submit route request.');

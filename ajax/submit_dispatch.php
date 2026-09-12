@@ -20,6 +20,7 @@ $truckId     = requiredInt('truck_id', 'Truck', 1);
 $routeId     = requiredInt('route_id', 'Route', 1);
 $driverId    = requiredInt('driver_id', 'Driver', 1);
 $helperId    = filter_input(INPUT_POST, 'helper_id', FILTER_VALIDATE_INT) ?: null;
+$clientName  = requiredString('client_name', 'Client', 150);
 $scheduledAt = requiredString('scheduled_at', 'Scheduled date/time');
 $remarks     = optionalString('remarks');
 
@@ -32,6 +33,28 @@ if (strtotime($scheduledAt) < time()) {
 }
 
 $pdo = getDBConnection();
+
+$clientStmt = $pdo->prepare('SELECT client_id FROM clients WHERE client_name = ? AND is_active = 1');
+$clientStmt->execute([$clientName]);
+if (!$clientStmt->fetchColumn()) {
+    jsonFail('Select a registered active client.');
+}
+
+$driverStmt = $pdo->prepare("SELECT full_name FROM employees WHERE employee_id = ? AND is_active = 1 AND license_number IS NOT NULL");
+$driverStmt->execute([$driverId]);
+if (!$driverStmt->fetchColumn()) {
+    jsonFail('The selected driver is not active or does not have a valid license.');
+}
+if ($helperId !== null) {
+    $helperStmt = $pdo->prepare("SELECT full_name FROM employees WHERE employee_id = ? AND is_active = 1");
+    $helperStmt->execute([$helperId]);
+    if (!$helperStmt->fetchColumn()) {
+        jsonFail('The selected helper is not active.');
+    }
+    if ($helperId === $driverId) {
+        jsonFail('Driver and helper must be different employees.');
+    }
+}
 
 // A driver/helper may be scheduled again only after the current trip is done,
 // and never twice on the same calendar day.
@@ -81,14 +104,15 @@ $pdo->beginTransaction();
 try {
     $stmt = $pdo->prepare(
         "INSERT INTO dispatch_requests
-           (truck_id, driver_id, helper_id, route_id, requested_by, approved_by, scheduled_at, status, remarks, reviewed_at)
+           (truck_id, driver_id, helper_id, route_id, requested_by, approved_by, scheduled_at, status, remarks, client_name, reviewed_at)
          VALUES
-           (:truck, :driver, :helper, :route, :user, :user, :scheduled, 'Approved', :remarks, NOW())"
+           (:truck, :driver, :helper, :route, :user, :user, :scheduled, 'Approved', :remarks, :client_name, NOW())"
     );
     $stmt->execute([
         ':truck' => $truckId, ':driver' => $driverId, ':helper' => $helperId,
         ':route' => $routeId, ':user' => currentUserId(),
         ':scheduled' => $scheduledAt, ':remarks' => $remarks,
+        ':client_name' => $clientName,
     ]);
     $newId = (int)$pdo->lastInsertId();
     $year = date('Y');

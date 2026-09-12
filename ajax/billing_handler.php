@@ -14,13 +14,19 @@ requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
+
+$clientStmt = $pdo->prepare('SELECT client_id FROM clients WHERE client_name = ? AND is_active = 1');
+$clientStmt->execute([$clientName]);
+if (!$clientStmt->fetchColumn()) {
+    jsonFail('Select a registered active client.');
+}
 $action = $_POST['action'] ?? '';
 
 // ── Create billing ────────────────────────────────────────────────────────────
 if ($action === 'create_billing') {
 
     $tripId        = requiredInt('trip_id', 'Trip', 1);
-    $clientName    = optionalString('client_name');
+    $clientName    = requiredString('client_name', 'Client', 150);
     $amount        = requiredPositiveFloat('amount', 'Amount');
     $dueDate       = requiredDate('due_date', 'Due date', true);
     $billingNumber = requiredString('billing_number', 'Billing number', 100);

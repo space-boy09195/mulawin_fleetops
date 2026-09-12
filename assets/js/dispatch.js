@@ -18,7 +18,14 @@ document.addEventListener('DOMContentLoaded', () => {
       method:  'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body:    new URLSearchParams({ ...data, [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN }),
-    }).then(r => r.json());
+    }).then(async response => {
+      const text = await response.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw new Error(`Server returned HTTP ${response.status} instead of JSON.`);
+      }
+    });
   }
 
   function postForm(url, formData) {
@@ -87,25 +94,54 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Driver → Helper exclusion ────────────────────────────────────────────────
   const driverSel = document.getElementById('d_driver');
   const helperSel = document.getElementById('d_helper');
+  const routeInput = document.getElementById('d_route');
+  const routeIdInput = document.getElementById('d_route_id');
+  const driverIdInput = document.getElementById('d_driver_id');
+  const helperIdInput = document.getElementById('d_helper_id');
 
-  function syncHelperOptions() {
-    if (!driverSel || !helperSel) return;
-    const selectedDriverId = driverSel.value;
-
-    Array.from(helperSel.options).forEach(opt => {
-      if (opt.value === '') return; // keep "— None —"
-      opt.hidden   = opt.value === selectedDriverId;
-      opt.disabled = opt.value === selectedDriverId;
-    });
-
-    // If current helper selection is now the driver, reset helper
-    if (helperSel.value === selectedDriverId) {
-      helperSel.value = '';
-    }
+  function syncDatalistId(input, hiddenInput, listId) {
+    if (!input || !hiddenInput) return;
+    const value = input.value.trim();
+    const option = Array.from(document.querySelectorAll(`#${listId} option`))
+      .find(item => item.value === value);
+    hiddenInput.value = option?.dataset.id ?? '';
   }
 
-  driverSel?.addEventListener('change', syncHelperOptions);
-  syncHelperOptions(); // run on load in case of pre-selection
+  routeInput?.addEventListener('input', () => syncDatalistId(routeInput, routeIdInput, 'approvedRoutesList'));
+  driverSel?.addEventListener('input', () => syncDatalistId(driverSel, driverIdInput, 'activeDriversList'));
+  helperSel?.addEventListener('input', () => syncDatalistId(helperSel, helperIdInput, 'activeHelpersList'));
+
+  function syncHelperOptions() {
+    if (!driverIdInput || !helperIdInput) return;
+    if (helperIdInput.value === driverIdInput.value) {
+      helperSel.value = '';
+      helperIdInput.value = '';
+    }
+  }
+  helperSel?.addEventListener('input', syncHelperOptions);
+
+  function clearDispatchFields() {
+    if (routeInput) routeInput.value = '';
+    if (routeIdInput) routeIdInput.value = '';
+    if (driverSel) driverSel.value = '';
+    if (driverIdInput) driverIdInput.value = '';
+    if (helperSel) helperSel.value = '';
+    if (helperIdInput) helperIdInput.value = '';
+    const client = document.getElementById('d_client');
+    if (client) client.value = '';
+    const route = document.getElementById('d_route');
+    const truck = document.getElementById('d_truck');
+    const scheduled = document.getElementById('d_scheduled');
+    const remarks = document.getElementById('d_remarks');
+    if (route) route.value = '';
+    if (truck) truck.value = '';
+    if (scheduled) scheduled.value = '';
+    if (remarks) remarks.value = '';
+    if (helperIdInput.value === driverIdInput.value) {
+      helperSel.value = '';
+      helperIdInput.value = '';
+    }
+  }
 
   // ── Submit new dispatch request ──────────────────────────────────────────────
   const submitDispatchBtn = document.getElementById('submitDispatchBtn');
@@ -114,33 +150,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
   newDispatchModal?.addEventListener('hidden.bs.modal', () => {
     hideAlert(dispatchFormError);
-    if (driverSel)  driverSel.value  = '';
-    if (helperSel)  helperSel.value  = '';
-    const route     = document.getElementById('d_route');
-    const truck     = document.getElementById('d_truck');
-    const scheduled = document.getElementById('d_scheduled');
-    const remarks   = document.getElementById('d_remarks');
-    if (route)     route.value     = '';
-    if (truck)     truck.value     = '';
-    if (scheduled) scheduled.value = '';
-    if (remarks)   remarks.value   = '';
-    syncHelperOptions();
+    clearDispatchFields();
   });
 
   submitDispatchBtn?.addEventListener('click', async () => {
     hideAlert(dispatchFormError);
 
     const truck     = document.getElementById('d_truck')?.value      ?? '';
-    const route     = document.getElementById('d_route')?.value      ?? '';
-    const driver    = driverSel?.value                               ?? '';
-    const helper    = helperSel?.value                               ?? '';
+    const route     = routeIdInput?.value                            ?? '';
+    const driver    = driverIdInput?.value                           ?? '';
+    const helper    = helperIdInput?.value                           ?? '';
+    const client    = document.getElementById('d_client')?.value.trim() ?? '';
     const scheduled = document.getElementById('d_scheduled')?.value  ?? '';
     const remarks   = document.getElementById('d_remarks')?.value.trim() ?? '';
 
-    if (!truck || !route || !driver || !scheduled) {
-      showAlert(dispatchFormError, 'Please fill in all required fields (Truck, Route, Driver, Scheduled Departure).');
+    if (!truck || !route || !driver || !scheduled || !client) {
+      showAlert(dispatchFormError, 'Please choose a registered client, approved route, active driver, truck, and scheduled departure.');
       return;
     }
+    if (client.length > 150) {
+      showAlert(dispatchFormError, 'Client name must be 150 characters or fewer.');
+      return;
+    }
+    if (helper && helper === driver) {
+      showAlert(dispatchFormError, 'Driver and helper must be different employees.');
+      return;
+    }
+    if (!window.confirm('Confirm and submit this dispatch request?')) return;
 
     const btnText    = document.getElementById('dispatchBtnText');
     const btnSpinner = document.getElementById('dispatchBtnSpinner');
@@ -154,6 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
       fd.append('helper_id',    helper);
       fd.append('scheduled_at', scheduled);
       fd.append('remarks',      remarks);
+      fd.append('client_name',  client);
 
       const result = await postForm(DISPATCH_URL, fd);
 
@@ -195,14 +232,31 @@ document.addEventListener('DOMContentLoaded', () => {
       showAlert(alertEl, 'Route name, origin, and destination are required.');
       return;
     }
+    if (name.length > 150 || origin.length > 150 || destination.length > 150) {
+      showAlert(alertEl, 'Route name, origin, and destination must be 150 characters or fewer.');
+      return;
+    }
+    const distanceValue = distance === '' ? null : Number(distance);
+    if (distanceValue !== null && (!Number.isFinite(distanceValue) || distanceValue < 0 || distanceValue > 100000)) {
+      showAlert(alertEl, 'Distance must be a valid number between 0 and 100,000 km.');
+      return;
+    }
+    const confirmed = window.confirm(
+      `Submit route request "${name}" from "${origin}" to "${destination}" to Head Management?`
+    );
+    if (!confirmed) return;
+    const submitButton = document.getElementById('submitRouteRequestBtn');
+    if (submitButton) submitButton.disabled = true;
     try {
       const result = await postAjax(ROUTE_REQUEST_URL, {
         action: 'request', route_name: name, origin, destination, distance_km: distance, request_notes: notes
       });
       if (result.success) window.location.reload();
       else showAlert(alertEl, result.message || 'Could not submit route request.');
-    } catch {
-      showAlert(alertEl, 'Network error. Please try again.');
+    } catch (error) {
+      showAlert(alertEl, error.message || 'Network error. Please try again.');
+    } finally {
+      if (submitButton) submitButton.disabled = false;
     }
   });
 

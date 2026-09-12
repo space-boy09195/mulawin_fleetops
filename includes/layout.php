@@ -30,6 +30,7 @@ function getNavItems(): array {
         ['label' => 'Fleet Status',        'href' => '/pages/fleet_status.php', 'icon' => 'bi-truck',               'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE]],
         ['label' => 'Trip Monitoring',     'href' => '/pages/trip_monitor.php', 'icon' => 'bi-map',                 'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
         ['label' => 'Dispatch',            'href' => '/pages/dispatch.php',     'icon' => 'bi-send',                'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
+        ['label' => 'Requests',            'href' => '/pages/requests.php',     'icon' => 'bi-inbox',               'roles' => [ROLE_HEAD_MANAGEMENT]],
         ['label' => 'Incidents',           'href' => '/pages/incidents.php',    'icon' => 'bi-exclamation-triangle','roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
         ['section' => 'Maintenance'],
         //['label' => 'Checklists',          'href' => '/pages/checklists.php',   'icon' => 'bi-clipboard-check',     'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]],
@@ -37,6 +38,7 @@ function getNavItems(): array {
         ['label' => 'Parts Inventory',     'href' => '/pages/parts.php',        'icon' => 'bi-box-seam',            'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]],
         ['section' => 'Accounting'],
         ['label' => 'Billing',             'href' => '/pages/billing.php',      'icon' => 'bi-receipt',             'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
+        ['label' => 'Clients',             'href' => '/pages/clients.php',      'icon' => 'bi-person-vcard',         'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
         ['label' => 'Trip Costs',           'href' => '/pages/trip_costs.php',    'icon' => 'bi-fuel-pump',            'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
         //['label' => 'Collections',         'href' => '/pages/collections.php',  'icon' => 'bi-cash-stack',          'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
         ['section' => 'Repository'],
@@ -476,7 +478,12 @@ function layoutFoot(): void {
     $base        = APP_BASE;
     $extraScript = '';
     if (!empty($GLOBALS['page_js'])) {
-        $extraScript = '<script src="' . $GLOBALS['page_js'] . '"></script>';
+        $scriptUrlPath = parse_url($GLOBALS['page_js'], PHP_URL_PATH);
+        $scriptRelativePath = ltrim(str_replace(rtrim(APP_BASE, '/') . '/', '', $scriptUrlPath), '/');
+        $scriptPath = __DIR__ . '/../' . $scriptRelativePath;
+        $scriptVersion = is_file($scriptPath) ? (string)filemtime($scriptPath) : (string)time();
+        $extraScript = '<script src="' . htmlspecialchars($GLOBALS['page_js'], ENT_QUOTES)
+            . '?v=' . $scriptVersion . '"></script>';
     }
     echo <<<HTML
 

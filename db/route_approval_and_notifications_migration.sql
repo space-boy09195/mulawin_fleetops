@@ -3,6 +3,7 @@ ALTER TABLE routes
     NOT NULL DEFAULT 'Approved'
     AFTER is_active,
   ADD COLUMN requested_by INT UNSIGNED NULL AFTER approval_status,
+  ADD COLUMN request_notes VARCHAR(500) NULL AFTER requested_by,
   ADD INDEX idx_routes_approval (approval_status),
   ADD CONSTRAINT fk_routes_requested_by
     FOREIGN KEY (requested_by) REFERENCES users (user_id) ON DELETE SET NULL;

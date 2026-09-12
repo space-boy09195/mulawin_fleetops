@@ -60,7 +60,7 @@ $routes = $pdo->query("
 // ── All routes for management tab ─────────────────────────────────────────────
 $allRoutes = $pdo->query("
     SELECT route_id, route_name, origin, destination,
-           distance_km, is_active, approval_status
+           distance_km, is_active, approval_status, request_notes
     FROM routes ORDER BY route_name
 ")->fetchAll();
 
@@ -328,6 +328,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
               <th>Origin</th>
               <th>Destination</th>
               <th>Distance</th>
+              <th>Requester Note</th>
               <th>Status</th>
               <th>Map</th>
               <?php if ($isHead): ?>
@@ -344,6 +345,11 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
               <td>
                 <?= $rt['distance_km']
                   ? number_format($rt['distance_km'], 1) . ' km'
+                  : '<span class="text-muted">—</span>' ?>
+              </td>
+              <td class="small">
+                <?= !empty($rt['request_notes'])
+                  ? htmlspecialchars($rt['request_notes'])
                   : '<span class="text-muted">—</span>' ?>
               </td>
               <td>
@@ -497,7 +503,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
 
 <?php if ($isDispatcher): ?>
 <div class="modal fade" id="routeRequestModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content disp-modal">
       <div class="modal-header disp-modal-header-blue">
         <h5 class="modal-title"><i class="bi bi-signpost-2 me-2"></i>New Route Request</h5>
@@ -509,6 +515,38 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
         <input class="form-control disp-input mb-2" id="rr_origin" placeholder="Origin" required>
         <input class="form-control disp-input mb-2" id="rr_destination" placeholder="Destination" required>
         <input type="number" min="0" step="0.1" class="form-control disp-input" id="rr_distance" placeholder="Distance (km, optional)">
+        <label class="disp-label mt-2" for="rr_notes">Side note <span class="text-muted">(optional)</span></label>
+        <textarea class="form-control disp-input mb-3" id="rr_notes" rows="2" maxlength="500"
+                  placeholder="Add context or special instructions for Head Management"></textarea>
+        <div class="row g-2">
+          <div class="col-md-6">
+            <div class="route-map-wrap">
+              <div class="route-map-placeholder" id="rr_origin_map_placeholder">
+                <i class="bi bi-geo-alt"></i><span>Origin preview</span>
+              </div>
+              <iframe class="route-map-frame d-none" id="rr_origin_map"
+                      title="Origin map preview" loading="lazy"></iframe>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="route-map-wrap">
+              <div class="route-map-placeholder" id="rr_destination_map_placeholder">
+                <i class="bi bi-geo-alt-fill"></i><span>Destination preview</span>
+              </div>
+              <iframe class="route-map-frame d-none" id="rr_destination_map"
+                      title="Destination map preview" loading="lazy"></iframe>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="route-map-wrap route-map-wrap-lg">
+              <div class="route-map-placeholder" id="rr_route_map_placeholder">
+                <i class="bi bi-map"></i><span>Route preview</span>
+              </div>
+              <iframe class="route-map-frame d-none" id="rr_route_map"
+                      title="Route map preview" loading="lazy"></iframe>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="modal-footer disp-modal-footer">
         <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>

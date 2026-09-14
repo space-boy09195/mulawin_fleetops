@@ -34,7 +34,6 @@ try {
     <h1 class="page-title">Automation</h1>
     <p class="page-subtitle">    Control isolated, read-only notification jobs without changing normal FleetOps workflows.</p>
   </div>
-
   <?php if (!$migrationReady): ?>
   <div class="alert alert-warning" role="alert">
     <strong>Automation controls are not installed yet.</strong>
@@ -105,3 +104,4 @@ try {
   </div>
   <?php endif; ?>
 </div>
+<?php layoutFoot(); ?>

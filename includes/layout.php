@@ -291,22 +291,31 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
 
     <!-- Nav -->
     <nav class="sidebar-nav">
+      <a href="{$homeUrl}" class="sidebar-home-nav">
+        <i class="bi bi-house-fill nav-icon"></i>
+        <span class="nav-label">Home</span>
+      </a>
       {$navHtml}
     </nav>
 
-    <!-- Footer: theme toggle + user -->
+    <!-- Footer: user + theme toggle + logout -->
     <div class="sidebar-footer">
-      <button class="theme-toggle-btn" id="themeToggleBtn" type="button">
-        <i class="bi bi-moon-fill toggle-icon" id="themeIcon"></i>
-        <span class="theme-toggle-label" id="themeLabel">Dark Mode</span>
-      </button>
-      <div class="sidebar-user mt-2">
+      <div class="sidebar-user">
         <div class="sidebar-avatar">{$initials}</div>
         <div class="sidebar-user-info">
           <div class="sidebar-user-name">{$fullName}</div>
           <div class="sidebar-user-role">{$roleName}</div>
         </div>
       </div>
+      <button class="theme-toggle-btn mt-2" id="themeToggleBtn" type="button">
+        <i class="bi bi-moon-fill toggle-icon" id="themeIcon"></i>
+        <span class="theme-toggle-label" id="themeLabel">Dark Mode</span>
+      </button>
+      <a href="{$logoutUrl}" class="logout-btn sidebar-logout-btn mt-2"
+         onclick="return confirm('Log out of Mulawin FleetOps?')">
+        <i class="bi bi-box-arrow-right"></i>
+        <span>Log Out</span>
+      </a>
     </div>
 
   </aside>
@@ -339,12 +348,6 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
           <span class="notif-badge {$badgeClass}" id="notifBadge">{$unreadCount}</span>
         </button>
 
-        <!-- Logout -->
-        <a href="{$logoutUrl}" class="logout-btn"
-           onclick="return confirm('Log out of Mulawin FleetOps?')">
-          <i class="bi bi-box-arrow-right"></i>
-          <span>Log Out</span>
-        </a>
       </div>
     </header>
 

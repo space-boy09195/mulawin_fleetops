@@ -4,6 +4,13 @@
   margin: 0 auto;
 }
 
+.automation-page > .page-header {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
 .automation-card {
   display: flex;
   align-items: center;

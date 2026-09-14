@@ -8,25 +8,6 @@
   margin: 0 auto;
 }
 
-.rb-header {
-  border-bottom: 1px solid var(--bs-border-color);
-  padding-bottom: 1.1rem;
-  margin-bottom: 1.5rem;
-}
-
-.rb-title {
-  font-size: 1.45rem;
-  font-weight: 700;
-  color: var(--bs-emphasis-color);
-  letter-spacing: -0.01em;
-}
-
-.rb-subtitle {
-  font-size: 0.85rem;
-  color: var(--bs-secondary-color);
-  margin-top: 2px;
-}
-
 /* ── Empty state ─────────────────────────────── */
 .rb-empty {
   display: flex;
@@ -56,31 +37,9 @@
   overflow: hidden;
 }
 
-.rb-table { margin-bottom: 0; font-size: 0.85rem; }
-.rb-table thead th {
-  background: var(--bs-tertiary-bg);
-  font-weight: 600;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--bs-secondary-color);
-  border-bottom: 1px solid var(--bs-border-color);
-  padding: 0.75rem 1rem;
-  white-space: nowrap;
-}
-.rb-table tbody td {
-  padding: 0.8rem 1rem;
-  vertical-align: middle;
-  border-bottom: 1px solid var(--bs-border-color);
-  color: var(--bs-body-color);
-}
-.rb-table tbody tr:last-child td { 
-  border-bottom: none; 
-}
-
-.rb-table tbody tr:hover { 
-  background: var(--bs-tertiary-bg); 
-}
+.rb-table { margin-bottom: 0; font-size: 0.9rem; }
+.rb-table thead th { white-space: nowrap; }
+.rb-table tbody td { color: var(--text-primary); }
 
 .rb-type-badge {
   display: inline-flex;
@@ -97,7 +56,7 @@
 
 .rb-summary {
   font-weight: 600;
-  max-width: 260px;
+  max-width: 320px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -105,8 +64,8 @@
 
 .rb-date {
   white-space: nowrap;
-  font-size: 0.8rem;
-  color: var(--bs-secondary-color);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
 
 /* ── Actions ─────────────────────────────────── */
@@ -119,9 +78,9 @@
   font-weight: 600;
   padding: 4px 10px;
   border-radius: 6px;
-  border: 1.5px solid var(--bs-border-color);
+  border: 1.5px solid var(--card-border);
   background: transparent;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: color 0.12s, border-color 0.12s, background-color 0.12s;
   white-space: nowrap;

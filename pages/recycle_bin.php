@@ -36,15 +36,35 @@ $tableLabels = [
     'documents'     => ['label' => 'Document',     'icon' => 'bi-file-earmark'],
     'payroll_records' => ['label' => 'Payroll Record', 'icon' => 'bi-cash-stack'],
 ];
+
+function auditActionLabel(string $action): string {
+    return ucwords(strtolower(str_replace(['_', '-'], ' ', $action)));
+}
+
+function auditDetails(array $log): string {
+    $new = json_decode((string)($log['new_value'] ?? ''), true);
+    $old = json_decode((string)($log['old_value'] ?? ''), true);
+    $data = is_array($new) && $new ? $new : (is_array($old) ? $old : []);
+    $labels = [
+        'client_name' => 'Client', 'route_name' => 'Route', 'file_name' => 'File',
+        'title' => 'Title', 'status' => 'Status', 'approval_status' => 'Approval',
+        'is_active' => 'Active', 'amount' => 'Amount', 'trip_number' => 'Trip',
+    ];
+    $parts = [];
+    foreach ($data as $key => $value) {
+        if (!array_key_exists($key, $labels) || is_array($value) || is_object($value)) continue;
+        $display = is_bool($value) ? ($value ? 'Yes' : 'No') : (string)$value;
+        $parts[] = ($labels[$key] ?? ucwords(str_replace('_', ' ', $key))) . ': ' . $display;
+    }
+    return implode(' | ', $parts);
+}
 ?>
 
 <div class="rb-page">
 
-  <div class="rb-header">
-    <div>
-      <h1 class="rb-title">Recycle Bin</h1>
-      <p class="rb-subtitle">Review deleted records, restore them, and inspect the system audit history.</p>
-    </div>
+  <div class="page-header">
+    <h1 class="page-title">Recycle Bin</h1>
+    <p class="page-subtitle">Review deleted records, restore them, and inspect the system audit history.</p>
   </div>
 
   <ul class="nav nav-tabs mb-4" role="tablist">
@@ -65,7 +85,7 @@ $tableLabels = [
   </div>
   <?php else: ?>
   <div class="rb-table-wrap">
-    <table class="table rb-table">
+    <table class="table-custom rb-table">
       <thead>
         <tr>
           <th>Type</th>
@@ -125,18 +145,20 @@ $tableLabels = [
         <input type="search" class="form-control" id="auditSearch" placeholder="Search actions, users, tables, or record IDs...">
       </div>
       <div class="table-responsive">
-        <table class="table rb-table" id="auditTable">
+        <table class="table-custom rb-table" id="auditTable">
           <thead><tr><th>Date</th><th>User</th><th>Action</th><th>Table</th><th>Record</th><th>Details</th><th>IP Address</th></tr></thead>
           <tbody>
           <?php foreach ($auditLogs as $log):
-            $details = trim(($log['old_value'] ?? '') . ' ' . ($log['new_value'] ?? ''));
-            $searchText = strtolower($log['user_name'] . ' ' . $log['action'] . ' ' . $log['table_name'] . ' ' . $log['record_id'] . ' ' . $details);
+            $details = auditDetails($log);
+            $actionLabel = auditActionLabel($log['action']);
+            $tableLabel = $tableLabels[$log['table_name']]['label'] ?? ucwords(str_replace('_', ' ', $log['table_name']));
+            $searchText = strtolower($log['user_name'] . ' ' . $actionLabel . ' ' . $tableLabel . ' ' . $log['record_id'] . ' ' . $details);
           ?>
             <tr data-audit-search="<?= htmlspecialchars($searchText, ENT_QUOTES) ?>">
               <td class="rb-date"><?= date('M d, Y g:i A', strtotime($log['logged_at'])) ?></td>
               <td><?= htmlspecialchars($log['user_name']) ?></td>
-              <td><span class="rb-type-badge"><?= htmlspecialchars($log['action']) ?></span></td>
-              <td><?= htmlspecialchars($log['table_name']) ?></td>
+              <td><span class="rb-type-badge"><?= htmlspecialchars($actionLabel) ?></span></td>
+              <td><?= htmlspecialchars($tableLabel) ?></td>
               <td><?= $log['record_id'] !== null ? (int)$log['record_id'] : '—' ?></td>
               <td class="rb-summary" title="<?= htmlspecialchars($details) ?>"><?= htmlspecialchars($details ?: '—') ?></td>
               <td><?= htmlspecialchars($log['ip_address'] ?? '—') ?></td>

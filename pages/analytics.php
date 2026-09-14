@@ -58,6 +58,8 @@ if ($months !== null) {
     if ($rangeStart < $clamp) $rangeStart = $clamp;
 }
 $rangeStartSql = $rangeStart->format('Y-m-d 00:00:00');
+$rangeEndExclusive = (clone $rangeEnd)->modify('+1 day');
+$rangeEndSql = $rangeEndExclusive->format('Y-m-d 00:00:00');
 $rangeDays     = (int)$rangeStart->diff($rangeEnd)->days;
 
 // ── Guardrail: which granularities are practical for this date range? ────────
@@ -78,10 +80,10 @@ $granularityWasAdjusted = $granularity !== $requestedGranularity;
 // Date filters as bindable clauses — $months === null (All Time) still uses
 // the clamped $rangeStart so trend buckets stay bounded; KPIs/leaderboards
 // use the same start for consistency across the page.
-$tripDateFilter  = "AND t.created_at >= :rangeStart";
-$billDateFilter  = "AND b.created_at >= :rangeStart";
-$collDateFilter  = "AND c.payment_date >= :rangeStart";
-$maintDateFilter = "AND date_performed >= :rangeStart";
+$tripDateFilter  = "AND t.created_at >= :rangeStart AND t.created_at < :rangeEnd";
+$billDateFilter  = "AND b.created_at >= :rangeStart AND b.created_at < :rangeEnd";
+$collDateFilter  = "AND c.payment_date >= :rangeStart AND c.payment_date < :rangeEnd";
+$maintDateFilter = "AND date_performed >= :rangeStart AND date_performed < :rangeEnd";
 
 // ── Bucket-expression helper for the selected granularity ────────────────────
 function bucketExpr(string $col, string $granularity): string {
@@ -128,9 +130,9 @@ $buckets = buildBuckets($rangeStart, $rangeEnd, $granularity);
 
 // Runs a query that references :rangeStart, binding it once so every call
 // site doesn't have to repeat the bind boilerplate.
-function qRange(PDO $pdo, string $sql, string $rangeStartSql): PDOStatement {
+function qRange(PDO $pdo, string $sql, string $rangeStartSql, string $rangeEndSql): PDOStatement {
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([':rangeStart' => $rangeStartSql]);
+    $stmt->execute([':rangeStart' => $rangeStartSql, ':rangeEnd' => $rangeEndSql]);
     return $stmt;
 }
 
@@ -213,18 +215,18 @@ function trendBadgePts($current, $previous, bool $higherIsBetter = true, bool $h
 // ── KPI: Revenue billed vs collected ──────────────────────────────────────────
 $revenue = (float)qRange($pdo, "
     SELECT COALESCE(SUM(b.amount), 0) FROM billings b WHERE 1=1 $billDateFilter
-", $rangeStartSql)->fetchColumn();
+", $rangeStartSql, $rangeEndSql)->fetchColumn();
 
 $collected = (float)qRange($pdo, "
     SELECT COALESCE(SUM(c.amount_paid), 0) FROM collections c WHERE 1=1 $collDateFilter
-", $rangeStartSql)->fetchColumn();
+", $rangeStartSql, $rangeEndSql)->fetchColumn();
 
 $collectionRate = $revenue > 0 ? round(($collected / $revenue) * 100, 1) : 0;
 
 // ── KPI: Maintenance cost ─────────────────────────────────────────────────────
 $maintCost = (float)qRange($pdo, "
     SELECT COALESCE(SUM(cost), 0) FROM maintenance_records WHERE 1=1 $maintDateFilter
-", $rangeStartSql)->fetchColumn();
+", $rangeStartSql, $rangeEndSql)->fetchColumn();
 
 // ── KPI: Completed trips + on-time rate ───────────────────────────────────────
 $tripStats = qRange($pdo, "
@@ -233,7 +235,7 @@ $tripStats = qRange($pdo, "
         SUM(CASE WHEN is_late = 1 THEN 1 ELSE 0 END)         AS late_count
     FROM trips t
     WHERE t.status = 'Completed' $tripDateFilter
-", $rangeStartSql)->fetch(PDO::FETCH_ASSOC);
+", $rangeStartSql, $rangeEndSql)->fetch(PDO::FETCH_ASSOC);
 $completedTrips = (int)($tripStats['completed'] ?? 0);
 $lateCount      = (int)($tripStats['late_count'] ?? 0);
 $onTimeRate     = $completedTrips > 0 ? round((($completedTrips - $lateCount) / $completedTrips) * 100, 1) : 0;
@@ -246,7 +248,7 @@ $utilizedTrucks = (int)qRange($pdo, "
     FROM dispatch_requests dr
     JOIN trips t ON t.dispatch_id = dr.dispatch_id
     WHERE 1=1 $tripDateFilter
-", $rangeStartSql)->fetchColumn();
+", $rangeStartSql, $rangeEndSql)->fetchColumn();
 $utilizationRate = $totalTrucks > 0 ? round(($utilizedTrucks / $totalTrucks) * 100, 1) : 0;
 
 // ── KPI: Avg revenue per completed trip ───────────────────────────────────────
@@ -315,10 +317,10 @@ $payrollTableMissing = false;
 $expCategoryTotalsStmt = $pdo->prepare("
     SELECT expense_type, COALESCE(SUM(amount), 0) AS total
     FROM trip_expenses
-    WHERE expense_date >= :rangeStart
+    WHERE expense_date >= :rangeStart AND expense_date < :rangeEnd
     GROUP BY expense_type
 ");
-$expCategoryTotalsStmt->execute([':rangeStart' => $rangeStartSql]);
+$expCategoryTotalsStmt->execute([':rangeStart' => $rangeStartSql, ':rangeEnd' => $rangeEndSql]);
 $expenseCategoryTotals = ['Fuel' => 0.0, 'Toll' => 0.0, 'Driver Allowance' => 0.0, 'Other' => 0.0];
 foreach ($expCategoryTotalsStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
     $expenseCategoryTotals[$row['expense_type']] = (float)$row['total'];
@@ -327,8 +329,8 @@ foreach ($expCategoryTotalsStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
 // Defensive: same missing-table handling as the Net Profit Trend chart below.
 $payrollTotalForVariance = 0.0;
 try {
-    $payrollTotalStmt = $pdo->prepare("SELECT COALESCE(SUM(amount_paid), 0) FROM payroll_records WHERE paid_date >= :rangeStart");
-    $payrollTotalStmt->execute([':rangeStart' => $rangeStartSql]);
+    $payrollTotalStmt = $pdo->prepare("SELECT COALESCE(SUM(amount_paid), 0) FROM payroll_records WHERE paid_date >= :rangeStart AND paid_date < :rangeEnd");
+    $payrollTotalStmt->execute([':rangeStart' => $rangeStartSql, ':rangeEnd' => $rangeEndSql]);
     $payrollTotalForVariance = (float)$payrollTotalStmt->fetchColumn();
 } catch (PDOException $e) {
     if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
@@ -341,8 +343,8 @@ try {
 $tripPayTableMissing = false;
 $tripPayTotalForVariance = 0.0;
 try {
-    $tripPayTotalStmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM trip_pay WHERE paid_date >= :rangeStart");
-    $tripPayTotalStmt->execute([':rangeStart' => $rangeStartSql]);
+    $tripPayTotalStmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM trip_pay WHERE paid_date >= :rangeStart AND paid_date < :rangeEnd");
+    $tripPayTotalStmt->execute([':rangeStart' => $rangeStartSql, ':rangeEnd' => $rangeEndSql]);
     $tripPayTotalForVariance = (float)$tripPayTotalStmt->fetchColumn();
 } catch (PDOException $e) {
     if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
@@ -359,16 +361,16 @@ $costBucketExpr = bucketExpr('date_performed', $granularity);
 $revByBucket = qRange($pdo, "
     SELECT $revBucketExpr AS bucket, SUM(amount) AS total
     FROM billings
-    WHERE created_at >= :rangeStart
+    WHERE created_at >= :rangeStart AND created_at < :rangeEnd
     GROUP BY bucket
-", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
 
 $costByBucket = qRange($pdo, "
     SELECT $costBucketExpr AS bucket, SUM(cost) AS total
     FROM maintenance_records
-    WHERE date_performed >= :rangeStart
+    WHERE date_performed >= :rangeStart AND date_performed < :rangeEnd
     GROUP BY bucket
-", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
 
 $trendLabels = $buckets['labels'];
 $revTrend    = array_map(fn($k) => round((float)($revByBucket[$k]  ?? 0), 2), $buckets['keys']);
@@ -385,9 +387,9 @@ if ($isHead) {
     $tripExpByBucket = qRange($pdo, "
         SELECT $tripExpBucketExpr AS bucket, SUM(amount) AS total
         FROM trip_expenses
-        WHERE expense_date >= :rangeStart
+        WHERE expense_date >= :rangeStart AND expense_date < :rangeEnd
         GROUP BY bucket
-    ", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
 
     // Defensive: if payroll_records hasn't been created yet, degrade to "no
     // payroll data" instead of a fatal crash, but keep the profit chart
@@ -399,9 +401,9 @@ if ($isHead) {
         $payrollByBucket = qRange($pdo, "
             SELECT $payrollBucketExpr AS bucket, SUM(amount_paid) AS total
             FROM payroll_records
-            WHERE paid_date >= :rangeStart
+            WHERE paid_date >= :rangeStart AND paid_date < :rangeEnd
             GROUP BY bucket
-        ", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+        ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
     } catch (PDOException $e) {
         if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
             $payrollTableMissing = true;
@@ -417,9 +419,9 @@ if ($isHead) {
         $tripPayByBucket = qRange($pdo, "
             SELECT $tripPayBucketExpr AS bucket, SUM(amount) AS total
             FROM trip_pay
-            WHERE paid_date >= :rangeStart
+            WHERE paid_date >= :rangeStart AND paid_date < :rangeEnd
             GROUP BY bucket
-        ", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+        ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
     } catch (PDOException $e) {
         if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
             $tripPayTableMissing = true;
@@ -449,7 +451,7 @@ if ($isHead) {
 // ── Trip status breakdown (period-aware) ──────────────────────────────────────
 $statusRows = qRange($pdo, "
     SELECT status, COUNT(*) AS cnt FROM trips t WHERE 1=1 $tripDateFilter GROUP BY status
-", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
 $statusLabels = ['Loading', 'In Transit', 'Unloading', 'Completed', 'Cancelled'];
 $statusData   = array_map(fn($s) => (int)($statusRows[$s] ?? 0), $statusLabels);
 $statusColors = ['#6c757d', '#0d6efd', '#0dcaf0', '#198754', '#dc3545'];
@@ -460,7 +462,7 @@ $maintTypeRows = qRange($pdo, "
     FROM maintenance_records
     WHERE 1=1 $maintDateFilter
     GROUP BY maintenance_type
-", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
 $maintTypeLabels = ['Preventive', 'Corrective', 'Inspection'];
 $maintTypeData   = array_map(fn($t) => round((float)($maintTypeRows[$t] ?? 0), 2), $maintTypeLabels);
 $maintTypeColors = ['#198754', '#dc3545', '#0d6efd'];
@@ -478,7 +480,7 @@ $topTrucks = qRange($pdo, "
     GROUP BY tr.truck_id
     ORDER BY revenue DESC
     LIMIT 5
-", $rangeStartSql)->fetchAll(PDO::FETCH_ASSOC);
+", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Top 5 drivers by completed trips ──────────────────────────────────────────
 $topDrivers = qRange($pdo, "
@@ -492,16 +494,16 @@ $topDrivers = qRange($pdo, "
     GROUP BY e.employee_id
     ORDER BY trip_count DESC
     LIMIT 5
-", $rangeStartSql)->fetchAll(PDO::FETCH_ASSOC);
+", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Incident trend (bucketed by selected granularity) ─────────────────────────
 $incBucketExpr = bucketExpr('reported_at', $granularity);
 $incByBucket = qRange($pdo, "
     SELECT $incBucketExpr AS bucket, COUNT(*) AS cnt
     FROM incidents
-    WHERE reported_at >= :rangeStart
+    WHERE reported_at >= :rangeStart AND reported_at < :rangeEnd
     GROUP BY bucket
-", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
 $incTrend = array_map(fn($k) => (int)($incByBucket[$k] ?? 0), $buckets['keys']);
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -528,9 +530,9 @@ if ($role === ROLE_DISPATCHER) {
     $tripVolByBucket = qRange($pdo, "
         SELECT $tripVolBucketExpr AS bucket, COUNT(*) AS cnt
         FROM trips t
-        WHERE t.status = 'Completed' AND t.created_at >= :rangeStart
+        WHERE t.status = 'Completed' AND t.created_at >= :rangeStart AND t.created_at < :rangeEnd
         GROUP BY bucket
-    ", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
     $tripVolumeTrend = array_map(fn($k) => (int)($tripVolByBucket[$k] ?? 0), $buckets['keys']);
 
     $topTrucksByTrips = qRange($pdo, "
@@ -540,11 +542,11 @@ if ($role === ROLE_DISPATCHER) {
         FROM trucks tr
         JOIN dispatch_requests dr ON dr.truck_id = tr.truck_id
         JOIN trips t ON t.dispatch_id = dr.dispatch_id AND t.status = 'Completed'
-        WHERE t.created_at >= :rangeStart
+        WHERE t.created_at >= :rangeStart AND t.created_at < :rangeEnd
         GROUP BY tr.truck_id
         ORDER BY trip_count DESC
         LIMIT 5
-    ", $rangeStartSql)->fetchAll(PDO::FETCH_ASSOC);
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
 }
 
 // ── Maintenance: cost-only trend, open incidents, records logged, top trucks ─
@@ -554,8 +556,8 @@ if ($role === ROLE_MAINTENANCE) {
     ")->fetchColumn();
 
     $maintRecordsLoggedCount = (int)qRange($pdo, "
-        SELECT COUNT(*) FROM maintenance_records WHERE date_performed >= :rangeStart
-    ", $rangeStartSql)->fetchColumn();
+        SELECT COUNT(*) FROM maintenance_records WHERE date_performed >= :rangeStart AND date_performed < :rangeEnd
+    ", $rangeStartSql, $rangeEndSql)->fetchColumn();
 
     $maintRecordsLoggedCountPrev = $hasComparison ? (int)qPrev($pdo, "
         SELECT COUNT(*) FROM maintenance_records
@@ -568,11 +570,11 @@ if ($role === ROLE_MAINTENANCE) {
                COALESCE(SUM(mr.cost), 0) AS total_cost
         FROM trucks tr
         JOIN maintenance_records mr ON mr.truck_id = tr.truck_id
-        WHERE mr.date_performed >= :rangeStart
+        WHERE mr.date_performed >= :rangeStart AND mr.date_performed < :rangeEnd
         GROUP BY tr.truck_id
         ORDER BY total_cost DESC
         LIMIT 5
-    ", $rangeStartSql)->fetchAll(PDO::FETCH_ASSOC);
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
 }
 
 // ── Accounting: billed vs collected trend, top clients ────────────────────────
@@ -581,9 +583,9 @@ if ($role === ROLE_ACCOUNTING) {
     $collByBucket = qRange($pdo, "
         SELECT $collBucketExpr AS bucket, SUM(c.amount_paid) AS total
         FROM collections c
-        WHERE c.payment_date >= :rangeStart
+        WHERE c.payment_date >= :rangeStart AND c.payment_date < :rangeEnd
         GROUP BY bucket
-    ", $rangeStartSql)->fetchAll(PDO::FETCH_KEY_PAIR);
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
     $collTrend = array_map(fn($k) => round((float)($collByBucket[$k] ?? 0), 2), $buckets['keys']);
 
     $topClientsByRevenue = qRange($pdo, "
@@ -592,15 +594,19 @@ if ($role === ROLE_ACCOUNTING) {
                COALESCE(SUM(b.amount), 0) AS revenue
         FROM billings b
         JOIN trips t ON b.trip_id = t.trip_id
-        WHERE b.created_at >= :rangeStart
+        WHERE b.created_at >= :rangeStart AND b.created_at < :rangeEnd
         GROUP BY client_label
         ORDER BY revenue DESC
         LIMIT 5
-    ", $rangeStartSql)->fetchAll(PDO::FETCH_ASSOC);
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
 }
 
 // Pass chart data to JS
 $GLOBALS['analytics_data'] = json_encode([
+    'periodLabel'      => $periodLabel,
+    'rangeStart'       => $rangeStart->format('Y-m-d'),
+    'rangeEnd'         => $rangeEnd->format('Y-m-d'),
+    'granularityLabel' => $granularityLabel,
     'revCostTrend'     => ['labels' => $trendLabels, 'revenue' => $revTrend, 'cost' => $costTrend],
     'profitTrend'      => $profitTrend,
     'tripStatus'       => ['labels' => $statusLabels, 'data' => $statusData, 'colors' => $statusColors],
@@ -672,7 +678,19 @@ $GLOBALS['analytics_data'] = json_encode([
         </option>
         <?php endforeach; ?>
       </select>
+      <button type="button" class="btn btn-outline-secondary an-report-btn" id="anPrintReport">
+        <i class="bi bi-printer me-1"></i>Print
+      </button>
+      <button type="button" class="btn btn-outline-primary an-report-btn" id="anExportReport">
+        <i class="bi bi-download me-1"></i>Export data
+      </button>
     </form>
+  </div>
+  <div class="an-scope-note" role="status">
+    <i class="bi bi-calendar3"></i>
+    Reporting window: <strong><?= htmlspecialchars($rangeStart->format('M d, Y')) ?></strong>
+    through <strong><?= htmlspecialchars($rangeEnd->format('M d, Y')) ?></strong>.
+    All figures and charts use this same window.
   </div>
   <?php if ($granularityWasAdjusted): ?>
   <div class="an-adjust-note">

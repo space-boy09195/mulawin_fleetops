@@ -1,0 +1,63 @@
+.automation-page {
+  padding: 1.75rem 2rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.automation-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 12px;
+}
+
+.automation-card-muted {
+  background: var(--bs-tertiary-bg);
+}
+
+.automation-card-title {
+  color: var(--bs-emphasis-color);
+  font-weight: 700;
+}
+
+.automation-card-text {
+  max-width: 760px;
+  margin: 0.45rem 0 0;
+  color: var(--bs-secondary-color);
+  font-size: 0.9rem;
+}
+
+.automation-status {
+  min-width: 64px;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.automation-status.is-on {
+  color: #146c43;
+  background: rgba(25, 135, 84, 0.14);
+}
+
+.automation-status.is-off {
+  color: var(--bs-secondary-color);
+  background: var(--bs-secondary-bg);
+}
+
+.automation-control-form {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 700px) {
+  .automation-page { padding: 1.25rem 1rem; }
+  .automation-card { align-items: flex-start; flex-direction: column; }
+}

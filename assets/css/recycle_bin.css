@@ -37,6 +37,43 @@
   overflow: hidden;
 }
 
+.rb-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg);
+}
+
+.rb-filter-search {
+  position: relative;
+  flex: 1 1 280px;
+}
+
+.rb-filter-search > i {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--bs-secondary-color);
+  pointer-events: none;
+}
+
+.rb-filter-search input {
+  padding-left: 2.2rem;
+}
+
+.rb-filter-select {
+  flex: 0 1 190px;
+}
+
+.rb-filter-select .form-select,
+.rb-filter-search .form-control {
+  min-height: 38px;
+}
+
 .rb-table { margin-bottom: 0; font-size: 0.9rem; }
 .rb-table thead th { white-space: nowrap; }
 .rb-table tbody td { color: var(--text-primary); }
@@ -123,4 +160,5 @@
   .rb-title { font-size: 1.2rem; }
   .rb-table-wrap { overflow-x: auto; }
   .rb-table { min-width: 600px; }
+  .rb-filter-select { flex: 1 1 170px; }
 }

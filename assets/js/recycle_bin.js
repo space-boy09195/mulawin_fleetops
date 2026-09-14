@@ -40,14 +40,49 @@
           btn.disabled = false;
         });
 
-        const auditSearch = document.getElementById('auditSearch');
-        auditSearch?.addEventListener('input', () => {
-          const query = auditSearch.value.trim().toLowerCase();
-          document.querySelectorAll('#auditTable tbody tr[data-audit-search]').forEach(row => {
-            row.classList.toggle('d-none', query !== '' && !row.dataset.auditSearch.includes(query));
-          });
-        });
     });
+  });
+
+  function applyDeletedFilters() {
+    const query = (document.getElementById('deletedSearch')?.value || '').trim().toLowerCase();
+    const type = document.getElementById('deletedTypeFilter')?.value || '';
+    const status = document.getElementById('deletedStatusFilter')?.value || '';
+    const rows = document.querySelectorAll('#rbDeleted tbody tr[data-deleted-search]');
+    let visible = 0;
+    rows.forEach(row => {
+      const matches = (!query || row.dataset.deletedSearch.includes(query))
+        && (!type || row.dataset.deletedType === type)
+        && (!status || row.dataset.deletedStatus === status);
+      row.classList.toggle('d-none', !matches);
+      if (matches) visible++;
+    });
+    document.querySelector('#rbDeleted .rb-no-results')?.classList.toggle('d-none', visible !== 0);
+  }
+
+  ['deletedSearch', 'deletedTypeFilter', 'deletedStatusFilter'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', applyDeletedFilters);
+    document.getElementById(id)?.addEventListener('change', applyDeletedFilters);
+  });
+
+  function applyAuditFilters() {
+    const query = (document.getElementById('auditSearch')?.value || '').trim().toLowerCase();
+    const action = document.getElementById('auditActionFilter')?.value || '';
+    const table = document.getElementById('auditTableFilter')?.value || '';
+    const rows = document.querySelectorAll('#auditTable tbody tr[data-audit-search]');
+    let visible = 0;
+    rows.forEach(row => {
+      const matches = (!query || row.dataset.auditSearch.includes(query))
+        && (!action || row.dataset.auditAction === action)
+        && (!table || row.dataset.auditTable === table);
+      row.classList.toggle('d-none', !matches);
+      if (matches) visible++;
+    });
+    document.getElementById('auditNoResults')?.classList.toggle('d-none', visible !== 0);
+  }
+
+  ['auditSearch', 'auditActionFilter', 'auditTableFilter'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', applyAuditFilters);
+    document.getElementById(id)?.addEventListener('change', applyAuditFilters);
   });
 
   // ── Permanently delete ────────────────────────────────────────────────────

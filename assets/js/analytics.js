@@ -7,6 +7,10 @@
 (function () {
   const D = window.ANALYTICS_DATA;
   if (!D) return;
+  if (!window.Chart) {
+    console.error('Analytics charts could not load because Chart.js is unavailable.');
+    return;
+  }
 
   const isDark    = document.documentElement.getAttribute('data-theme') === 'dark';
   const gridColor = isDark ? 'rgba(225,245,225,0.24)' : 'rgba(23,35,27,0.18)';
@@ -446,6 +450,44 @@
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     });
+
+    function downloadCsv(filename, rows) {
+      const csv = rows.map(row => row.map(value => {
+        const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+        return `"${text.replace(/"/g, '""')}"`;
+      }).join(',')).join('\r\n');
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    const exportReport = document.getElementById('anExportReport');
+    if (exportReport) {
+      exportReport.addEventListener('click', () => {
+        const rows = [['Reporting window', `${D.rangeStart} to ${D.rangeEnd}`], ['Granularity', D.granularityLabel], []];
+        if (D.revCostTrend) {
+          rows.push(['Period', 'Revenue billed', 'Maintenance cost']);
+          D.revCostTrend.labels.forEach((label, index) => {
+            rows.push([label, D.revCostTrend.revenue[index] ?? 0, D.revCostTrend.cost[index] ?? 0]);
+          });
+        }
+        if (D.profitTrend) {
+          rows.push([], ['Period', 'Revenue billed', 'Total expenses', 'Net profit']);
+          D.profitTrend.labels.forEach((label, index) => {
+            rows.push([label, D.profitTrend.revenue[index] ?? 0, D.profitTrend.expenses[index] ?? 0, D.profitTrend.profit[index] ?? 0]);
+          });
+        }
+        downloadCsv(`fleetops-analytics-${D.rangeStart}-to-${D.rangeEnd}.csv`, rows);
+      });
+    }
+
+    const printReport = document.getElementById('anPrintReport');
+    if (printReport) printReport.addEventListener('click', () => window.print());
   });
 
   // ── Alert popover behavior (Analytics page) ──────────────────────────────

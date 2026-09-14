@@ -36,15 +36,35 @@ $tableLabels = [
     'documents'     => ['label' => 'Document',     'icon' => 'bi-file-earmark'],
     'payroll_records' => ['label' => 'Payroll Record', 'icon' => 'bi-cash-stack'],
 ];
+
+function auditActionLabel(string $action): string {
+    return ucwords(strtolower(str_replace(['_', '-'], ' ', $action)));
+}
+
+function auditDetails(array $log): string {
+    $new = json_decode((string)($log['new_value'] ?? ''), true);
+    $old = json_decode((string)($log['old_value'] ?? ''), true);
+    $data = is_array($new) && $new ? $new : (is_array($old) ? $old : []);
+    $labels = [
+        'client_name' => 'Client', 'route_name' => 'Route', 'file_name' => 'File',
+        'title' => 'Title', 'status' => 'Status', 'approval_status' => 'Approval',
+        'is_active' => 'Active', 'amount' => 'Amount', 'trip_number' => 'Trip',
+    ];
+    $parts = [];
+    foreach ($data as $key => $value) {
+        if (!array_key_exists($key, $labels) || is_array($value) || is_object($value)) continue;
+        $display = is_bool($value) ? ($value ? 'Yes' : 'No') : (string)$value;
+        $parts[] = ($labels[$key] ?? ucwords(str_replace('_', ' ', $key))) . ': ' . $display;
+    }
+    return implode(' | ', $parts);
+}
 ?>
 
 <div class="rb-page">
 
-  <div class="rb-header">
-    <div>
-      <h1 class="rb-title">Recycle Bin</h1>
-      <p class="rb-subtitle">Review deleted records, restore them, and inspect the system audit history.</p>
-    </div>
+  <div class="page-header">
+    <h1 class="page-title">Recycle Bin</h1>
+    <p class="page-subtitle">Review deleted records, restore them, and inspect the system audit history.</p>
   </div>
 
   <ul class="nav nav-tabs mb-4" role="tablist">
@@ -65,9 +85,40 @@ $tableLabels = [
   </div>
   <?php else: ?>
   <div class="rb-table-wrap">
-    <table class="table rb-table">
+    <div class="rb-filter-bar">
+      <div class="rb-filter-search">
+        <label class="visually-hidden" for="deletedSearch">Search deleted records</label>
+        <i class="bi bi-search" aria-hidden="true"></i>
+        <input type="search" class="form-control" id="deletedSearch" placeholder="Search deleted records, people, or IDs...">
+      </div>
+      <div class="rb-filter-select">
+        <label class="visually-hidden" for="deletedTypeFilter">Filter deleted record type</label>
+        <select class="form-select" id="deletedTypeFilter">
+          <option value="">All record types</option>
+          <?php
+            $archivedTypes = array_unique(array_map(fn($a) => $a['original_table'], $archived));
+            sort($archivedTypes);
+            foreach ($archivedTypes as $type):
+              $typeLabel = $tableLabels[$type]['label'] ?? ucwords(str_replace('_', ' ', $type));
+          ?>
+          <option value="<?= htmlspecialchars(strtolower($type)) ?>"><?= htmlspecialchars($typeLabel) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div class="rb-filter-select">
+        <label class="visually-hidden" for="deletedStatusFilter">Filter deleted record status</label>
+        <select class="form-select" id="deletedStatusFilter">
+          <option value="">All statuses</option>
+          <option value="deleted">Deleted</option>
+          <option value="restored">Restored</option>
+        </select>
+      </div>
+    </div>
+    <table class="table-custom rb-table">
       <thead>
-        <tr>
+        <tr data-deleted-search="<?= htmlspecialchars(strtolower($summary . ' ' . $a['original_table'] . ' ' . $a['deleted_by_name'] . ' ' . $a['original_id']), ENT_QUOTES) ?>"
+            data-deleted-type="<?= htmlspecialchars(strtolower($a['original_table'])) ?>"
+            data-deleted-status="<?= $a['restored_at'] ? 'restored' : 'deleted' ?>">
           <th>Type</th>
           <th>Item</th>
           <th>Deleted By</th>
@@ -113,6 +164,7 @@ $tableLabels = [
           </td>
         </tr>
         <?php endforeach; ?>
+        <tr class="rb-no-results d-none"><td colspan="6" class="text-center text-muted py-4">No deleted records match these filters.</td></tr>
       </tbody>
     </table>
   </div>
@@ -122,26 +174,64 @@ $tableLabels = [
   <div class="tab-pane fade" id="rbAudit">
     <div class="rb-table-wrap">
       <div class="p-3 border-bottom">
-        <input type="search" class="form-control" id="auditSearch" placeholder="Search actions, users, tables, or record IDs...">
+        <div class="rb-filter-bar rb-filter-bar-audit">
+          <div class="rb-filter-search">
+            <label class="visually-hidden" for="auditSearch">Search audit logs</label>
+            <i class="bi bi-search" aria-hidden="true"></i>
+            <input type="search" class="form-control" id="auditSearch" placeholder="Search users, actions, records, or details...">
+          </div>
+          <div class="rb-filter-select">
+            <label class="visually-hidden" for="auditActionFilter">Filter audit action</label>
+            <select class="form-select" id="auditActionFilter">
+              <option value="">All actions</option>
+              <?php
+                $auditActions = array_unique(array_map(fn($log) => strtolower($log['action']), $auditLogs));
+                sort($auditActions);
+                foreach ($auditActions as $action):
+              ?>
+              <option value="<?= htmlspecialchars($action) ?>"><?= htmlspecialchars(auditActionLabel($action)) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="rb-filter-select">
+            <label class="visually-hidden" for="auditTableFilter">Filter audit table</label>
+            <select class="form-select" id="auditTableFilter">
+              <option value="">All areas</option>
+              <?php
+                $auditTables = array_unique(array_map(fn($log) => strtolower($log['table_name']), $auditLogs));
+                sort($auditTables);
+                foreach ($auditTables as $table):
+                  $auditTableLabel = $tableLabels[$table]['label'] ?? ucwords(str_replace('_', ' ', $table));
+              ?>
+              <option value="<?= htmlspecialchars($table) ?>"><?= htmlspecialchars($auditTableLabel) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+        </div>
       </div>
       <div class="table-responsive">
-        <table class="table rb-table" id="auditTable">
+        <table class="table-custom rb-table" id="auditTable">
           <thead><tr><th>Date</th><th>User</th><th>Action</th><th>Table</th><th>Record</th><th>Details</th><th>IP Address</th></tr></thead>
           <tbody>
           <?php foreach ($auditLogs as $log):
-            $details = trim(($log['old_value'] ?? '') . ' ' . ($log['new_value'] ?? ''));
-            $searchText = strtolower($log['user_name'] . ' ' . $log['action'] . ' ' . $log['table_name'] . ' ' . $log['record_id'] . ' ' . $details);
+            $details = auditDetails($log);
+            $actionLabel = auditActionLabel($log['action']);
+            $tableLabel = $tableLabels[$log['table_name']]['label'] ?? ucwords(str_replace('_', ' ', $log['table_name']));
+            $searchText = strtolower($log['user_name'] . ' ' . $actionLabel . ' ' . $tableLabel . ' ' . $log['record_id'] . ' ' . $details);
           ?>
-            <tr data-audit-search="<?= htmlspecialchars($searchText, ENT_QUOTES) ?>">
+            <tr data-audit-search="<?= htmlspecialchars($searchText, ENT_QUOTES) ?>"
+                data-audit-action="<?= htmlspecialchars(strtolower($log['action'])) ?>"
+                data-audit-table="<?= htmlspecialchars(strtolower($log['table_name'])) ?>">
               <td class="rb-date"><?= date('M d, Y g:i A', strtotime($log['logged_at'])) ?></td>
               <td><?= htmlspecialchars($log['user_name']) ?></td>
-              <td><span class="rb-type-badge"><?= htmlspecialchars($log['action']) ?></span></td>
-              <td><?= htmlspecialchars($log['table_name']) ?></td>
+              <td><span class="rb-type-badge"><?= htmlspecialchars($actionLabel) ?></span></td>
+              <td><?= htmlspecialchars($tableLabel) ?></td>
               <td><?= $log['record_id'] !== null ? (int)$log['record_id'] : '—' ?></td>
               <td class="rb-summary" title="<?= htmlspecialchars($details) ?>"><?= htmlspecialchars($details ?: '—') ?></td>
               <td><?= htmlspecialchars($log['ip_address'] ?? '—') ?></td>
             </tr>
           <?php endforeach; ?>
+          <tr id="auditNoResults" class="d-none"><td colspan="7" class="text-center text-muted py-4">No audit logs match these filters.</td></tr>
           <?php if (!$auditLogs): ?><tr><td colspan="7" class="text-center text-muted py-4">No audit logs found.</td></tr><?php endif; ?>
           </tbody>
         </table>

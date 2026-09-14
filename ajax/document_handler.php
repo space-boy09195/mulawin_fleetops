@@ -32,6 +32,13 @@ if ($action === 'upload') {
     $docType     = requiredEnum('doc_type', DOCUMENT_TYPES, 'Document type');
     $tripId      = filter_input(INPUT_POST, 'trip_id', FILTER_VALIDATE_INT) ?: null;
     $description = optionalString('description');
+    $expiryDate = optionalString('expiry_date', null, 10);
+    if ($expiryDate !== null) {
+        $parsedExpiry = DateTime::createFromFormat('Y-m-d', $expiryDate);
+        if (!$parsedExpiry || $parsedExpiry->format('Y-m-d') !== $expiryDate) {
+            jsonFail('Expiry date must be a valid date.');
+        }
+    }
 
     $file     = $_FILES['file'];
     $origName = basename($file['name']);
@@ -79,17 +86,14 @@ if ($action === 'upload') {
     }
 
     try {
-        $stmt = $pdo->prepare("
-            INSERT INTO documents
-                (uploaded_by, trip_id, doc_type, file_name, stored_name,
-                 file_path, file_size, mime_type, description)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ");
-        $stmt->execute([
-            currentUserId(), $tripId, $docType,
-            $origName, $storedName, $filePath,
-            $fileSize, $mimeType, $description,
-        ]);
+        $hasExpiryColumn = (bool)$pdo->query("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'documents' AND column_name = 'expiry_date'")->fetchColumn();
+        if ($hasExpiryColumn) {
+            $stmt = $pdo->prepare("INSERT INTO documents (uploaded_by, trip_id, doc_type, file_name, stored_name, file_path, file_size, mime_type, description, expiry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([currentUserId(), $tripId, $docType, $origName, $storedName, $filePath, $fileSize, $mimeType, $description, $expiryDate]);
+        } else {
+            $stmt = $pdo->prepare("INSERT INTO documents (uploaded_by, trip_id, doc_type, file_name, stored_name, file_path, file_size, mime_type, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([currentUserId(), $tripId, $docType, $origName, $storedName, $filePath, $fileSize, $mimeType, $description]);
+        }
         $newId = (int)$pdo->lastInsertId();
 
         auditLog('UPLOAD_DOCUMENT', 'documents', $newId, null, [

@@ -46,6 +46,7 @@ function getNavItems(): array {
         ['section' => 'Admin'],
         ['label' => 'User Management',     'href' => '/pages/users.php',        'icon' => 'bi-people',              'roles' => [ROLE_HEAD_MANAGEMENT]],
         ['label' => 'Recycle Bin',         'href' => '/pages/recycle_bin.php',  'icon' => 'bi-trash3',              'roles' => [ROLE_HEAD_MANAGEMENT]],
+        ['label' => 'Automation',          'href' => '/pages/automation.php',   'icon' => 'bi-gear-wide-connected','roles' => [ROLE_HEAD_MANAGEMENT]],
     ];
 }
 

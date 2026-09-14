@@ -39,6 +39,14 @@
           alert('Network error. Please try again.');
           btn.disabled = false;
         });
+
+        const auditSearch = document.getElementById('auditSearch');
+        auditSearch?.addEventListener('input', () => {
+          const query = auditSearch.value.trim().toLowerCase();
+          document.querySelectorAll('#auditTable tbody tr[data-audit-search]').forEach(row => {
+            row.classList.toggle('d-none', query !== '' && !row.dataset.auditSearch.includes(query));
+          });
+        });
     });
   });
 

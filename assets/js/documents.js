@@ -46,6 +46,7 @@
   const uploadDocType   = document.getElementById('uploadDocType');
   const uploadTripId    = document.getElementById('uploadTripId');
   const uploadDescription = document.getElementById('uploadDescription');
+  const uploadExpiryDate = document.getElementById('uploadExpiryDate');
   const submitUploadBtn = document.getElementById('submitUploadBtn');
   const uploadBtnSpinner = document.getElementById('uploadBtnSpinner');
   const uploadBtnText   = document.getElementById('uploadBtnText');
@@ -182,6 +183,7 @@
     if (uploadDocType)    uploadDocType.value    = '';
     if (uploadTripId)     uploadTripId.value     = '';
     if (uploadDescription) uploadDescription.value = '';
+    if (uploadExpiryDate) uploadExpiryDate.value = '';
     hideAlert(uploadAlert);
     uploadProgress?.classList.add('d-none');
     if (uploadProgressBar) uploadProgressBar.style.width = '0%';
@@ -223,6 +225,7 @@
     formData.append('doc_type',    docType);
     formData.append('trip_id',     uploadTripId?.value     ?? '');
     formData.append('description', uploadDescription?.value.trim() ?? '');
+    formData.append('expiry_date', uploadExpiryDate?.value ?? '');
     formData.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
 
     setBusy(submitUploadBtn, uploadBtnSpinner, true);

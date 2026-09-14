@@ -287,6 +287,11 @@ function mimeIcon(?string $mime): string {
             <input type="text" class="form-control doc-input" id="uploadDescription"
                    placeholder="Short note about this document…" maxlength="255">
           </div>
+          <div class="col-md-6">
+            <label class="form-label doc-label" for="uploadExpiryDate">Expiry date (optional)</label>
+            <input type="date" class="form-control doc-input" id="uploadExpiryDate">
+            <small class="text-muted">Used for expiry reminders.</small>
+          </div>
         </div>
 
         <!-- Upload progress -->

@@ -1,8 +1,7 @@
 <?php
 // ============================================================
 // pages/automation.php
-// Safe control center for future system automations.
-// No automation jobs are registered yet.
+// Safe control center for read-only system automations.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
@@ -17,11 +16,11 @@ layoutHead('Automation', APP_BASE . '/assets/css/automation.css');
 $pdo = getDBConnection();
 $engineEnabled = false;
 $migrationReady = true;
+$settings = [];
 
 try {
-    $stmt = $pdo->prepare("SELECT setting_value FROM automation_settings WHERE setting_key = 'automation_engine_enabled'");
-    $stmt->execute();
-    $engineEnabled = $stmt->fetchColumn() === '1';
+    $settings = $pdo->query("SELECT setting_key, setting_value FROM automation_settings")->fetchAll(PDO::FETCH_KEY_PAIR);
+    $engineEnabled = ($settings['automation_engine_enabled'] ?? '0') === '1';
 } catch (PDOException $e) {
     if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
         $migrationReady = false;
@@ -33,7 +32,7 @@ try {
 <div class="automation-page">
   <div class="page-header">
     <h1 class="page-title">Automation</h1>
-    <p class="page-subtitle">Control future background tasks without changing normal FleetOps workflows.</p>
+    <p class="page-subtitle">    Control isolated, read-only notification jobs without changing normal FleetOps workflows.</p>
   </div>
 
   <?php if (!$migrationReady): ?>
@@ -47,8 +46,8 @@ try {
     <div>
       <div class="automation-card-title"><i class="bi bi-power me-2"></i>Automation engine</div>
       <p class="automation-card-text">
-        There are currently no automated jobs configured. This switch is intentionally inactive until a reviewed
-        automation is added. Turning it on now will not run anything.
+        Jobs run only through the separate CLI scheduler and only when both the engine and the individual job
+        are enabled. They send notifications only; they do not approve, delete, or modify operational records.
       </p>
     </div>
     <div class="automation-status <?= $engineEnabled ? 'is-on' : 'is-off' ?>">
@@ -60,11 +59,10 @@ try {
     <div>
       <div class="automation-card-title"><i class="bi bi-shield-check me-2"></i>Safe-by-default controls</div>
       <p class="automation-card-text">
-        Future automations will be listed here individually. Each one can have its own schedule, last-run status,
-        error message, and separate on/off switch. No automation will be allowed to silently change records.
+        Each job is independent, deduplicated, and logged. A failed job is recorded without stopping other jobs.
       </p>
     </div>
-    <span class="badge text-bg-secondary">No jobs configured</span>
+    <span class="badge text-bg-secondary">Read-only notifications</span>
   </div>
 
   <?php if ($migrationReady): ?>
@@ -72,11 +70,38 @@ try {
     <?= csrfInput() ?>
     <input type="hidden" name="action" value="toggle_engine">
     <input type="hidden" name="enabled" value="<?= $engineEnabled ? '0' : '1' ?>">
-    <button type="submit" class="btn btn-outline-secondary" disabled title="No automation jobs are configured yet">
-      <i class="bi bi-toggle2-off me-1"></i>
+    <button type="submit" class="btn btn-outline-<?= $engineEnabled ? 'danger' : 'success' ?>">
+      <i class="bi bi-power me-1"></i>
       <?= $engineEnabled ? 'Turn automation engine off' : 'Turn automation engine on' ?>
     </button>
-    <small class="text-muted">The control will become available after the first reviewed automation is installed.</small>
+    <small class="text-muted">The engine must be on before any selected job can run.</small>
   </form>
+  <div class="automation-job-grid">
+    <?php
+    $jobs = [
+      'pending_approval_reminders' => ['Pending approval reminders', 'Notify Head Management about route or dispatch requests older than 24 hours.', 'bi-inbox'],
+      'expiry_reminders' => ['License and document expiry reminders', 'Notify authorized users about employee licenses and documents expiring within 30 days.', 'bi-calendar-x'],
+      'maintenance_due_reminders' => ['Maintenance due reminders', 'Notify Maintenance about trucks with maintenance due dates within 14 days.', 'bi-tools'],
+      'unpaid_billing_reminders' => ['Unpaid billing reminders', 'Notify Accounting about unpaid or overdue billings without changing billing status.', 'bi-receipt'],
+      'daily_analytics_summary' => ['Daily analytics summary', 'Send Head Management a read-only daily summary of trips, lateness, maintenance, and collections.', 'bi-bar-chart-line'],
+      'system_health_checks' => ['System health checks', 'Check required tables and missing document files, then notify Head Management if action is needed.', 'bi-heart-pulse'],
+    ];
+    foreach ($jobs as $key => [$title, $description, $icon]):
+      $enabled = ($settings[$key] ?? '0') === '1';
+    ?>
+    <div class="automation-job-card">
+      <div class="automation-job-icon"><i class="bi <?= $icon ?>"></i></div>
+      <div class="automation-job-content"><h2><?= htmlspecialchars($title) ?></h2><p><?= htmlspecialchars($description) ?></p></div>
+      <form method="post" action="<?= APP_BASE ?>/ajax/automation_handler.php" class="automation-job-toggle">
+        <?= csrfInput() ?>
+        <input type="hidden" name="action" value="toggle_job">
+        <input type="hidden" name="job_key" value="<?= htmlspecialchars($key) ?>">
+        <input type="hidden" name="enabled" value="<?= $enabled ? '0' : '1' ?>">
+        <button type="submit" class="btn btn-sm btn-outline-<?= $enabled ? 'danger' : 'success' ?>"><?= $enabled ? 'Turn off' : 'Turn on' ?></button>
+        <span class="automation-job-state <?= $enabled ? 'is-on' : 'is-off' ?>"><?= $enabled ? 'On' : 'Off' ?></span>
+      </form>
+    </div>
+    <?php endforeach; ?>
+  </div>
   <?php endif; ?>
 </div>

@@ -537,9 +537,7 @@ textarea {
 }
 
 .sidebar.collapsed .sidebar-logout-btn {
-  justify-content: center;
-  padding-left: 0;
-  padding-right: 0;
+  display: none;
 }
 
 .sidebar-avatar {

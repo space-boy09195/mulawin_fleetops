@@ -15,6 +15,62 @@
   padding: 0;
 }
 
+.rb-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 2px solid var(--bs-border-color);
+  scrollbar-width: thin;
+}
+
+.rb-tabs .nav-item {
+  flex: 0 0 calc(25% - 0.2rem);
+  min-width: 180px;
+}
+
+.rb-tab {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0.55rem 1.1rem;
+  margin-bottom: -2px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  background: none;
+  color: var(--bs-secondary-color);
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rb-tab:hover { color: var(--bs-body-color); }
+.rb-tab.active { color: #0d6efd; border-bottom-color: #0d6efd; }
+
+.rb-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.rb-tab.active .rb-tab-count {
+  background: rgba(13, 110, 253, 0.12);
+  color: #0d6efd;
+}
+
 /* ── Empty state ─────────────────────────────── */
 .rb-empty {
   display: flex;

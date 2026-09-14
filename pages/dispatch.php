@@ -360,6 +360,15 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                   : '<span class="text-muted">—</span>' ?>
               </td>
               <td>
+                <?php if (!empty($rt['request_notes'])): ?>
+                <span class="text-muted small" title="Requester note">
+                  <i class="bi bi-chat-left-text me-1"></i><?= htmlspecialchars($rt['request_notes']) ?>
+                </span>
+                <?php else: ?>
+                <span class="text-muted">—</span>
+                <?php endif; ?>
+              </td>
+              <td>
                 <span class="status-badge <?= $rt['approval_status'] === 'Approved' && $rt['is_active'] ? 'available' : ($rt['approval_status'] === 'Pending' ? 'maintenance' : 'inactive') ?>">
                   <?= htmlspecialchars($rt['approval_status']) ?><?= $rt['approval_status'] === 'Approved' && $rt['is_active'] ? ' / Active' : '' ?>
                 </span>
@@ -529,48 +538,39 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
       </div>
       <div class="modal-body disp-modal-body">
         <div id="routeRequestAlert" class="alert d-none"></div>
-        <label class="disp-label" for="rr_name">Route name <span class="text-danger">*</span></label>
-        <input class="form-control disp-input mb-2" id="rr_name" maxlength="150" placeholder="Route name" required>
-        <label class="disp-label" for="rr_origin">Origin <span class="text-danger">*</span></label>
-        <input class="form-control disp-input mb-2" id="rr_origin" maxlength="150" placeholder="Origin" required>
-        <label class="disp-label" for="rr_destination">Destination <span class="text-danger">*</span></label>
-        <input class="form-control disp-input mb-2" id="rr_destination" maxlength="150" placeholder="Destination" required>
-        <label class="disp-label" for="rr_distance">Distance (km)
-          <span class="text-muted" style="font-weight:400;">(optional)</span>
-        </label>
-        <input type="number" min="0" max="100000" step="0.1"
-               class="form-control disp-input mb-3" id="rr_distance"
-               placeholder="e.g. 1180.5">
-        <label class="disp-label mt-2" for="rr_notes">Side note <span class="text-muted">(optional)</span></label>
-        <textarea class="form-control disp-input mb-3" id="rr_notes" rows="2" maxlength="500"
-                  placeholder="Add context or special instructions for Head Management"></textarea>
-        <label class="disp-label">Map Preview</label>
-        <div class="row g-2">
+        <input class="form-control disp-input mb-2" id="rr_name" placeholder="Route name" required>
+        <input class="form-control disp-input mb-2" id="rr_origin" placeholder="Origin" required>
+        <input class="form-control disp-input mb-2" id="rr_destination" placeholder="Destination" required>
+        <input type="number" min="0" step="0.1" class="form-control disp-input" id="rr_distance" placeholder="Distance (km, optional)">
+        <label class="disp-label mt-2" for="rr_notes">Side note <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+        <textarea class="form-control disp-input" id="rr_notes" rows="2" maxlength="500"
+                  placeholder="Add context or special instructions for Head Management…"></textarea>
+        <div class="row g-2 mt-2">
           <div class="col-md-6">
-            <div class="route-map-wrap">
+            <div class="route-map-wrap" id="rr_origin_map_wrap">
               <div class="route-map-placeholder" id="rr_origin_map_placeholder">
                 <i class="bi bi-geo-alt"></i><span>Origin preview</span>
               </div>
               <iframe class="route-map-frame d-none" id="rr_origin_map"
-                      title="Origin map preview" loading="lazy"></iframe>
+                      loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
             </div>
           </div>
           <div class="col-md-6">
-            <div class="route-map-wrap">
+            <div class="route-map-wrap" id="rr_destination_map_wrap">
               <div class="route-map-placeholder" id="rr_destination_map_placeholder">
                 <i class="bi bi-geo-alt-fill"></i><span>Destination preview</span>
               </div>
               <iframe class="route-map-frame d-none" id="rr_destination_map"
-                      title="Destination map preview" loading="lazy"></iframe>
+                      loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
             </div>
           </div>
           <div class="col-12">
-            <div class="route-map-wrap route-map-wrap-lg">
+            <div class="route-map-wrap route-map-wrap-lg" id="rr_route_map_wrap">
               <div class="route-map-placeholder" id="rr_route_map_placeholder">
-                <i class="bi bi-map"></i><span>Route preview</span>
+                <i class="bi bi-signpost-2"></i><span>Enter both locations to preview the route</span>
               </div>
-              <iframe class="route-map-frame d-none" id="rr_route_map"
-                      title="Route map preview" loading="lazy"></iframe>
+              <iframe class="route-map-frame route-map-frame-lg d-none" id="rr_route_map"
+                      loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
             </div>
           </div>
         </div>

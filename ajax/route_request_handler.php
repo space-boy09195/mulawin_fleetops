@@ -19,7 +19,7 @@ if ($action === 'request') {
     $origin = requiredString('origin', 'Origin', 150);
     $destination = requiredString('destination', 'Destination', 150);
     $distance = optionalFloat('distance_km');
-    $requestNotes = optionalString('request_notes', null, 500);
+    $requestNotes = optionalString('request_notes');
     if ($distance !== null && $distance < 0) {
         jsonFail('Distance cannot be negative.');
     }

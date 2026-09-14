@@ -1,14 +1,14 @@
 <?php
 // ============================================================
 // pages/recycle_bin.php
-// View and restore soft-deleted records — Head Management and Accounting.
+// View deleted records and audit history — Head Management only.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/soft_delete.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]);
+requireRole([ROLE_HEAD_MANAGEMENT]);
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/recycle_bin.js';
 layoutHead('Recycle Bin', APP_BASE . '/assets/css/recycle_bin.css');
@@ -16,15 +16,25 @@ layoutHead('Recycle Bin', APP_BASE . '/assets/css/recycle_bin.css');
 $pdo = getDBConnection();
 
 $archived = $pdo->query("
-    SELECT archive_id, original_table, original_id, record_data, deleted_by_name, deleted_at
+    SELECT archive_id, original_table, original_id, record_data, deleted_by_name, deleted_at, restored_at
     FROM deleted_records
-    WHERE restored_at IS NULL
     ORDER BY deleted_at DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$auditLogs = $pdo->query("
+    SELECT a.log_id, a.action, a.table_name, a.record_id,
+           a.old_value, a.new_value, a.ip_address, a.logged_at,
+           COALESCE(u.full_name, 'System') AS user_name
+    FROM audit_logs a
+    LEFT JOIN users u ON u.user_id = a.user_id
+    ORDER BY a.logged_at DESC
+    LIMIT 500
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $tableLabels = [
     'announcements' => ['label' => 'Announcement', 'icon' => 'bi-megaphone'],
     'documents'     => ['label' => 'Document',     'icon' => 'bi-file-earmark'],
+    'payroll_records' => ['label' => 'Payroll Record', 'icon' => 'bi-cash-stack'],
 ];
 ?>
 
@@ -33,10 +43,21 @@ $tableLabels = [
   <div class="rb-header">
     <div>
       <h1 class="rb-title">Recycle Bin</h1>
-      <p class="rb-subtitle">Deleted items are kept here until restored or permanently removed</p>
+      <p class="rb-subtitle">Review deleted records, restore them, and inspect the system audit history.</p>
     </div>
   </div>
 
+  <ul class="nav nav-tabs mb-4" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#rbDeleted" type="button">
+      <i class="bi bi-trash3 me-1"></i>Deleted Records <span class="badge text-bg-secondary"><?= count(array_filter($archived, fn($a) => $a['restored_at'] === null)) ?></span>
+    </button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#rbAudit" type="button">
+      <i class="bi bi-journal-text me-1"></i>Audit Logs <span class="badge text-bg-secondary"><?= count($auditLogs) ?></span>
+    </button></li>
+  </ul>
+
+  <div class="tab-content">
+  <div class="tab-pane fade show active" id="rbDeleted">
   <?php if (empty($archived)): ?>
   <div class="rb-empty">
     <i class="bi bi-trash3 rb-empty-icon"></i>
@@ -51,6 +72,7 @@ $tableLabels = [
           <th>Item</th>
           <th>Deleted By</th>
           <th>Deleted At</th>
+          <th>Status</th>
           <th></th>
         </tr>
       </thead>
@@ -68,7 +90,15 @@ $tableLabels = [
           <td><?= htmlspecialchars($a['deleted_by_name']) ?></td>
           <td class="rb-date"><?= date('M d, Y g:i A', strtotime($a['deleted_at'])) ?></td>
           <td>
+            <?php if ($a['restored_at']): ?>
+            <span class="badge text-bg-success">Restored</span>
+            <?php else: ?>
+            <span class="badge text-bg-warning">Deleted</span>
+            <?php endif; ?>
+          </td>
+          <td>
             <div class="rb-actions">
+              <?php if (!$a['restored_at']): ?>
               <button class="rb-btn rb-btn-restore" data-archive-id="<?= $a['archive_id'] ?>" title="Restore">
                 <i class="bi bi-arrow-counterclockwise"></i> Restore
               </button>
@@ -76,6 +106,9 @@ $tableLabels = [
                       data-summary="<?= htmlspecialchars($summary) ?>" title="Permanently delete">
                 <i class="bi bi-trash3"></i>
               </button>
+              <?php else: ?>
+              <span class="text-muted small">No actions</span>
+              <?php endif; ?>
             </div>
           </td>
         </tr>
@@ -84,6 +117,38 @@ $tableLabels = [
     </table>
   </div>
   <?php endif; ?>
+  </div>
+
+  <div class="tab-pane fade" id="rbAudit">
+    <div class="rb-table-wrap">
+      <div class="p-3 border-bottom">
+        <input type="search" class="form-control" id="auditSearch" placeholder="Search actions, users, tables, or record IDs...">
+      </div>
+      <div class="table-responsive">
+        <table class="table rb-table" id="auditTable">
+          <thead><tr><th>Date</th><th>User</th><th>Action</th><th>Table</th><th>Record</th><th>Details</th><th>IP Address</th></tr></thead>
+          <tbody>
+          <?php foreach ($auditLogs as $log):
+            $details = trim(($log['old_value'] ?? '') . ' ' . ($log['new_value'] ?? ''));
+            $searchText = strtolower($log['user_name'] . ' ' . $log['action'] . ' ' . $log['table_name'] . ' ' . $log['record_id'] . ' ' . $details);
+          ?>
+            <tr data-audit-search="<?= htmlspecialchars($searchText, ENT_QUOTES) ?>">
+              <td class="rb-date"><?= date('M d, Y g:i A', strtotime($log['logged_at'])) ?></td>
+              <td><?= htmlspecialchars($log['user_name']) ?></td>
+              <td><span class="rb-type-badge"><?= htmlspecialchars($log['action']) ?></span></td>
+              <td><?= htmlspecialchars($log['table_name']) ?></td>
+              <td><?= $log['record_id'] !== null ? (int)$log['record_id'] : '—' ?></td>
+              <td class="rb-summary" title="<?= htmlspecialchars($details) ?>"><?= htmlspecialchars($details ?: '—') ?></td>
+              <td><?= htmlspecialchars($log['ip_address'] ?? '—') ?></td>
+            </tr>
+          <?php endforeach; ?>
+          <?php if (!$auditLogs): ?><tr><td colspan="7" class="text-center text-muted py-4">No audit logs found.</td></tr><?php endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  </div>
 
 </div>
 

@@ -45,6 +45,7 @@ function getNavItems(): array {
         ['label' => 'Documents',           'href' => '/pages/documents.php',    'icon' => 'bi-folder2-open',        'roles' => []],
         ['section' => 'Admin'],
         ['label' => 'User Management',     'href' => '/pages/users.php',        'icon' => 'bi-people',              'roles' => [ROLE_HEAD_MANAGEMENT]],
+        ['label' => 'Recycle Bin',         'href' => '/pages/recycle_bin.php',  'icon' => 'bi-trash3',              'roles' => [ROLE_HEAD_MANAGEMENT]],
     ];
 }
 

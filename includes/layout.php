@@ -258,6 +258,7 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     html.sidebar-precollapsed #appSidebar .nav-link { padding: 10px 0; justify-content: center; }
     html.sidebar-precollapsed #appSidebar .theme-toggle-label { opacity: 0; width: 0; }
     html.sidebar-precollapsed #appSidebar .sidebar-user-info { opacity: 0; width: 0; }
+    html.sidebar-precollapsed #appSidebar .sidebar-logout-btn { display: none; }
     html.sidebar-precollapsed #appShell .main-wrapper { margin-left: var(--sidebar-collapsed); }
     html.sidebar-precollapsed #appSidebar .sidebar-home-icon-btn { display: none; }
   </style>

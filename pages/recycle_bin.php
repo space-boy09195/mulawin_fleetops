@@ -67,12 +67,12 @@ function auditDetails(array $log): string {
     <p class="page-subtitle">Review deleted records, restore them, and inspect the system audit history.</p>
   </div>
 
-  <ul class="nav nav-tabs mb-4" role="tablist">
-    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#rbDeleted" type="button">
-      <i class="bi bi-trash3 me-1"></i>Deleted Records <span class="badge text-bg-secondary"><?= count(array_filter($archived, fn($a) => $a['restored_at'] === null)) ?></span>
+  <ul class="nav rb-tabs mb-4" role="tablist">
+    <li class="nav-item" role="presentation"><button class="rb-tab active" data-bs-toggle="tab" data-bs-target="#rbDeleted" type="button" role="tab">
+      <i class="bi bi-trash3 me-1"></i>Deleted Records <span class="rb-tab-count"><?= count(array_filter($archived, fn($a) => $a['restored_at'] === null)) ?></span>
     </button></li>
-    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#rbAudit" type="button">
-      <i class="bi bi-journal-text me-1"></i>Audit Logs <span class="badge text-bg-secondary"><?= count($auditLogs) ?></span>
+    <li class="nav-item" role="presentation"><button class="rb-tab" data-bs-toggle="tab" data-bs-target="#rbAudit" type="button" role="tab">
+      <i class="bi bi-journal-text me-1"></i>Audit Logs <span class="rb-tab-count"><?= count($auditLogs) ?></span>
     </button></li>
   </ul>
 
@@ -116,9 +116,7 @@ function auditDetails(array $log): string {
     </div>
     <table class="table-custom rb-table">
       <thead>
-        <tr data-deleted-search="<?= htmlspecialchars(strtolower($summary . ' ' . $a['original_table'] . ' ' . $a['deleted_by_name'] . ' ' . $a['original_id']), ENT_QUOTES) ?>"
-            data-deleted-type="<?= htmlspecialchars(strtolower($a['original_table'])) ?>"
-            data-deleted-status="<?= $a['restored_at'] ? 'restored' : 'deleted' ?>">
+        <tr>
           <th>Type</th>
           <th>Item</th>
           <th>Deleted By</th>
@@ -133,7 +131,9 @@ function auditDetails(array $log): string {
           $meta  = $tableLabels[$a['original_table']] ?? ['label' => ucfirst($a['original_table']), 'icon' => 'bi-box'];
           $summary = summarizeArchivedRecord($a['original_table'], $data);
         ?>
-        <tr>
+        <tr data-deleted-search="<?= htmlspecialchars(strtolower($summary . ' ' . $a['original_table'] . ' ' . $a['deleted_by_name'] . ' ' . $a['original_id']), ENT_QUOTES) ?>"
+            data-deleted-type="<?= htmlspecialchars(strtolower($a['original_table'])) ?>"
+            data-deleted-status="<?= $a['restored_at'] ? 'restored' : 'deleted' ?>">
           <td>
             <span class="rb-type-badge"><i class="bi <?= $meta['icon'] ?>"></i> <?= htmlspecialchars($meta['label']) ?></span>
           </td>

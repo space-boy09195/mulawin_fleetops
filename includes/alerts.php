@@ -1,31 +1,31 @@
 <?php
 // includes/alerts.php
-// Rule-based Analytical Insights engine for the Analytics page.
 //
-// This file is now just an ORCHESTRATOR. All the actual detection logic
-// lives in /analytics/, split by stage of the same progression this file
-// used to document in one big comment:
-//   - analytics/descriptive_analytics.php   -> what is the number right now
-//   - analytics/comparative_analytics.php   -> how does it compare with the previous period
-//   - analytics/diagnostic_analytics.php    -> what's the likely driver (e.g. which truck/client)
-//   - analytics/prescriptive_analytics.php  -> concrete next actions (the 'prescription' list)
+// ALERTS ORCHESTRATOR — The Boss/Traffic Controller for the Analytics Page.
 //
-// getAnalyticsAlerts() below has the SAME name, SAME parameters, and SAME
-// return shape as before the split — pages/analytics.php calls it exactly
-// as it did previously, so nothing outside this file needs to change.
+// WHAT THIS DOES:
+// - Manages and gathers all alerts in one place.
+// - Acts as a middleman (orchestrator): it doesn't do any calculations itself, 
+//   it just calls the 4 main analytics layer files and merges their results together:
+//     1. descriptive_analytics.php  -> What is the number right now?
+//     2. comparative_analytics.php  -> How does it compare to last period?
+//     3. diagnostic_analytics.php   -> What/Who caused the change?
+//     4. prescriptive_analytics.php -> What actions should we take?
 //
-// Each alert is still an associative array:
-//   [
-//     'alert'        => short headline,
-//     'severity'     => 'Critical' | 'Warning' | 'Info',
-//     'source'       => department label,
-//     'detail'       => one-line explanation with the numbers,
-//     'action_url'   => where to go to act on it,
-//     'type'         => machine-readable tag,
-//     'priority'     => optional explicit CSS-tier override ('high'|'medium'|'good'),
-//     'prescription' => array of concrete next-step bullets,
-//   ]
-
+// WHY IT IS EASY TO USE:
+// - `getAnalyticsAlerts()` works exactly the same as it did before the code split. 
+// - Other files (like `pages/analytics.php`) call it the same way without needing any updates.
+//
+// WHAT EACH ALERT CONTAINS (Output Structure):
+// - 'alert'        => Short summary headline
+// - 'severity'     => 'Critical', 'Warning', or 'Info'
+// - 'source'       => Department responsible
+// - 'detail'       => One-line breakdown with the actual numbers
+// - 'action_url'   => Link/page to go fix the issue
+// - 'type'         => Internal code label
+// - 'priority'     => Visual styling tier ('high', 'medium', or 'good')
+// - 'prescription' => List of recommended action bullet points
+//
 require_once __DIR__ . '/../analytics/descriptive_analytics.php';
 require_once __DIR__ . '/../analytics/comparative_analytics.php';
 require_once __DIR__ . '/../analytics/diagnostic_analytics.php';

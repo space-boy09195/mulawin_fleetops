@@ -1,21 +1,24 @@
 <?php
 // analytics/diagnostic_analytics.php
 //
-// DIAGNOSTIC layer — third step in the Descriptive -> Comparative ->
-// Diagnostic -> Prescriptive progression. Answers "what's the likely
-// DRIVER behind this number?" not just "it changed." Both checks below
-// compare against the previous period the same way comparative_analytics
-// .php does, but go one step further by trying to explain WHY — that
-// extra step is what makes them diagnostic instead of comparative.
+// DIAGNOSTIC LAYER — Step 3 of the analytics system.
 //
-// This is the only detection file that needs $pdo directly for its own
-// query: the maintenance-cost check drills into maintenance_records to
-// name the single truck responsible for the largest share of this
-// period's spend, rather than just reporting the total went up.
+// WHAT THIS DOES:
+// - Answers one simple question: "WHY did this number change?"
+// - Unlike the Comparative layer (which just tells you a number went up or down), 
+//   this file digs deeper to find the main driver or cause behind the change.
+// - Focuses on explaining the reason behind bad news or significant shifts.
 //
-// Called by includes/alerts.php, which merges this file's output with
-// descriptive_analytics.php and comparative_analytics.php before sorting
-// and returning the combined alert list.
+// WHY IT NEEDS THE DATABASE ($pdo):
+// - It talks directly to the database ($pdo) to pull specific details.
+// - Example: Instead of just saying "maintenance costs went up," it queries the 
+//   `maintenance_records` table to pinpoint the exact truck responsible for the biggest chunk of that spend.
+//
+// HOW IT FITS INTO THE APP:
+// - Called by `includes/alerts.php`.
+// - The system combines the results from this file with `descriptive_analytics.php` 
+//   and `comparative_analytics.php`, sorts them into one list, and shows the final alerts.
+//
 
 require_once __DIR__ . '/prescriptive_analytics.php';
 

@@ -1,26 +1,29 @@
 <?php
 // analytics/comparative_analytics.php
 //
-// COMPARATIVE layer — second step in the Descriptive -> Comparative ->
-// Diagnostic -> Prescriptive progression. Answers "how does this period
-// compare with the previous one?" Every check in this file needs
-// $metrics['hasComparison'] to be true — periods like "All Time" have no
-// natural prior window, so this entire file is a no-op (returns an empty
-// array immediately) when that flag is false.
+// COMPARATIVE LAYER — Step 2 of the analytics system.
 //
-// This file only reports GOOD news — rising revenue, improving on-time
-// rate, and so on. Bad-news comparisons (revenue falling, maintenance
-// cost rising) go one step further than a plain before/after comparison
-// because they also try to explain WHY, which is what makes them
-// diagnostic instead — see diagnostic_analytics.php.
+// WHAT THIS DOES:
+// - Answers one question: "Is this period better than the previous one?"
+// - Compares current numbers against past numbers (e.g., this month vs. last month).
+// - REQUIRES PRIOR DATA: If there is no previous period to compare against (like selecting
+//   "All Time"), it immediately stops and returns nothing.
 //
-// No DB access needed here at all: this is pure math on the $metrics
-// array that pages/analytics.php already built from the DB earlier in
-// the request, which is why the function signature doesn't take $pdo.
+// KEY RULE (GOOD NEWS ONLY):
+// - This file ONLY flags GOOD news (e.g., revenue went up, on-time rate improved).
+// - Bad news (e.g., revenue dropped) is handled by `diagnostic_analytics.php` instead,
+//   because bad news needs to explain WHY things got worse, not just that they did.
 //
-// Called by includes/alerts.php, which merges this file's output with
-// descriptive_analytics.php and diagnostic_analytics.php before sorting
-// and returning the combined alert list.
+// NO DATABASE ACCESS NEEDED:
+// - Does NOT talk to the database ($pdo). 
+// - It just does quick math using the pre-calculated numbers (`$metrics` array) 
+//   already created by `pages/analytics.php`.
+//
+// HOW IT FITS INTO THE APP:
+// - Called by `includes/alerts.php`.
+// - Its results are combined with `descriptive_analytics.php` and `diagnostic_analytics.php`,
+//   sorted into one single list, and returned as alerts.
+//
 
 require_once __DIR__ . '/prescriptive_analytics.php';
 

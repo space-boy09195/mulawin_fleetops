@@ -1,22 +1,25 @@
 <?php
 // analytics/descriptive_analytics.php
 //
-// DESCRIPTIVE layer — first step in the Descriptive -> Comparative ->
-// Diagnostic -> Prescriptive progression. Answers only "what is the
-// number right now?" There is no comparison to a previous period here
-// and no investigation into causes — just a snapshot check against a
-// fixed, hardcoded threshold (e.g. "utilization under 60% is worth
-// flagging, regardless of whether it's trending up or down").
+// DESCRIPTIVE LAYER — Step 1 of the analytics system.
 //
-// This is the only one of the three DETECTION files (descriptive,
-// comparative, diagnostic) that needs $pdo directly on its own — not for
-// any of the period-based metrics, but because "open incidents" is a
-// live COUNT(*) against the incidents table rather than something
-// derived from the $metrics array pages/analytics.php builds.
+// WHAT THIS DOES:
+// - Answers one simple question: "What is the number right now?"
+// - Works like a basic snapshot: it checks current numbers against a set limit.
+//   (Example: "If usage is below 60%, raise a red flag" — no matter if usage is getting better or worse).
+// - Does NOT compare past data and does NOT try to explain why something happened.
 //
-// Called by includes/alerts.php, which merges this file's output with
-// comparative_analytics.php and diagnostic_analytics.php before sorting
-// and returning the combined alert list.
+// WHY IT NEEDS THE DATABASE ($pdo):
+// - Out of the 3 detection files (Descriptive, Comparative, Diagnostic), this is the ONLY ONE
+//   that talks directly to the database ($pdo).
+// - Reason: It needs to run a live count of "open incidents" straight from the `incidents` table,
+//   instead of relying on the pre-calculated numbers from `pages/analytics.php`.
+//
+// HOW IT FITS INTO THE APP:
+// - Called by `includes/alerts.php`.
+// - The system combines the results from this file with `comparative_analytics.php`
+//   and `diagnostic_analytics.php`, sorts them into one list, and shows the final alerts.
+//
 
 require_once __DIR__ . '/prescriptive_analytics.php';
 

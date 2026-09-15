@@ -1,31 +1,26 @@
 <?php
 // analytics/prescriptive_analytics.php
 //
-// PRESCRIPTIVE layer — the last step in the Descriptive -> Comparative ->
-// Diagnostic -> Prescriptive progression used by the Analytics page's
-// rule-based insights engine (see includes/alerts.php, which is now just
-// the orchestrator that calls all four layers and merges the results).
+// PRESCRIPTIVE LAYER — Final step of the analytics system.
 //
-// This file holds NO detection logic of its own — no thresholds, no DB
-// queries, no period comparisons. It only answers "given that this alert
-// fired, what should someone actually DO about it?" That's a lookup
-// table, not a calculation, which is exactly why it's safe to split out:
-// nothing else in the system depends on HOW a prescription is produced,
-// only on what getPrescription() returns for a given type.
+// WHAT THIS DOES:
+// - Answers one simple question: "Now that we have an alert, what should we DO about it?"
+// - Does NOT check thresholds, compare past data, or run database queries.
+// - Acts as a cheat sheet / lookup table that pairs an alert type to an actionable fix or next step.
 //
-// Each of the other three files calls this instead of writing the bullet
-// list inline, e.g.:
-//     'prescription' => getPrescription('utilization'),
+// HOW OTHER FILES USE IT:
+// - The other detection files (Descriptive, Comparative, Diagnostic) call `getPrescription()` 
+//   to attach action steps to an alert.
+// - Example: `'prescription' => getPrescription('utilization')`
 //
-// Benefit of splitting this out: if you ever want to reword an action
-// step, or hand this off to a teammate to fill in better suggestions,
-// they can edit this one file without touching any detection logic and
-// without risk of breaking a threshold check by accident.
+// WHY IT IS SPLIT INTO ITS OWN FILE:
+// - Keeps action steps in one place. Anyone can edit or reword recommendations 
+//   without touching code logic or risking breaking threshold checks.
 //
-// If a type isn't found in the table, this returns an empty array rather
-// than throwing an error — an alert simply renders with no action
-// bullets, which is a safe, non-breaking fallback.
-
+// SAFE FALLBACK:
+// - If an alert type isn't listed in the lookup table, it simply returns an empty list 
+//   instead of crashing or throwing an error.
+//
 function getPrescription(string $type): array {
     static $prescriptions = [
 

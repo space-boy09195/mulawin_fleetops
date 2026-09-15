@@ -8,11 +8,14 @@
   margin: 0 auto;
 }
 
-.rb-page > .page-header {
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  padding: 0;
+.rb-page > .page-header,
+.rb-page > .page-header.page-header {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 0 24px 0 !important;
 }
 
 .rb-tabs {

@@ -86,14 +86,11 @@ if ($action === 'upload') {
     }
 
     try {
-        $hasExpiryColumn = (bool)$pdo->query("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'documents' AND column_name = 'expiry_date'")->fetchColumn();
-        if ($hasExpiryColumn) {
-            $stmt = $pdo->prepare("INSERT INTO documents (uploaded_by, trip_id, doc_type, file_name, stored_name, file_path, file_size, mime_type, description, expiry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([currentUserId(), $tripId, $docType, $origName, $storedName, $filePath, $fileSize, $mimeType, $description, $expiryDate]);
-        } else {
-            $stmt = $pdo->prepare("INSERT INTO documents (uploaded_by, trip_id, doc_type, file_name, stored_name, file_path, file_size, mime_type, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([currentUserId(), $tripId, $docType, $origName, $storedName, $filePath, $fileSize, $mimeType, $description]);
-        }
+        // Requires db/document_expiry_migration.sql to have been applied — see
+        // instructions/instructions.md, which now runs every db/*_migration.sql
+        // file as a required setup step rather than a hand-picked subset.
+        $stmt = $pdo->prepare("INSERT INTO documents (uploaded_by, trip_id, doc_type, file_name, stored_name, file_path, file_size, mime_type, description, expiry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([currentUserId(), $tripId, $docType, $origName, $storedName, $filePath, $fileSize, $mimeType, $description, $expiryDate]);
         $newId = (int)$pdo->lastInsertId();
 
         auditLog('UPLOAD_DOCUMENT', 'documents', $newId, null, [

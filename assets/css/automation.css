@@ -21,24 +21,24 @@
   gap: 1rem;
   padding: 1.25rem;
   margin-bottom: 1rem;
-  background: var(--bs-body-bg);
-  border: 1px solid var(--bs-border-color);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
 }
 
 .automation-card-muted {
-  background: var(--bs-tertiary-bg);
+  background: var(--content-bg);
 }
 
 .automation-card-title {
-  color: var(--bs-emphasis-color);
+  color: var(--text-primary);
   font-weight: 700;
 }
 
 .automation-card-text {
   max-width: 760px;
   margin: 0.45rem 0 0;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   font-size: 0.9rem;
 }
 
@@ -56,8 +56,8 @@
 }
 
 .automation-status.is-off {
-  color: var(--bs-secondary-color);
-  background: var(--bs-secondary-bg);
+  color: var(--text-secondary);
+  background: var(--content-bg);
 }
 
 .automation-control-form {
@@ -70,16 +70,16 @@
 .automation-job-grid { display: grid; gap: .8rem; margin-top: 1.25rem; }
 .automation-job-card {
   display: flex; align-items: center; gap: 1rem; padding: 1rem;
-  background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: 10px;
+  background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px;
 }
-.automation-job-icon { font-size: 1.35rem; color: var(--bs-primary); width: 2rem; text-align: center; }
+.automation-job-icon { font-size: 1.35rem; color: var(--accent); width: 2rem; text-align: center; }
 .automation-job-content { flex: 1; }
-.automation-job-content h2 { font-size: .95rem; margin: 0; color: var(--bs-emphasis-color); }
-.automation-job-content p { margin: .25rem 0 0; color: var(--bs-secondary-color); font-size: .82rem; }
+.automation-job-content h2 { font-size: .95rem; margin: 0; color: var(--text-primary); }
+.automation-job-content p { margin: .25rem 0 0; color: var(--text-secondary); font-size: .82rem; }
 .automation-job-toggle { display: flex; align-items: center; gap: .6rem; }
 .automation-job-state { font-size: .76rem; font-weight: 700; }
 .automation-job-state.is-on { color: #198754; }
-.automation-job-state.is-off { color: var(--bs-secondary-color); }
+.automation-job-state.is-off { color: var(--text-secondary); }
 
 @media (max-width: 700px) {
   .automation-page { padding: 1.25rem 1rem; }

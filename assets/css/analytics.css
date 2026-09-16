@@ -15,7 +15,7 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 1rem;
-  border-bottom: 1px solid var(--bs-border-color);
+  border-bottom: 1px solid var(--card-border);
   padding-bottom: 1rem;
   margin-bottom: 1.5rem;
 }
@@ -23,14 +23,14 @@
 .an-title {
   font-size: 1.4rem;
   font-weight: 700;
-  color: var(--bs-emphasis-color);
+  color: var(--text-primary);
   margin: 0;
   letter-spacing: -0.01em;
 }
 
 .an-subtitle {
   font-size: 0.82rem;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   margin: 3px 0 0;
 }
 
@@ -43,14 +43,14 @@
 .an-period-select {
   font-size: 0.85rem;
   border-radius: 8px;
-  border-color: var(--bs-border-color);
-  background-color: var(--bs-body-bg);
-  color: var(--bs-body-color);
+  border-color: var(--card-border);
+  background-color: var(--card-bg);
+  color: var(--text-primary);
   min-width: 150px;
 }
 
 .an-period-select option:disabled {
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   font-style: italic;
 }
 
@@ -64,13 +64,13 @@
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   font-size: 0.8rem;
   margin: -0.75rem 0 1.25rem;
 }
 
 .an-scope-note i {
-  color: var(--bs-primary);
+  color: var(--accent);
 }
 
 .an-adjust-note {
@@ -95,8 +95,8 @@
 }
 
 .an-kpi-card {
-  background: var(--bs-body-bg);
-  border: 1px solid var(--bs-border-color);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
   padding: 1rem 1.1rem;
 }
@@ -106,7 +106,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   margin-bottom: 8px;
   display: flex;
   align-items: center;
@@ -117,13 +117,13 @@
   font-size: 1.5rem;
   font-weight: 800;
   line-height: 1;
-  color: var(--bs-emphasis-color);
+  color: var(--text-primary);
   white-space: nowrap;
 }
 
 .an-kpi-sub {
   font-size: 0.74rem;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   margin-top: 6px;
 }
 
@@ -167,7 +167,7 @@
 }
 
 .an-trend-flat {
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   font-weight: 600;
 }
 
@@ -180,8 +180,8 @@
 }
 
 .an-widget {
-  background: var(--bs-body-bg);
-  border: 1px solid var(--bs-border-color);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -195,14 +195,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.8rem 1rem;
-  border-bottom: 1px solid var(--bs-border-color);
-  background: var(--bs-tertiary-bg);
+  border-bottom: 1px solid var(--card-border);
+  background: var(--content-bg);
 }
 
 .an-widget-title {
   font-size: 0.875rem;
   font-weight: 700;
-  color: var(--bs-emphasis-color);
+  color: var(--text-primary);
   display: flex;
   align-items: center;
 }
@@ -213,9 +213,9 @@
   gap: 5px;
   font-size: 0.75rem;
   font-weight: 600;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   background: transparent;
-  border: 1px solid var(--bs-border-color);
+  border: 1px solid var(--card-border);
   border-radius: 6px;
   padding: 3px 9px;
   cursor: pointer;
@@ -235,7 +235,7 @@
   justify-content: center;
   gap: 0.5rem;
   padding: 2.5rem 1rem;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   font-size: 0.85rem;
 }
 
@@ -277,7 +277,7 @@
   align-items: center;
   gap: 6px;
   font-size: 0.78rem;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
 }
 
 .an-legend-dot {
@@ -293,7 +293,7 @@
 
 .an-legend-val {
   font-weight: 700;
-  color: var(--bs-body-color);
+  color: var(--text-primary);
   margin-left: 2px;
 }
 
@@ -315,8 +315,8 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--bs-secondary-color);
-  border-bottom: 1px solid var(--bs-border-color);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--card-border);
   padding: 0.6rem 1rem;
   white-space: nowrap;
 }
@@ -324,8 +324,8 @@
 .an-table tbody td {
   padding: 0.7rem 1rem;
   vertical-align: middle;
-  border-bottom: 1px solid var(--bs-border-color);
-  color: var(--bs-body-color);
+  border-bottom: 1px solid var(--card-border);
+  color: var(--text-primary);
 }
 
 .an-table tbody tr:last-child td {
@@ -333,7 +333,7 @@
 }
 
 .an-table tbody tr:hover {
-  background: var(--bs-tertiary-bg);
+  background: var(--content-bg);
 }
 
 .an-mono {
@@ -405,8 +405,8 @@
 }
 
 .an-alerts-summary .an-alert-summary-item {
-  background: var(--bs-body-bg);
-  border: 1px solid var(--bs-border-color);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
   border-radius: 10px;
   padding: 0.5rem 0.9rem;
   font-size: 0.86rem;
@@ -497,13 +497,13 @@
 
 .an-alert-title {
   font-weight: 700;
-  color: var(--bs-emphasis-color);
+  color: var(--text-primary);
   margin-bottom: 4px;
 }
 
 .an-alert-detail {
   font-size: 0.88rem;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   margin-bottom: 8px;
   display: none;
 }
@@ -521,7 +521,7 @@
 .an-alert-toggle {
   background: transparent;
   border: none;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   cursor: pointer;
   font-weight: 600;
 }
@@ -560,7 +560,7 @@
   background: transparent;
   border: none;
   font-weight: 700;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
@@ -585,7 +585,7 @@
 
 .an-section-sub {
   font-size: 0.82rem;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
 }
 
 .an-set-budgets-btn {
@@ -593,11 +593,11 @@
 }
 
 .an-variance-empty {
-  background: var(--bs-body-bg);
-  border: 1px dashed var(--bs-border-color);
+  background: var(--card-bg);
+  border: 1px dashed var(--card-border);
   border-radius: 12px;
   padding: 1.1rem;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   font-size: 0.88rem;
   margin-bottom: 1rem;
 }
@@ -610,9 +610,9 @@
 }
 
 .an-variance-card {
-  background: var(--bs-body-bg);
-  border: 1px solid var(--bs-border-color);
-  border-left: 4px solid var(--bs-border-color);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-left: 4px solid var(--card-border);
   border-radius: 12px;
   padding: 1rem 1.1rem;
 }
@@ -635,16 +635,16 @@
   display: flex;
   justify-content: space-between;
   font-size: 0.85rem;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   padding: 2px 0;
 }
 
 .an-variance-diff {
   margin-top: 6px;
   padding-top: 8px;
-  border-top: 1px solid var(--bs-border-color);
+  border-top: 1px solid var(--card-border);
   font-weight: 700;
-  color: var(--bs-emphasis-color);
+  color: var(--text-primary);
 }
 
 .an-variance-favorable .an-variance-diff span:last-child {
@@ -657,7 +657,7 @@
 
 /* ── Set Budgets modal ─────────────────────────── */
 .an-budget-month-group {
-  border: 1px solid var(--bs-border-color);
+  border: 1px solid var(--card-border);
   border-radius: 10px;
   padding: 0.8rem 1rem;
   margin-bottom: 0.8rem;
@@ -674,7 +674,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   margin: 4px 0 6px;
 }
 

@@ -25,7 +25,7 @@
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
-  border-bottom: 2px solid var(--bs-border-color);
+  border-bottom: 2px solid var(--card-border);
   scrollbar-width: thin;
 }
 
@@ -45,14 +45,14 @@
   border: none;
   border-bottom: 3px solid transparent;
   background: none;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   font-size: 0.875rem;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.rb-tab:hover { color: var(--bs-body-color); }
+.rb-tab:hover { color: var(--text-primary); }
 .rb-tab.active { color: #0d6efd; border-bottom-color: #0d6efd; }
 
 .rb-tab-count {
@@ -63,8 +63,8 @@
   height: 20px;
   padding: 0 5px;
   border-radius: 10px;
-  background: var(--bs-secondary-bg);
-  color: var(--bs-secondary-color);
+  background: var(--content-bg);
+  color: var(--text-secondary);
   font-size: 0.72rem;
   font-weight: 700;
 }
@@ -81,7 +81,7 @@
   align-items: center;
   justify-content: center;
   padding: 4rem 2rem;
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   text-align: center;
 }
 .rb-empty-icon { 
@@ -97,8 +97,8 @@
 
 /* ── Table ───────────────────────────────────── */
 .rb-table-wrap {
-  background: var(--bs-body-bg);
-  border: 1px solid var(--bs-border-color);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -109,8 +109,8 @@
   gap: 0.65rem;
   flex-wrap: wrap;
   padding: 0.85rem 1rem;
-  border-bottom: 1px solid var(--bs-border-color);
-  background: var(--bs-tertiary-bg);
+  border-bottom: 1px solid var(--card-border);
+  background: var(--content-bg);
 }
 
 .rb-filter-search {
@@ -123,7 +123,7 @@
   left: 0.75rem;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--bs-secondary-color);
+  color: var(--text-secondary);
   pointer-events: none;
 }
 
@@ -152,8 +152,8 @@
   font-weight: 600;
   padding: 3px 9px;
   border-radius: 20px;
-  background: var(--bs-secondary-bg);
-  color: var(--bs-secondary-color);
+  background: var(--content-bg);
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 

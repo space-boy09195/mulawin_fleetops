@@ -25,9 +25,26 @@ if ($action !== 'toggle_engine' && ($action !== 'toggle_job' || !in_array($key, 
     jsonFail('Unknown automation action.');
 }
 $pdo = getDBConnection();
+
+// automation_settings is keyed by a VARCHAR setting_key, not an int PK, so it
+// can't populate audit_logs.record_id (INT UNSIGNED). Capture the before/after
+// state instead and keep setting_key in both snapshots so the row stays
+// traceable via old_value/new_value (the recycle_bin audit search already
+// matches against both).
+$prevStmt = $pdo->prepare("SELECT setting_value FROM automation_settings WHERE setting_key = ?");
+$prevStmt->execute([$key]);
+$prevValue = $prevStmt->fetchColumn();
+if ($prevValue === false) jsonFail('Automation settings are not installed. Run the automation migration first.', 409);
+
 $stmt = $pdo->prepare("UPDATE automation_settings SET setting_value = ?, updated_by = ? WHERE setting_key = ?");
 $stmt->execute([$enabledRaw, currentUserId(), $key]);
-if ($stmt->rowCount() === 0) jsonFail('Automation settings are not installed. Run the automation migration first.', 409);
-auditLog('UPDATE', 'automation_settings', null, null, ['setting_key' => $key, 'enabled' => $enabledRaw === '1']);
+
+auditLog(
+    'UPDATE',
+    'automation_settings',
+    null,
+    ['setting_key' => $key, 'enabled' => $prevValue === '1'],
+    ['setting_key' => $key, 'enabled' => $enabledRaw === '1']
+);
 header('Location: ' . APP_BASE . '/pages/automation.php');
 exit;

@@ -25,11 +25,30 @@
    mysql -u root -p -e "CREATE DATABASE mulawin_fleetops"
    mysql -u root -p mulawin_fleetops < "db/Mulawin_DB-Phase 1"
    ```
-5. Run any migrations in `db/` on top of the base schema:
+5. Run **every** migration in `db/` on top of the base schema, in any order
+   (each one is written to be safe to re-run). Application code assumes all
+   of these have been applied — skipping one (e.g. on a preview/staging DB
+   that drifts from local) will cause runtime errors on the features that
+   depend on it:
    ```
+   for f in db/*_migration.sql; do mysql -u root -p mulawin_fleetops < "$f"; done
+   ```
+   or run them individually if your shell doesn't support globbing:
+   ```
+   mysql -u root -p mulawin_fleetops < db/announcement_duration_audience_migration.sql
+   mysql -u root -p mulawin_fleetops < db/automation_settings_migration.sql
+   mysql -u root -p mulawin_fleetops < db/clients_migration.sql
+   mysql -u root -p mulawin_fleetops < db/dispatch_client_migration.sql
+   mysql -u root -p mulawin_fleetops < db/document_expiry_migration.sql
+   mysql -u root -p mulawin_fleetops < db/route_approval_and_notifications_migration.sql
    mysql -u root -p mulawin_fleetops < db/trip_costs_migration.sql
+   mysql -u root -p mulawin_fleetops < db/trip_report_document_visibility_migration.sql
+   mysql -u root -p mulawin_fleetops < db/truck_image_migration.sql
    mysql -u root -p mulawin_fleetops < db/vehicle_inspection_migration.sql
    ```
+   Whenever a new `*_migration.sql` file is added to `db/`, run it on every
+   environment (local, Hostinger, and any Vercel preview database) before
+   relying on the feature it backs.
 6. Seed initial user accounts:
    - Open `auth/seed_users.php` in a browser once (or run via CLI), then
      remove/protect it — it should not stay publicly reachable in production.

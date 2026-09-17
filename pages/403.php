@@ -11,6 +11,7 @@ require_once __DIR__ . '/../includes/session.php';
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Access Denied — Mulawin FleetOps</title>
+  <link rel="icon" type="image/png" href="<?= APP_BASE ?>/assets/images/logo.png">
   <link rel="stylesheet" href="<?= APP_BASE ?>/assets/vendor/bootstrap/css/bootstrap.min.css">
   <link rel="stylesheet" href="<?= APP_BASE ?>/assets/vendor/bootstrap-icons/font/bootstrap-icons.min.css">
 </head>

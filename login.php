@@ -86,6 +86,7 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mulawin FleetOps — Login</title>
+  <link rel="icon" type="image/png" href="assets/images/logo.png">
 
   <!-- Bootstrap 5 (vendored locally — see assets/vendor/) -->
   <link rel="stylesheet" href="assets/vendor/bootstrap/css/bootstrap.min.css">
@@ -104,7 +105,9 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
 
     <div class="visual-brand">
       <div class="brand-icon">
-        <i class="bi bi-truck-front-fill"></i>
+        <img src="assets/images/logo.png" alt="Logo" style="width:70%;height:70%;object-fit:contain;"
+             onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';">
+        <i class="bi bi-truck-front-fill" style="display:none;"></i>
       </div>
       <div>
         <p class="eyebrow">Employee access</p>
@@ -134,7 +137,9 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
 
     <div class="login-brand">
       <div class="brand-icon brand-icon--compact">
-        <i class="bi bi-truck-front-fill"></i>
+        <img src="assets/images/logo.png" alt="Logo" style="width:70%;height:70%;object-fit:contain;"
+             onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';">
+        <i class="bi bi-truck-front-fill" style="display:none;"></i>
       </div>
       <h1 class="brand-name">Welcome back</h1>
       <p class="brand-sub">Sign in to your dashboard</p>

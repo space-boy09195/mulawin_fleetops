@@ -218,6 +218,7 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{$fullTitle}</title>
+  <link rel="icon" type="image/png" href="{$base}/assets/images/logo.png">
   <link rel="stylesheet" href="{$base}/assets/vendor/bootstrap/css/bootstrap.min.css">
   <link rel="stylesheet" href="{$base}/assets/vendor/bootstrap-icons/font/bootstrap-icons.min.css">
   <link rel="stylesheet" href="{$base}/assets/css/layout.css">
@@ -278,7 +279,9 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     <div class="sidebar-brand">
       <a href="{$homeUrl}" class="sidebar-home-btn" title="Go to Dashboard">
         <div class="sidebar-brand-icon">
-          <i class="bi bi-truck-front-fill"></i>
+          <img src="{$base}/assets/images/logo.png" alt="Logo" style="width:70%;height:70%;object-fit:contain;"
+               onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';">
+          <i class="bi bi-truck-front-fill" style="display:none;"></i>
         </div>
       </a>
       <div class="sidebar-brand-text">

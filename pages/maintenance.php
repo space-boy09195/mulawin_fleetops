@@ -110,20 +110,11 @@ $checklistSql = "
 $checklists = $pdo->query($checklistSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Dropdowns for forms ───────────────────────────────────────────────────────
-$imageColumns = $pdo->query("
-    SELECT column_name
-    FROM information_schema.columns
-    WHERE table_schema = DATABASE()
-      AND table_name = 'trucks'
-      AND column_name IN ('truck_image_name', 'image_path')
-")->fetchAll(PDO::FETCH_COLUMN);
-$hasLegacyTruckImage = in_array('truck_image_name', $imageColumns, true);
-$hasTruckImagePath = in_array('image_path', $imageColumns, true);
-$truckImageSelect = $hasTruckImagePath
-    ? 'image_path'
-    : ($hasLegacyTruckImage ? "CONCAT('uploads/trucks/', truck_image_name) AS image_path" : 'NULL AS image_path');
+// Requires db/truck_image_migration.sql to have been applied — see
+// instructions/instructions.md, which now runs every db/*_migration.sql file
+// as a required setup step.
 $trucks = $pdo->query("
-    SELECT truck_id, plate_number, brand, model, $truckImageSelect,
+    SELECT truck_id, plate_number, brand, model, image_path,
            image_front_path, image_side_path, image_rear_path, image_top_path,
            COALESCE(body_type, 'Closed Van') AS body_type
     FROM trucks

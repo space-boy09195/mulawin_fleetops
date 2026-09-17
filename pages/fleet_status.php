@@ -202,7 +202,7 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
           </td>
           <td>
             <?php if (!empty($truck['image_path'])): ?>
-            <img src="<?= APP_BASE . '/' . htmlspecialchars($truck['image_path']) ?>" alt="" style="width:42px;height:32px;object-fit:cover;border-radius:4px;" class="me-2">
+            <img src="<?= APP_BASE . '/' . htmlspecialchars($truck['image_path']) ?>" alt="" loading="lazy" decoding="async" style="width:42px;height:32px;object-fit:cover;border-radius:4px;" class="me-2">
             <?php endif; ?>
             <div style="font-weight:600;"><?= htmlspecialchars($truck['brand'] . ' ' . $truck['model']) ?></div>
             <div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars($truck['year_model']) ?></div>

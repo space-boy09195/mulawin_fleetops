@@ -13,8 +13,10 @@
 .DS_Store
 Thumbs.db
 
-# Dependencies (if using Composer)
-vendor/
+# Dependencies (if using Composer) — root-anchored so this doesn't also
+# match assets/vendor/, which holds vendored front-end libraries that ARE
+# meant to be committed (see assets/vendor/README.md).
+/vendor/
 composer.lock
 
 # Logs

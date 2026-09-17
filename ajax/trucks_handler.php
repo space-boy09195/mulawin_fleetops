@@ -51,10 +51,67 @@ function storeTruckImage(?array $file, ?string $existingPath = null): ?string {
         jsonFail('Truck image directory could not be created.', 500);
     }
     $name = bin2hex(random_bytes(16)) . '.' . $extensions[$mime];
-    if (!move_uploaded_file($file['tmp_name'], $directory . $name)) {
+    $destPath = $directory . $name;
+    if (!move_uploaded_file($file['tmp_name'], $destPath)) {
         jsonFail('Truck image could not be saved.', 500);
     }
+    resizeTruckImage($destPath, $mime);
     return 'uploads/trucks/' . $name;
+}
+
+// Cap the longest side and re-encode so a phone photo (often 3000px+, several
+// MB) doesn't get served at full size for a 42x32px table thumbnail. Also
+// auto-rotates JPEGs per their EXIF orientation tag, since phone cameras store
+// portrait shots "sideways" with a rotation flag rather than rotating the
+// pixels — without this they'd display on their side everywhere in the app.
+// Best-effort only: if GD isn't available or decoding fails, the original
+// upload is left in place rather than failing the whole request.
+function resizeTruckImage(string $path, string $mime): void {
+    if (!extension_loaded('gd')) return;
+
+    $maxDimension = 1600;
+    $image = match ($mime) {
+        'image/jpeg' => @imagecreatefromjpeg($path),
+        'image/png'  => @imagecreatefrompng($path),
+        'image/webp' => @imagecreatefromwebp($path),
+        default      => null,
+    };
+    if (!$image) return;
+
+    if ($mime === 'image/jpeg' && function_exists('exif_read_data')) {
+        $exif = @exif_read_data($path);
+        $orientation = $exif['Orientation'] ?? 1;
+        $image = match ($orientation) {
+            3       => imagerotate($image, 180, 0),
+            6       => imagerotate($image, -90, 0),
+            8       => imagerotate($image, 90, 0),
+            default => $image,
+        };
+    }
+
+    $width  = imagesx($image);
+    $height = imagesy($image);
+    if (max($width, $height) > $maxDimension) {
+        $scale     = $maxDimension / max($width, $height);
+        $newWidth  = (int)round($width * $scale);
+        $newHeight = (int)round($height * $scale);
+        $resized   = imagecreatetruecolor($newWidth, $newHeight);
+        if ($mime !== 'image/jpeg') {
+            imagealphablending($resized, false);
+            imagesavealpha($resized, true);
+        }
+        imagecopyresampled($resized, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+        imagedestroy($image);
+        $image = $resized;
+    }
+
+    match ($mime) {
+        'image/jpeg' => imagejpeg($image, $path, 82),
+        'image/png'  => imagepng($image, $path, 6),
+        'image/webp' => imagewebp($image, $path, 82),
+        default      => null,
+    };
+    imagedestroy($image);
 }
 
 function storeTruckViewImages(array $files, array $existing = []): array {

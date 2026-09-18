@@ -47,8 +47,7 @@ $annStmt = $pdo->prepare(
             u.full_name AS author
        FROM announcements a
        JOIN users u ON a.created_by = u.user_id
-      WHERE a.starts_at <= NOW()
-        AND (a.ends_at IS NULL OR a.ends_at >= NOW())
+      WHERE (a.ends_at IS NULL OR a.ends_at >= NOW())
         {$audienceSql}
         {$periodSql}
       ORDER BY a.is_pinned DESC, FIELD(a.priority, 'high', 'medium', 'low'), a.created_at DESC"

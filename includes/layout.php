@@ -117,11 +117,27 @@ function buildSidebarNav(): string {
 }
 
 // ---- Fetch latest active announcements for the current audience (max 3) ----
+function getLatestNotifications(): array {
+    try {
+        $stmt = getDBConnection()->prepare("
+            SELECT notification_id, title, message, link, created_at
+            FROM notifications
+            WHERE user_id = ? AND is_read = 0
+            ORDER BY created_at DESC
+            LIMIT 5
+        ");
+        $stmt->execute([currentUserId()]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log('Unable to load notifications: ' . $e->getMessage());
+        return [];
+    }
+}
+
 function getLatestAnnouncements(): array {
     try {
         $pdo  = getDBConnection();
         $where = [
-            'a.starts_at <= NOW()',
             '(a.ends_at IS NULL OR a.ends_at >= NOW())',
         ];
         $params = [];
@@ -135,23 +151,6 @@ function getLatestAnnouncements(): array {
             };
             $where[] = "(a.audience = 'all' OR a.audience = :audience)";
             $params[':audience'] = $audience;
-        }
-
-        function getLatestNotifications(): array {
-            try {
-                $stmt = getDBConnection()->prepare("
-                    SELECT notification_id, title, message, link, created_at
-                    FROM notifications
-                    WHERE user_id = ? AND is_read = 0
-                    ORDER BY created_at DESC
-                    LIMIT 5
-                ");
-                $stmt->execute([currentUserId()]);
-                return $stmt->fetchAll(PDO::FETCH_ASSOC);
-            } catch (PDOException $e) {
-                error_log('Unable to load notifications: ' . $e->getMessage());
-                return [];
-            }
         }
 
         $stmt = $pdo->prepare(

@@ -8,7 +8,7 @@
   gap: 4px;
   font-size: 0.72rem;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--accent-text);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -118,7 +118,7 @@
 }
 
 .ann-delete-btn:hover {
-  color: #dc2626;
+  color: #c62828;
   background: rgba(220,38,38,0.08);
   border-color: #fca5a5;
 }
@@ -135,7 +135,7 @@
 }
 
 .ann-edit-btn:hover {
-  color: var(--accent);
+  color: var(--accent-text);
   background: rgba(13,110,253,0.08);
   border-color: var(--accent);
 }
@@ -167,3 +167,19 @@
 }
 
 [data-theme="dark"] .btn-close { filter: invert(1); }
+
+
+/* ── Dark mode: text-contrast fixes ──────────────────────────────
+   These status colors were tuned for light backgrounds only; on the
+   dark theme's near-black blended backgrounds several dropped below
+   2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
+[data-theme="dark"] .ann-severity-high { color: #f87171; }
+[data-theme="dark"] .ann-severity-medium { color: #fbbf24; }
+[data-theme="dark"] .ann-severity-low { color: #4ade80; }
+[data-theme="dark"] .ann-severity-option-high:has(input:checked),
+.ann-severity-option-high.ann-severity-option-selected { color: #f87171; }
+[data-theme="dark"] .ann-severity-option-medium:has(input:checked),
+.ann-severity-option-medium.ann-severity-option-selected { color: #fbbf24; }
+[data-theme="dark"] .ann-severity-option-low:has(input:checked),
+.ann-severity-option-low.ann-severity-option-selected { color: #4ade80; }
+[data-theme="dark"] .ann-delete-btn:hover { color: #f87171; }

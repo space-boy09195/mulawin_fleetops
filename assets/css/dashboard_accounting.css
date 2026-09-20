@@ -391,12 +391,12 @@
 }
 
 .da-rec-high {
-  border-left-color: #dc3545;
+  border-left-color: #c62828;
   background: rgba(220, 53, 69, 0.04);
 }
 
 .da-rec-medium {
-  border-left-color: #e67e00;
+  border-left-color: #805900;
   background: rgba(230, 126, 0, 0.04);
 }
 
@@ -475,3 +475,20 @@
   color: var(--bs-body-color);
   min-width: 160px;
 }
+
+
+/* ── Dark mode: text-contrast fixes ──────────────────────────────
+   These status colors were tuned for light backgrounds only; on the
+   dark theme's near-black blended backgrounds several dropped below
+   2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
+[data-theme="dark"] .da-badge-orange { color: #fbbf24; }
+[data-theme="dark"] .da-badge-red { color: #f87171; }
+[data-theme="dark"] .da-badge-green { color: #4ade80; }
+/* Quick-pay action (Overdue / Due Soon widgets) */
+[data-theme="dark"] .da-quick-pay-btn { color: #4ade80; }
+[data-theme="dark"] .da-quick-pay-btn:hover { color: #4ade80; }
+[data-theme="dark"] .da-rec-count { color: #60a5fa; }
+[data-theme="dark"] .da-rec-high { color: #f87171; }
+[data-theme="dark"] .da-rec-medium { color: #e67e00; }
+[data-theme="dark"] .da-rec-priority-high { color: #f87171; }
+[data-theme="dark"] .da-rec-priority-medium { color: #fbbf24; }

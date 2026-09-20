@@ -70,7 +70,7 @@
 }
 
 .an-scope-note i {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .an-adjust-note {
@@ -223,7 +223,7 @@
 }
 
 .an-export-btn:hover {
-  color: #0d6efd;
+  color: #0a58ca;
   border-color: #0d6efd;
   background: rgba(13, 110, 253, 0.06);
 }
@@ -424,7 +424,7 @@
   justify-content: center;
   border-radius: 6px;
   background: rgba(13,110,253,0.06);
-  color: #0d6efd;
+  color: #0a58ca;
 }
 
 .an-alert-cards {
@@ -704,3 +704,15 @@
     box-shadow: none !important;
   }
 }
+
+
+/* ── Dark mode: text-contrast fixes ──────────────────────────────
+   These status colors were tuned for light backgrounds only; on the
+   dark theme's near-black blended backgrounds several dropped below
+   2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
+[data-theme="dark"] .an-adjust-note { color: #fbbf24; }
+[data-theme="dark"] .an-export-btn:hover { color: #60a5fa; }
+[data-theme="dark"] .an-alerts-summary .an-alert-count { color: #60a5fa; }
+[data-theme="dark"] .dh-rec-priority-high { color: #f87171; }
+[data-theme="dark"] .dh-rec-priority-medium { color: #fbbf24; }
+[data-theme="dark"] .dh-rec-priority-good { color: #4ade80; }

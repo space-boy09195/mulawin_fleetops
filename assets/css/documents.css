@@ -223,8 +223,8 @@
 
 .btn-doc-delete:hover {
   background: rgba(220,53,69,0.1);
-  border-color: #dc3545;
-  color: #dc3545;
+  border-color: #c62828;
+  color: #c62828;
 }
 
 /* ── Empty state ─────────────────────────────── */
@@ -445,3 +445,16 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ── Dark mode: text-contrast fixes ──────────────────────────────
+   These status colors were tuned for light backgrounds only; on the
+   dark theme's near-black blended backgrounds several dropped below
+   2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
+[data-theme="dark"] .doc-type-or-cr { color: #4ade80; }
+[data-theme="dark"] .doc-type-delivery-receipt { color: #60a5fa; }
+[data-theme="dark"] .doc-type-waybill { color: #c084fc; }
+[data-theme="dark"] .doc-type-maintenance-record { color: #fbbf24; }
+[data-theme="dark"] .doc-type-billing-record { color: #f87171; }
+[data-theme="dark"] .doc-type-company-document { color: #4ade80; }
+[data-theme="dark"] .btn-doc-delete:hover { color: #f87171; }

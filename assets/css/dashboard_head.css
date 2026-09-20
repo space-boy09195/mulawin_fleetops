@@ -366,7 +366,7 @@
 }
 
 .dh-rec-header i {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .dh-rec-count {
@@ -423,7 +423,7 @@
 }
 
 .dh-rec-medium {
-  border-left-color: #e67e00;
+  border-left-color: #805900;
   background: rgba(230, 126, 0, 0.04);
 }
 
@@ -563,3 +563,16 @@
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+
+/* ── Dark mode: text-contrast fixes ──────────────────────────────
+   These status colors were tuned for light backgrounds only; on the
+   dark theme's near-black blended backgrounds several dropped below
+   2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
+[data-theme="dark"] .dh-sev-critical { color: #f87171; }
+[data-theme="dark"] .dh-sev-warning { color: #fbbf24; }
+[data-theme="dark"] .dh-sev-info { color: #60a5fa; }
+[data-theme="dark"] .dh-rec-count { color: #60a5fa; }
+[data-theme="dark"] .dh-rec-medium { color: #e67e00; }
+[data-theme="dark"] .dh-rec-priority-high { color: #f87171; }
+[data-theme="dark"] .dh-rec-priority-medium { color: #fbbf24; }

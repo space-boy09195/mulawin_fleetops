@@ -17,7 +17,7 @@
 }
 .filter-btn:hover  { 
   border-color: var(--accent); 
-  color: var(--accent); 
+  color: var(--accent-text); 
 }
 
 .filter-btn.active { 
@@ -70,7 +70,7 @@ tr.hidden-row { display: none; }
 .disp-tab:hover { color: var(--text-primary); }
 
 .disp-tab.active {
-  color: var(--accent);
+  color: var(--accent-text);
   border-bottom-color: var(--accent);
 }
 
@@ -90,7 +90,7 @@ tr.hidden-row { display: none; }
 
 .disp-tab.active .disp-tab-count {
   background: rgba(13, 110, 253, 0.15);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* ── Modals ──────────────────────────────────────────────────── */

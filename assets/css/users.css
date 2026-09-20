@@ -265,7 +265,7 @@
 
 .usr-tab.active .usr-tab-count {
   background: rgba(13, 110, 253, 0.12);
-  color: #0d6efd;
+  color: #0a58ca;
 }
 
 /* ── Pane toolbar ────────────────────────────── */
@@ -696,3 +696,26 @@ textarea.usr-input {
     flex-wrap: wrap;
   }
 }
+
+
+/* ── Dark mode: text-contrast fixes ──────────────────────────────
+   These status colors were tuned for light backgrounds only; on the
+   dark theme's near-black blended backgrounds several dropped below
+   2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
+[data-theme="dark"] .btn-usr-reset-pw:hover { color: #fbbf24; }
+[data-theme="dark"] .usr-alert-item { color: #f87171; }
+[data-theme="dark"] .usr-alert-critical { color: #f87171; }
+[data-theme="dark"] .usr-tab.active .usr-tab-count { color: #60a5fa; }
+[data-theme="dark"] .usr-badge-expired { color: #f87171; }
+[data-theme="dark"] .usr-badge-soon { color: #fbbf24; }
+/* Head Management */
+[data-theme="dark"] .usr-role-1 { color: #f87171; }
+/* Dispatcher */
+[data-theme="dark"] .usr-role-2 { color: #60a5fa; }
+/* Maintenance */
+[data-theme="dark"] .usr-role-3 { color: #fbbf24; }
+/* Accounting */
+[data-theme="dark"] .usr-role-4 { color: #4ade80; }
+[data-theme="dark"] .usr-status-active { color: #4ade80; }
+/* ── Driver requirement hint ─────────────────── */
+[data-theme="dark"] .usr-driver-hint { color: #fbbf24; }

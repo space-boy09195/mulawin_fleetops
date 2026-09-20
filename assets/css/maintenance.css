@@ -157,7 +157,7 @@
 
 .mnt-tab.active .mnt-tab-count {
   background: rgba(13, 110, 253, 0.12);
-  color: #0d6efd;
+  color: #0a58ca;
 }
 
 /* ── Filters ─────────────────────────────────── */
@@ -685,3 +685,22 @@ textarea.mnt-input {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+
+/* ── Dark mode: text-contrast fixes ──────────────────────────────
+   These status colors were tuned for light backgrounds only; on the
+   dark theme's near-black blended backgrounds several dropped below
+   2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
+[data-theme="dark"] .mnt-tab.active .mnt-tab-count { color: #60a5fa; }
+[data-theme="dark"] .mnt-type-preventive { color: #4ade80; }
+[data-theme="dark"] .mnt-type-corrective { color: #f87171; }
+[data-theme="dark"] .mnt-type-inspection { color: #fbbf24; }
+[data-theme="dark"] .mnt-ts-operational { color: #4ade80; }
+[data-theme="dark"] .mnt-ts-scheduled-maintenance { color: #fbbf24; }
+[data-theme="dark"] .mnt-ts-under-repair { color: #f87171; }
+[data-theme="dark"] .mnt-result-passed { color: #4ade80; }
+[data-theme="dark"] .mnt-result-failed { color: #f87171; }
+[data-theme="dark"] .mnt-check-ok { color: #4ade80; }
+[data-theme="dark"] .mnt-check-fail { color: #f87171; }
+[data-theme="dark"] .mnt-banner-pass { color: #4ade80; }
+[data-theme="dark"] .mnt-banner-fail { color: #f87171; }

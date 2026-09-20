@@ -196,7 +196,7 @@
 
 .bil-tab.active .bil-tab-count {
   background: rgba(13,110,253,0.12);
-  color: #0d6efd;
+  color: #0a58ca;
 }
 
 /* ── Filters ─────────────────────────────────── */
@@ -738,3 +738,15 @@ textarea.bil-input { resize: vertical; min-height: 70px; }
   justify-content: space-between;
   font-size: 0.85rem;
 }
+
+
+/* ── Dark mode: text-contrast fixes ──────────────────────────────
+   These status colors were tuned for light backgrounds only; on the
+   dark theme's near-black blended backgrounds several dropped below
+   2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
+[data-theme="dark"] .bil-tab.active .bil-tab-count { color: #60a5fa; }
+[data-theme="dark"] .bil-overdue-badge { color: #f87171; }
+[data-theme="dark"] .bil-status-unpaid { color: #f87171; }
+[data-theme="dark"] .bil-status-partial { color: #fbbf24; }
+[data-theme="dark"] .bil-status-paid { color: #4ade80; }
+[data-theme="dark"] .bil-period-note { color: #60a5fa; }

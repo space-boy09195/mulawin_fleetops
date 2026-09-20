@@ -72,7 +72,7 @@
   display: flex; align-items: center; gap: 1rem; padding: 1rem;
   background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 10px;
 }
-.automation-job-icon { font-size: 1.35rem; color: var(--accent); width: 2rem; text-align: center; }
+.automation-job-icon { font-size: 1.35rem; color: var(--accent-text); width: 2rem; text-align: center; }
 .automation-job-content { flex: 1; }
 .automation-job-content h2 { font-size: .95rem; margin: 0; color: var(--text-primary); }
 .automation-job-content p { margin: .25rem 0 0; color: var(--text-secondary); font-size: .82rem; }
@@ -87,3 +87,10 @@
   .automation-job-card { align-items: flex-start; flex-wrap: wrap; }
   .automation-job-toggle { width: 100%; margin-left: 3rem; }
 }
+
+
+/* ── Dark mode: text-contrast fixes ──────────────────────────────
+   These status colors were tuned for light backgrounds only; on the
+   dark theme's near-black blended backgrounds several dropped below
+   2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
+[data-theme="dark"] .automation-status.is-on { color: #4ade80; }

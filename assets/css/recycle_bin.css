@@ -71,7 +71,7 @@
 
 .rb-tab.active .rb-tab-count {
   background: rgba(13, 110, 253, 0.12);
-  color: #0d6efd;
+  color: #0a58ca;
 }
 
 /* ── Empty state ─────────────────────────────── */
@@ -189,7 +189,7 @@
   white-space: nowrap;
 }
 .rb-btn-restore:hover { 
-  color: #198754; 
+  color: #146c43; 
   border-color: #198754; 
   background: rgba(25,135,84,0.08); 
 }
@@ -199,7 +199,7 @@
 }
 
 .rb-btn-purge:hover { 
-  color: #dc3545; 
+  color: #c62828; 
   border-color: #dc3545; 
   background: rgba(220,53,69,0.08); 
 }
@@ -228,3 +228,12 @@
   .rb-table { min-width: 600px; }
   .rb-filter-select { flex: 1 1 170px; }
 }
+
+
+/* ── Dark mode: text-contrast fixes ──────────────────────────────
+   These status colors were tuned for light backgrounds only; on the
+   dark theme's near-black blended backgrounds several dropped below
+   2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
+[data-theme="dark"] .rb-tab.active .rb-tab-count { color: #60a5fa; }
+[data-theme="dark"] .rb-btn-restore:hover { color: #4ade80; }
+[data-theme="dark"] .rb-btn-purge:hover { color: #f87171; }

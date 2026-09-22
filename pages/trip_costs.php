@@ -230,6 +230,11 @@ function expectedFuel(array $row): float {
           <input type="hidden" name="action" value="create_expense">
           <input type="hidden" name="expense_id" value="">
           <div class="mb-3"><label class="form-label">Trip</label><select name="trip_id" class="form-select" required><option value="">Select trip</option><?php foreach ($trips as $trip): ?><option value="<?= $trip['trip_id'] ?>"><?= htmlspecialchars($trip['trip_number'] . ' — ' . $trip['plate_number']) ?></option><?php endforeach; ?></select></div>
+          <div class="alert alert-info py-2 px-3 mb-3" style="font-size: 0.82rem;">
+            <i class="bi bi-info-circle me-1"></i>
+            <strong>Driver Allowance</strong> here is a reimbursable expense (e.g. meals, incidentals) — not the
+            driver's wage. To pay the Driver or Helper for this trip, use <strong>Log Crew Pay</strong> instead.
+          </div>
           <div class="row g-2 mb-3"><div class="col-md-12"><label class="form-label">Date</label><input name="expense_date" id="expenseDate" type="date" value="<?= date('Y-m-d') ?>" min="<?= date('Y-m-d') ?>" class="form-control" required></div></div>
           <div class="d-flex justify-content-between align-items-center mb-2">
             <label class="form-label mb-0">Expense entries</label>

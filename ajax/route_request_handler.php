@@ -43,14 +43,38 @@ if ($action === 'review') {
     requireRole([ROLE_HEAD_MANAGEMENT]);
     $routeId = requiredInt('route_id', 'Route', 1);
     $status = requiredEnum('status', ['Approved', 'Rejected'], 'Status');
-    $route = findOrFail($pdo, 'routes', 'route_id', $routeId, 'Route not found.');
-    if (($route['approval_status'] ?? '') !== 'Pending') {
-        jsonFail('This route request has already been reviewed.', 409);
+
+    try {
+        $pdo->beginTransaction();
+
+        // FOR UPDATE: same reasoning as review_dispatch.php — without a row
+        // lock here, two concurrent reviews of the same request could both
+        // pass the status check below before either commits.
+        $stmt = $pdo->prepare("SELECT * FROM routes WHERE route_id = ? LIMIT 1 FOR UPDATE");
+        $stmt->execute([$routeId]);
+        $route = $stmt->fetch();
+
+        if (!$route) {
+            $pdo->rollBack();
+            jsonFail('Route not found.', 404);
+        }
+        if (($route['approval_status'] ?? '') !== 'Pending') {
+            $pdo->rollBack();
+            jsonFail('This route request has already been reviewed.', 409);
+        }
+
+        $pdo->prepare("UPDATE routes SET approval_status = ?, is_active = ? WHERE route_id = ?")
+            ->execute([$status, $status === 'Approved' ? 1 : 0, $routeId]);
+
+        $pdo->commit();
+
+        auditLog('REVIEW_ROUTE_REQUEST', 'routes', $routeId, ['approval_status' => $route['approval_status']], ['approval_status' => $status]);
+        jsonOk([], "Route request {$status}.");
+    } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('route_request_handler/review: ' . $e->getMessage());
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-    $pdo->prepare("UPDATE routes SET approval_status = ?, is_active = ? WHERE route_id = ?")
-        ->execute([$status, $status === 'Approved' ? 1 : 0, $routeId]);
-    auditLog('REVIEW_ROUTE_REQUEST', 'routes', $routeId, ['approval_status' => $route['approval_status']], ['approval_status' => $status]);
-    jsonOk([], "Route request {$status}.");
 }
 
 jsonFail('Unknown action.');

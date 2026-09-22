@@ -84,6 +84,7 @@ try {
       'unpaid_billing_reminders' => ['Unpaid billing reminders', 'Notify Accounting about unpaid or overdue billings without changing billing status.', 'bi-receipt'],
       'daily_analytics_summary' => ['Daily analytics summary', 'Send Head Management a read-only daily summary of trips, lateness, maintenance, and collections.', 'bi-bar-chart-line'],
       'system_health_checks' => ['System health checks', 'Check required tables and missing document files, then notify Head Management if action is needed.', 'bi-heart-pulse'],
+      'audit_log_retention' => ['Audit log retention', 'Delete audit log entries older than 365 days and notify Head Management how many were pruned.', 'bi-hourglass-split'],
     ];
     foreach ($jobs as $key => [$title, $description, $icon]):
       $enabled = ($settings[$key] ?? '0') === '1';

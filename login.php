@@ -19,6 +19,7 @@ $messages = [
         'empty'   => 'Please enter both username and password.',
         'invalid' => 'Incorrect username or password.',
         'disabled'=> 'Your account has been disabled. Contact the administrator.',
+        'too_many_attempts' => 'Too many failed login attempts. Please wait a few minutes before trying again.',
     ],
     'reason' => [
         'logout'  => 'You have been successfully logged out.',

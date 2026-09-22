@@ -45,8 +45,21 @@ function storeUploadedDocument(
     }
 
     $originalName = basename((string)$file['name']);
-    $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
-    $storedName = bin2hex(random_bytes(16)) . ($extension !== '' ? '.' . $extension : '');
+    // Extension comes from the validated MIME type, never from $originalName —
+    // see document_handler.php's create_document action for why: the name is
+    // attacker-controlled and a crafted polyglot file could otherwise land in
+    // uploads/ with a dangerous extension despite passing the MIME check above.
+    $mimeToExt = [
+        'application/pdf' => 'pdf',
+        'image/jpeg'       => 'jpg',
+        'image/png'        => 'png',
+        'application/msword' => 'doc',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+        'application/vnd.ms-excel' => 'xls',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+    ];
+    $extension = $mimeToExt[$mimeType];
+    $storedName = bin2hex(random_bytes(16)) . '.' . $extension;
     $destination = $uploadDir . $storedName;
 
     if (!move_uploaded_file($file['tmp_name'], $destination)) {

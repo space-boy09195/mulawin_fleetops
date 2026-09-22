@@ -719,3 +719,9 @@ textarea.usr-input {
 [data-theme="dark"] .usr-status-active { color: #4ade80; }
 /* ── Driver requirement hint ─────────────────── */
 [data-theme="dark"] .usr-driver-hint { color: #fbbf24; }
+
+/* Batch CSV import results (success summary + skipped-row list) */
+.usr-import-results {
+  max-height: 220px;
+  overflow-y: auto;
+}

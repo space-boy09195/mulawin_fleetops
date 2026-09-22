@@ -5,6 +5,7 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
+require_once __DIR__ . '/../includes/employee_validation.php';
 
 header('Content-Type: application/json');
 
@@ -181,61 +182,6 @@ function extractEmpFields(): array {
     ];
 }
 
-function validateEmpFields(array $f, bool $allowPassedDates = false): ?string {
-    if (!$f['employee_code']) return 'Employee code is required.';
-    if (!$f['full_name'])     return 'Full name is required.';
-    if (!$f['position'])      return 'Position is required.';
-
-    $isDriver = strcasecmp(trim($f['position']), 'Driver') === 0;
-
-    // License number and expiry must travel together regardless of position.
-    $hasLic = $f['license_number'] || $f['license_expiry'];
-    if ($hasLic && !$f['license_number']) return 'License number is required with expiry.';
-    if ($hasLic && !$f['license_expiry']) return 'License expiry is required with license number.';
-
-    // Drivers must have a complete license record on file.
-    if ($isDriver) {
-        if (!$f['license_number']) return 'License number is required for drivers.';
-        if (!$f['license_expiry']) return 'License expiry is required for drivers.';
-        if (!$f['license_type'])   return 'License type is required for drivers.';
-        if (!$f['date_hired'])     return 'Date hired is required for drivers.';
-    }
-
-    // Philippine LTO license number format: X00-00-000000 (e.g. N01-12-123456).
-    if ($f['license_number'] && !preg_match('/^[A-Za-z]\d{2}-\d{2}-\d{6}$/', $f['license_number']))
-        return 'License number must be in the format X00-00-000000 (e.g. N01-12-123456).';
-
-    if ($f['license_expiry'] && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $f['license_expiry']))
-        return 'Invalid license expiry date.';
-    if ($f['date_hired'] && !isValidDate($f['date_hired']))
-        return 'Invalid date hired.';
-    if ($f['date_hired'] && $f['date_hired'] > date('Y-m-d'))
-        return 'Hire date cannot be in the future.';
-    if (!$allowPassedDates && $f['license_expiry'] && isPassedDate($f['license_expiry']))
-        return 'New employees cannot use a passed license expiry date.';
-    return null;
-}
-
-function duplicateEmployeeExists(PDO $pdo, array $f, ?int $selfId = null): bool {
-    $fullName = preg_replace('/\s+/', ' ', trim((string)($f['full_name'] ?? '')));
-    $contact  = preg_replace('/\s+/', ' ', trim((string)($f['contact_number'] ?? '')));
-
-    if ($fullName === '' || $contact === '') {
-        return false;
-    }
-
-    $sql = "SELECT employee_id FROM employees WHERE full_name = ? AND contact_number = ?";
-    $params = [$fullName, $contact];
-    if ($selfId !== null) {
-        $sql .= " AND employee_id != ?";
-        $params[] = $selfId;
-    }
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    return (bool)$stmt->fetchColumn();
-}
-
 // ── Add employee ──────────────────────────────────────────────────────────────
 if ($action === 'add_employee') {
 
@@ -323,6 +269,114 @@ if ($action === 'edit_employee') {
         error_log('users_handler/edit_employee: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
     }
+}
+
+// ── Batch import employees (CSV) ────────────────────────────────────────────
+// Reuses validateEmpFields()/duplicateEmployeeExists() so an imported row
+// goes through exactly the same rules as one typed into the Add Employee
+// form — no separate, looser validation path for bulk data.
+if ($action === 'batch_import_employees') {
+
+    if (empty($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
+        jsonFail('Please choose a CSV file to upload.');
+    }
+    if ($_FILES['csv_file']['size'] > 2 * 1024 * 1024) {
+        jsonFail('CSV file must be 2 MB or smaller.');
+    }
+
+    $handle = fopen($_FILES['csv_file']['tmp_name'], 'r');
+    if (!$handle) {
+        jsonFail('Could not read the uploaded file.');
+    }
+
+    $header = fgetcsv($handle);
+    if (!$header) {
+        fclose($handle);
+        jsonFail('The CSV file appears to be empty.');
+    }
+    $header = array_map(fn($h) => strtolower(trim((string)$h)), $header);
+
+    $expectedColumns = [
+        'employee_code', 'full_name', 'position', 'contact_number', 'address',
+        'license_number', 'license_expiry', 'license_type', 'date_hired',
+    ];
+    $colIndex = [];
+    foreach ($expectedColumns as $col) {
+        $idx = array_search($col, $header, true);
+        if ($idx !== false) $colIndex[$col] = $idx;
+    }
+    if (!isset($colIndex['employee_code'], $colIndex['full_name'], $colIndex['position'])) {
+        fclose($handle);
+        jsonFail('CSV header must include at least: employee_code, full_name, position.');
+    }
+
+    $imported = [];
+    $errors   = [];
+    $rowNum   = 1; // header was row 1
+
+    while (($row = fgetcsv($handle)) !== false) {
+        $rowNum++;
+        if (count(array_filter($row, fn($v) => trim((string)$v) !== '')) === 0) {
+            continue; // skip blank lines
+        }
+
+        $get = fn($col) => isset($colIndex[$col], $row[$colIndex[$col]]) ? trim((string)$row[$colIndex[$col]]) : '';
+        $f = [
+            'employee_code'  => $get('employee_code') ?: null,
+            'full_name'      => $get('full_name') ?: null,
+            'position'       => $get('position') ?: null,
+            'contact_number' => $get('contact_number') ?: null,
+            'address'        => $get('address') ?: null,
+            'license_number' => $get('license_number') ?: null,
+            'license_expiry' => $get('license_expiry') ?: null,
+            'license_type'   => $get('license_type') ?: null,
+            'date_hired'     => $get('date_hired') ?: null,
+        ];
+
+        if ($err = validateEmpFields($f, true)) {
+            $errors[] = "Row $rowNum: $err";
+            continue;
+        }
+        if (existsWhere($pdo, 'employees', 'employee_code', $f['employee_code'])) {
+            $errors[] = "Row $rowNum: Employee code '{$f['employee_code']}' already exists.";
+            continue;
+        }
+        if (duplicateEmployeeExists($pdo, $f)) {
+            $errors[] = "Row $rowNum: An employee named '{$f['full_name']}' with that contact number already exists.";
+            continue;
+        }
+
+        try {
+            $pdo->prepare("
+                INSERT INTO employees
+                    (employee_code, full_name, position, contact_number, address,
+                     license_number, license_expiry, license_type, is_active, date_hired)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+            ")->execute([
+                $f['employee_code'], $f['full_name'], $f['position'],
+                $f['contact_number'], $f['address'],
+                $f['license_number'], $f['license_expiry'], $f['license_type'],
+                $f['date_hired'],
+            ]);
+            $imported[] = $f['employee_code'];
+        } catch (PDOException $e) {
+            error_log('users_handler/batch_import_employees row ' . $rowNum . ': ' . $e->getMessage());
+            $errors[] = "Row $rowNum: A database error occurred for this row.";
+        }
+    }
+    fclose($handle);
+
+    if ($imported) {
+        auditLog('BATCH_IMPORT_EMPLOYEES', 'employees', null, null, [
+            'imported_count' => count($imported),
+            'employee_codes' => $imported,
+        ]);
+    }
+
+    jsonOk(
+        ['imported' => count($imported), 'skipped' => count($errors), 'errors' => $errors],
+        count($imported) . ' employee(s) imported' . ($errors ? ', ' . count($errors) . ' row(s) skipped.' : '.')
+    );
 }
 
 // ── Unknown action ────────────────────────────────────────────────────────────

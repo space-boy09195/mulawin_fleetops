@@ -17,7 +17,7 @@ enforceCsrf();
 
 $action = $_POST['action'] ?? '';
 $allowedJobs = ['pending_approval_reminders', 'expiry_reminders', 'maintenance_due_reminders',
-    'unpaid_billing_reminders', 'daily_analytics_summary', 'system_health_checks'];
+    'unpaid_billing_reminders', 'daily_analytics_summary', 'system_health_checks', 'audit_log_retention'];
 $enabledRaw = $_POST['enabled'] ?? null;
 if (!in_array((string)$enabledRaw, ['0', '1'], true)) jsonFail('Invalid automation setting.');
 $key = $action === 'toggle_engine' ? 'automation_engine_enabled' : trim($_POST['job_key'] ?? '');

@@ -223,6 +223,7 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
       </div>
 
       <div class="pts-table-wrap" data-ajax-region="stock-table">
+        <?php if (empty ($parts)): ?>
         <div class="pts-empty">
           <i class="bi bi-boxes pts-empty-icon"></i>
           <p>No parts in inventory yet.</p>

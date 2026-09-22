@@ -88,21 +88,6 @@ $recentJobs = $pdo->query("
     ORDER BY mr.date_performed DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// ── Purchase orders ───────────────────────────────────────────────────────────
-$purchaseOrders = $pdo->query("
-    SELECT
-        po.po_id, po.po_number, po.quantity, po.unit_cost, po.supplier,
-        po.status, po.notes, po.requested_at, po.ordered_at, po.received_at, po.cancelled_at,
-        p.part_id, p.part_name, p.unit,
-        req.full_name AS requested_by_name
-    FROM purchase_orders po
-    JOIN parts_inventory p ON po.part_id = p.part_id
-    JOIN users req         ON po.requested_by = req.user_id
-    ORDER BY (po.status IN ('Pending','Ordered')) DESC, po.requested_at DESC
-    LIMIT 100
-")->fetchAll(PDO::FETCH_ASSOC);
-$openPoCount = count(array_filter($purchaseOrders, fn($po) => in_array($po['status'], ['Pending', 'Ordered'], true)));
-
 // ── Categories for filter ─────────────────────────────────────────────────────
 $categories = array_unique(array_column($parts, 'category'));
 sort($categories);
@@ -191,15 +176,6 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
       </button>
     </li>
     <?php endif; ?>
-    <li class="nav-item" role="presentation">
-      <button class="pts-tab" id="tab-po" data-bs-toggle="tab"
-              data-bs-target="#pane-po" type="button" role="tab">
-        <i class="bi bi-cart-check me-1"></i> Purchase Orders
-        <?php if ($openPoCount > 0): ?>
-        <span class="pts-tab-count"><?= $openPoCount ?></span>
-        <?php endif; ?>
-      </button>
-    </li>
   </ul>
 
   <div class="tab-content">
@@ -222,7 +198,8 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
                placeholder="Search part name, number, supplier…">
       </div>
 
-      <div class="pts-table-wrap" data-ajax-region="stock-table">
+      <div class="pts-table-wrap">
+        <?php if (empty($parts)): ?>
         <div class="pts-empty">
           <i class="bi bi-boxes pts-empty-icon"></i>
           <p>No parts in inventory yet.</p>
@@ -397,7 +374,6 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
               <th>Reorder Level</th>
               <th>Shortage</th>
               <th>Unit Cost</th>
-              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -423,17 +399,6 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
               <td class="pts-cost">
                 <?= $part['unit_cost'] !== null ? '₱' . number_format($part['unit_cost'], 2) : '<span class="text-muted">—</span>' ?>
               </td>
-              <td>
-                <button type="button" class="btn btn-sm btn-pts-primary btn-pts-create-po"
-                        data-part-id="<?= $part['part_id'] ?>"
-                        data-part-name="<?= htmlspecialchars($part['part_name']) ?>"
-                        data-unit="<?= htmlspecialchars($part['unit']) ?>"
-                        data-shortage="<?= $shortage ?>"
-                        data-unit-cost="<?= $part['unit_cost'] !== null ? $part['unit_cost'] : '' ?>"
-                        data-supplier="<?= htmlspecialchars($part['supplier'] ?? '') ?>">
-                  <i class="bi bi-cart-plus me-1"></i>Create PO
-                </button>
-              </td>
             </tr>
             <?php endforeach; ?>
           </tbody>
@@ -441,62 +406,6 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
       </div>
     </div>
     <?php endif; ?>
-
-    <!-- ── Purchase Orders pane ─────────────────────────────────────────── -->
-    <div class="tab-pane fade" id="pane-po" role="tabpanel">
-      <div class="pts-table-wrap" data-ajax-region="po-table">
-        <?php if (empty($purchaseOrders)): ?>
-        <div class="pts-empty">
-          <i class="bi bi-cart-check pts-empty-icon"></i>
-          <p>No purchase orders yet. Create one from a Low Stock item.</p>
-        </div>
-        <?php else: ?>
-        <table class="table pts-table" id="poTable">
-          <thead>
-            <tr>
-              <th>PO Number</th>
-              <th>Part</th>
-              <th>Quantity</th>
-              <th>Supplier</th>
-              <th>Est. Cost</th>
-              <th>Status</th>
-              <th>Requested By</th>
-              <th>Date</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php foreach ($purchaseOrders as $po):
-              $estCost = $po['unit_cost'] !== null ? $po['unit_cost'] * $po['quantity'] : null;
-            ?>
-            <tr>
-              <td class="pts-part-number"><?= htmlspecialchars($po['po_number']) ?></td>
-              <td class="pts-part-name"><?= htmlspecialchars($po['part_name']) ?></td>
-              <td><?= number_format($po['quantity']) ?> <?= htmlspecialchars($po['unit']) ?></td>
-              <td><?= $po['supplier'] ? htmlspecialchars($po['supplier']) : '<span class="text-muted">—</span>' ?></td>
-              <td class="pts-cost"><?= $estCost !== null ? '₱' . number_format($estCost, 2) : '<span class="text-muted">—</span>' ?></td>
-              <td><span class="pts-po-badge pts-po-<?= strtolower($po['status']) ?>"><?= htmlspecialchars($po['status']) ?></span></td>
-              <td><?= htmlspecialchars($po['requested_by_name']) ?></td>
-              <td class="pts-date"><?= date('M d, Y', strtotime($po['requested_at'])) ?></td>
-              <td class="pts-po-actions">
-                <?php if ($po['status'] === 'Pending'): ?>
-                <button type="button" class="btn btn-sm btn-pts-secondary btn-pts-mark-ordered" data-po-id="<?= $po['po_id'] ?>">Mark Ordered</button>
-                <button type="button" class="btn btn-sm btn-pts-primary btn-pts-receive-po" data-po-id="<?= $po['po_id'] ?>">Receive</button>
-                <button type="button" class="btn btn-sm btn-pts-cancel btn-pts-cancel-po" data-po-id="<?= $po['po_id'] ?>">Cancel</button>
-                <?php elseif ($po['status'] === 'Ordered'): ?>
-                <button type="button" class="btn btn-sm btn-pts-primary btn-pts-receive-po" data-po-id="<?= $po['po_id'] ?>">Receive</button>
-                <button type="button" class="btn btn-sm btn-pts-cancel btn-pts-cancel-po" data-po-id="<?= $po['po_id'] ?>">Cancel</button>
-                <?php else: ?>
-                <span class="text-muted">—</span>
-                <?php endif; ?>
-              </td>
-            </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
-        <?php endif; ?>
-      </div>
-    </div>
 
   </div><!-- /tab-content -->
 </div>
@@ -658,59 +567,6 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
         <button type="button" class="btn btn-pts-secondary" id="submitMovementBtn">
           <span id="movBtnText">Record Movement</span>
           <span id="movBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ══ Create Purchase Order Modal ═══════════════════════════════════════ -->
-<div class="modal fade" id="createPoModal" tabindex="-1" aria-labelledby="createPoLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content pts-modal-content">
-      <div class="modal-header pts-modal-header-primary">
-        <h5 class="modal-title" id="createPoLabel">
-          <i class="bi bi-cart-plus me-2"></i>Create Purchase Order
-        </h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body pts-modal-body">
-        <div id="createPoAlert" class="alert d-none" role="alert"></div>
-
-        <input type="hidden" id="poPartId">
-        <div class="mb-3">
-          <label class="form-label pts-label">Part</label>
-          <input type="text" class="form-control pts-input" id="poPartName" disabled>
-        </div>
-
-        <div class="row g-3 mb-3">
-          <div class="col-6">
-            <label class="form-label pts-label" for="poQty">
-              Quantity <span class="text-danger">*</span> <span id="poUnitLabel" class="pts-unit-hint"></span>
-            </label>
-            <input type="number" class="form-control pts-input" id="poQty" min="1" required>
-          </div>
-          <div class="col-6">
-            <label class="form-label pts-label" for="poUnitCost">Unit Cost (₱)</label>
-            <input type="number" class="form-control pts-input" id="poUnitCost" min="0" step="0.01" placeholder="Optional">
-          </div>
-        </div>
-
-        <div class="mb-3">
-          <label class="form-label pts-label" for="poSupplier">Supplier</label>
-          <input type="text" class="form-control pts-input" id="poSupplier" placeholder="Optional">
-        </div>
-
-        <div class="mb-1">
-          <label class="form-label pts-label" for="poNotes">Notes</label>
-          <textarea class="form-control pts-input" id="poNotes" rows="2" placeholder="Optional remarks…"></textarea>
-        </div>
-      </div>
-      <div class="modal-footer pts-modal-footer">
-        <button type="button" class="btn btn-pts-cancel" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-pts-primary" id="submitCreatePoBtn">
-          <span id="poBtnText">Create Purchase Order</span>
-          <span id="poBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
         </button>
       </div>
     </div>

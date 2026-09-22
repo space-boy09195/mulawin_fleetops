@@ -74,23 +74,8 @@ if ($action === 'upload') {
         mkdir($uploadDir, 0755, true);
     }
 
-    // The stored extension is derived ONLY from the validated MIME type above —
-    // never from $origName. $origName is attacker-controlled: a file crafted to
-    // pass the MIME sniff above (e.g. a polyglot with a valid PDF header) could
-    // still be named "shell.php" by whoever uploads it. Deriving the extension
-    // from that name instead of the checked MIME would let it land in uploads/
-    // as an executable .php file. This map guarantees the stored extension
-    // always matches what was actually validated.
-    $mimeToExt = [
-        'application/pdf' => 'pdf',
-        'image/jpeg'       => 'jpg',
-        'image/png'        => 'png',
-        'application/msword' => 'doc',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
-        'application/vnd.ms-excel' => 'xls',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
-    ];
-    $ext        = $mimeToExt[$mimeType];
+    // UUID-based stored filename to prevent collisions and enumeration
+    $ext        = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
     $storedName = sprintf('%s.%s', bin2hex(random_bytes(16)), $ext);
     $destPath   = $uploadDir . $storedName;
     $filePath   = 'uploads/' . $storedName; // relative path stored in DB

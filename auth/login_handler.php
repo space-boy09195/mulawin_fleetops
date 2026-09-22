@@ -9,7 +9,6 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/login_throttle.php';
 
 // ---- LOGOUT ------------------------------------------------
 if (isset($_GET['action']) && $_GET['action'] === 'logout') {
@@ -44,16 +43,6 @@ if ($username === '' || $password === '') {
 // ---- Look up user (fetch hash + role in one query) ---------
 $pdo = getDBConnection();
 
-$ip         = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? null;
-$identifier = strtolower($username);
-
-// ---- Rate limit: too many recent failures for this username or IP -------
-if (loginAttemptsExceeded($pdo, $identifier, $ip)) {
-    auditLog('LOGIN_RATE_LIMITED', 'users', null, null, ['username' => $username]);
-    header('Location: ' . APP_BASE . '/login.php?error=too_many_attempts');
-    exit;
-}
-
 $stmt = $pdo->prepare(
     "SELECT u.user_id, u.full_name, u.password_hash, u.is_active, u.role_id, r.role_name
        FROM users u
@@ -69,7 +58,6 @@ $user = $stmt->fetch();
 if (!$user || !password_verify($password, $user['password_hash'])) {
     // Log failed attempt (user_id null since we don't know who this is yet)
     auditLog('LOGIN_FAILED', 'users', null, null, ['username' => $username]);
-    recordFailedLoginAttempt($pdo, $identifier, $ip);
     header('Location: ' . APP_BASE . '/login.php?error=invalid');
     exit;
 }
@@ -92,7 +80,6 @@ $_SESSION['role_name'] = $user['role_name'];
 
 // ---- Log successful login ----------------------------------
 auditLog('LOGIN', 'users', (int)$user['user_id']);
-clearLoginAttempts($pdo, $identifier);
 
 // ---- Redirect to role-specific dashboard -------------------
 $dashboards = ROLE_DASHBOARDS;

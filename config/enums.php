@@ -57,7 +57,6 @@ define('INSPECTION_CONDITIONS', ['Good', 'Needs Attention', 'Damaged', 'Missing'
 
 // Parts inventory movement types (parts_handler.php).
 define('PARTS_MOVEMENT_TYPES', ['Stock In', 'Stock Out', 'Adjustment']);
-define('PURCHASE_ORDER_STATUSES', ['Pending', 'Ordered', 'Received', 'Cancelled']);
 
 // Trip expense categories (trip_costs_handler.php).
 define('TRIP_EXPENSE_TYPES', ['Fuel', 'Toll', 'Driver Allowance', 'Other']);

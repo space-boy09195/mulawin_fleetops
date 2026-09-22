@@ -104,12 +104,10 @@ $completedTrips = $pdo->query($tripsSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Active employees (for the Log Payroll Payment form) ───────────────────────
 // Drivers and Helpers are on-call, not fixed-salary — they're already paid
-// per trip via Trip Pay (logged on the Trip Costs page), which is their
-// wage. This is separate from "Driver Allowance" in trip_expenses, which is
-// expense reimbursement, not a wage — see the payroll report note below.
-// Excluding Drivers/Helpers here prevents accidentally double-paying the
-// same person: once per trip through Trip Pay, and again here through a
-// periodic payroll entry.
+// per trip via the "Driver Allowance" line in trip_expenses (logged on the
+// Trip Costs page). Excluding them here prevents accidentally double-paying
+// the same person: once per trip through Driver Allowance, and again here
+// through a periodic payroll entry.
 $activeEmployees = $pdo->query("
     SELECT employee_id, full_name, position
     FROM employees

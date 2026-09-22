@@ -101,6 +101,3 @@ natively, so no code changes are needed beyond configuration.
   `error_log` location in your PHP config rather than displaying errors —
   `config/database.php` already logs failures server-side and returns a
   generic message to the client.
-- Run `composer install && composer test` to run the automated test suite
-  (also runs in CI on every push/PR — see `.github/workflows/ci.yml`). See
-  `tests/README.md` for what's covered and what isn't yet.

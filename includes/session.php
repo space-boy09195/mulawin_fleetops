@@ -6,7 +6,6 @@
 // ============================================================
 
 require_once __DIR__ . '/../config/app.php';
-require_once __DIR__ . '/date_helpers.php';
 
 // Harden session cookie before session_start()
 session_name(SESSION_NAME);
@@ -95,4 +94,13 @@ function currentRoleId(): int {
 // ============================================================
 function currentUserId(): int {
     return (int)($_SESSION['user_id'] ?? 0);
+}
+
+function isValidDate(string $date): bool {
+    $parsed = DateTime::createFromFormat('!Y-m-d', $date);
+    return $parsed !== false && $parsed->format('Y-m-d') === $date;
+}
+
+function isPassedDate(string $date): bool {
+    return isValidDate($date) && $date < date('Y-m-d');
 }

@@ -502,7 +502,6 @@ function layoutFoot(): void {
 <script src="{$base}/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
 <script src="{$base}/assets/vendor/chartjs/chart.umd.min.js"></script>
 <script src="{$base}/assets/js/layout.js"></script>
-<script src="{$base}/assets/js/ajax-region.js"></script>
 {$extraScript}
 </body>
 </html>

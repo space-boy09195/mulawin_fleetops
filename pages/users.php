@@ -242,17 +242,12 @@ $alertCount  = count($alerts);
           <input type="search" id="filterEmpSearch" class="form-control usr-filter-search"
                  placeholder="Search name, code, position…">
         </div>
-        <div class="d-flex gap-2">
-          <button class="btn btn-usr-secondary" data-bs-toggle="modal" data-bs-target="#importEmpModal">
-            <i class="bi bi-upload me-1"></i> Import CSV
-          </button>
-          <button class="btn btn-usr-primary" data-bs-toggle="modal" data-bs-target="#addEmpModal">
-            <i class="bi bi-plus-lg me-1"></i> Add Employee
-          </button>
-        </div>
+        <button class="btn btn-usr-primary" data-bs-toggle="modal" data-bs-target="#addEmpModal">
+          <i class="bi bi-plus-lg me-1"></i> Add Employee
+        </button>
       </div>
 
-      <div class="usr-table-wrap" data-ajax-region="employees-table">
+      <div class="usr-table-wrap">
         <?php if (empty($employees)): ?>
         <div class="usr-empty">
           <i class="bi bi-person-lines-fill usr-empty-icon"></i>
@@ -611,43 +606,6 @@ $alertCount  = count($alerts);
         <button type="button" class="btn btn-usr-primary" id="submitAddEmpBtn">
           <span id="aeBtnText">Add Employee</span>
           <span id="aeBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ══ Import Employees CSV Modal ══════════════════════════════════════════ -->
-<div class="modal fade" id="importEmpModal" tabindex="-1" aria-labelledby="importEmpLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content usr-modal-content">
-      <div class="modal-header usr-modal-header-secondary">
-        <h5 class="modal-title" id="importEmpLabel">
-          <i class="bi bi-upload me-2"></i>Import Employees from CSV
-        </h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body usr-modal-body">
-        <div id="importEmpAlert" class="alert d-none" role="alert"></div>
-        <div id="importEmpResults" class="usr-import-results d-none"></div>
-
-        <p class="text-muted small mb-2">
-          CSV header row must include at least <code>employee_code</code>, <code>full_name</code>, <code>position</code>.
-          Optional columns: <code>contact_number</code>, <code>address</code>, <code>license_number</code>,
-          <code>license_expiry</code> (YYYY-MM-DD), <code>license_type</code>, <code>date_hired</code> (YYYY-MM-DD).
-          Each row is validated the same way as the Add Employee form — rows that fail are skipped and listed below, the rest are still imported.
-        </p>
-
-        <div class="mb-1">
-          <label class="form-label usr-label" for="importEmpFile">CSV File <span class="text-danger">*</span></label>
-          <input type="file" class="form-control usr-input" id="importEmpFile" accept=".csv,text/csv">
-        </div>
-      </div>
-      <div class="modal-footer usr-modal-footer">
-        <button type="button" class="btn btn-usr-cancel" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-usr-secondary" id="submitImportEmpBtn">
-          <span id="ieBtnText">Import</span>
-          <span id="ieBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
         </button>
       </div>
     </div>

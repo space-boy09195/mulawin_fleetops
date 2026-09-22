@@ -135,20 +135,5 @@ function runFleetOpsAutomations(): array {
             return automationNotify($pdo, 'system_health_checks', hash('sha256', $message . ':' . date('Y-m-d')), $head, 'FleetOps health warning', $message, '/pages/automation.php');
         });
     }
-    if (($settings['audit_log_retention'] ?? '0') === '1') {
-        $results[] = automationRunJob($pdo, 'audit_log_retention', function () use ($pdo, $head, $today) {
-            if (!automationTableExists($pdo, 'audit_logs')) return 0;
-            $retentionDays = 365;
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM audit_logs WHERE logged_at < DATE_SUB(NOW(), INTERVAL ? DAY)");
-            $stmt->execute([$retentionDays]);
-            $count = (int)$stmt->fetchColumn();
-            if ($count === 0) return 0;
-            $pdo->prepare("DELETE FROM audit_logs WHERE logged_at < DATE_SUB(NOW(), INTERVAL ? DAY)")
-                ->execute([$retentionDays]);
-            automationNotify($pdo, 'audit_log_retention', hash('sha256', 'audit_prune:' . $today),
-                $head, 'Audit log retention', "Pruned $count audit log entr" . ($count === 1 ? 'y' : 'ies') . " older than $retentionDays days.", '/pages/recycle_bin.php');
-            return $count;
-        });
-    }
     return $results;
 }

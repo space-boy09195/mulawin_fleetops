@@ -764,7 +764,7 @@ textarea {
   border: 1px solid var(--card-border);
   border-radius: var(--radius);
   box-shadow: var(--card-shadow);
-  transition: background-color var(--transition), border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+  transition: background-color var(--transition), border-color var(--transition);
 }
 
 .card-header-custom {
@@ -799,7 +799,7 @@ textarea {
   align-items: center;
   gap: 16px;
   box-shadow: var(--card-shadow);
-  transition: background-color var(--transition), border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+  transition: background-color var(--transition), border-color var(--transition);
 }
 
 .stat-icon {
@@ -1116,7 +1116,6 @@ textarea {
 .page-content .alert,
 .page-content .modal-content {
   border-radius: var(--radius);
-  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition), background-color var(--transition);
 }
 
 .page-content [class$="-header"],
@@ -1453,71 +1452,3 @@ textarea {
    dark theme's near-black blended backgrounds several dropped below
    2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
 [data-theme="dark"] .ann-delete-btn:hover { color: #f87171; }
-
-/* ============================================================
-   POLISH: modern-feel touches (focus ring, press feedback,
-   scrollbar, gentle entrance animation)
-   ============================================================ */
-
-/* Consistent, visible keyboard-focus ring everywhere (also an
-   accessibility win — the previous default outline was inconsistent
-   across browsers and easy to lose against colored buttons). */
-a:focus-visible,
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-.btn:focus-visible,
-[tabindex]:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Tactile press feedback on buttons */
-.page-content .btn:not(.btn-close):active,
-.page-content button:not(.btn-close):active,
-.btn:not(.btn-close):active {
-  transform: scale(0.97);
-}
-
-/* Thin, theme-aware scrollbar for scrollable page regions
-   (previously only the sidebar nav had a custom scrollbar) */
-.page-content ::-webkit-scrollbar,
-.table-responsive::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-.page-content ::-webkit-scrollbar-track,
-.table-responsive::-webkit-scrollbar-track {
-  background: transparent;
-}
-.page-content ::-webkit-scrollbar-thumb,
-.table-responsive::-webkit-scrollbar-thumb {
-  background: var(--card-border);
-  border-radius: 8px;
-}
-.page-content ::-webkit-scrollbar-thumb:hover,
-.table-responsive::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-}
-
-/* Gentle entrance animation for page content — a small "fresh load"
-   feel without being distracting or slowing anything down. */
-@keyframes fleetops-fade-in-up {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.page-content > * {
-  animation: fleetops-fade-in-up 0.28s ease both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .page-content .btn:not(.btn-close):active,
-  .page-content button:not(.btn-close):active,
-  .btn:not(.btn-close):active {
-    transform: none;
-  }
-  .page-content > * {
-    animation: none;
-  }
-}

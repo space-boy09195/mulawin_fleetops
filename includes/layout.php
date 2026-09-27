@@ -31,7 +31,7 @@ function getNavItems(): array {
         ['label' => 'Trip Monitoring',     'href' => '/pages/trip_monitor.php', 'icon' => 'bi-map',                 'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
         ['label' => 'Dispatch',            'href' => '/pages/dispatch.php',     'icon' => 'bi-send',                'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
         ['label' => 'Requests',            'href' => '/pages/requests.php',     'icon' => 'bi-inbox',               'roles' => [ROLE_HEAD_MANAGEMENT]],
-        ['label' => 'Incidents',           'href' => '/pages/incidents.php',    'icon' => 'bi-exclamation-triangle','roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
+        ['label' => 'Trip Problem Reports', 'href' => '/pages/incidents.php',    'icon' => 'bi-exclamation-triangle','roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
         ['section' => 'Maintenance'],
         //['label' => 'Checklists',          'href' => '/pages/checklists.php',   'icon' => 'bi-clipboard-check',     'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]],
         ['label' => 'Maintenance Records', 'href' => '/pages/maintenance.php',  'icon' => 'bi-tools',               'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]],

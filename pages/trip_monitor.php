@@ -70,7 +70,11 @@ $tripStmt = $pdo->prepare(
        e_h.full_name  AS helper_name,
        r.origin,
        r.destination,
-       dr.scheduled_at AS etd
+       dr.scheduled_at AS etd,
+       EXISTS (
+         SELECT 1 FROM incidents i
+         WHERE i.trip_id = t.trip_id
+       ) AS has_problem
      FROM trips t
      JOIN dispatch_requests dr ON t.dispatch_id  = dr.dispatch_id
      JOIN trucks tr             ON dr.truck_id    = tr.truck_id
@@ -174,6 +178,8 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
       <button class="filter-btn late-filter" data-filter="late">
         <i class="bi bi-alarm"></i> Late Only
       </button>
+      <button class="filter-btn" data-filter="problem">Problems</button>
+      <button class="filter-btn" data-filter="okay">No Problems</button>
       <div class="ms-auto">
         <input type="text" id="tripSearch" class="form-control form-control-sm"
                placeholder="Search trip, plate, driver…" style="width:220px;">
@@ -220,6 +226,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
             default      => 'inactive',
           };
           $isLate    = (bool)$trip['is_late'];
+          $hasProblem = (bool)$trip['has_problem'];
           $isActive  = !in_array($trip['status'], ['Completed','Cancelled']);
           $searchStr = strtolower(
             $trip['trip_number'] . ' ' .
@@ -231,6 +238,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
         ?>
         <tr data-status="<?= htmlspecialchars($trip['status']) ?>"
             data-late="<?= $isLate ? '1' : '0' ?>"
+            data-problem="<?= $hasProblem ? '1' : '0' ?>"
             data-search="<?= htmlspecialchars($searchStr) ?>"
             class="<?= $isLate && $isActive ? 'row-late' : '' ?>">
           <td>

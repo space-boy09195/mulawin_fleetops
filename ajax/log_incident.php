@@ -20,7 +20,7 @@ $action = $_POST['action'] ?? '';
 if ($action === 'log') {
 
     if (!in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER], true)) {
-        jsonFail('You are not authorised to log incidents.', 403);
+        jsonFail('You are not authorised to report trip problems.', 403);
     }
 
     $tripId      = requiredInt('trip_id', 'Trip ID', 1);
@@ -31,7 +31,7 @@ if ($action === 'log') {
     $trip = findOrFail($pdo, 'trips', 'trip_id', $tripId, 'Trip not found.');
 
     if (in_array($trip['status'], TRIP_TERMINAL_STATUSES, true)) {
-        jsonFail('Incidents can only be logged against active trips.');
+        jsonFail('Problems can only be reported against active trips.');
     }
 
     try {
@@ -42,13 +42,13 @@ if ($action === 'log') {
         $stmt->execute([$tripId, $type, $description, currentUserId()]);
         $newId = (int)$pdo->lastInsertId();
 
-        auditLog('LOG_INCIDENT', 'incidents', $newId, null, [
+        auditLog('REPORT_TRIP_PROBLEM', 'incidents', $newId, null, [
             'trip_id'       => $tripId,
             'incident_type' => $type,
             'description'   => $description,
         ]);
 
-        jsonOk(['id' => $newId], 'Incident logged successfully.');
+        jsonOk(['id' => $newId], 'Trip problem report submitted successfully.');
     } catch (PDOException $e) {
         error_log('log_incident/log: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
@@ -76,12 +76,12 @@ if ($action === 'resolve') {
         ");
         $upd->execute([$resolutionNotes, $incidentId]);
 
-        auditLog('RESOLVE_INCIDENT', 'incidents', $incidentId,
+        auditLog('RESOLVE_TRIP_PROBLEM', 'incidents', $incidentId,
             ['resolved_at' => null],
             ['resolved_at' => date('Y-m-d H:i:s'), 'resolution_notes' => $resolutionNotes]
         );
 
-        jsonOk([], 'Incident marked as resolved.');
+        jsonOk([], 'Trip problem marked as resolved.');
     } catch (PDOException $e) {
         error_log('log_incident/resolve: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);

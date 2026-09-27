@@ -50,6 +50,13 @@ $empSql = "
     ORDER BY e.is_active DESC, e.full_name ASC
 ";
 $employees = $pdo->query($empSql)->fetchAll(PDO::FETCH_ASSOC);
+$resetRequests = $pdo->query("
+    SELECT pr.request_id, pr.requested_at, u.user_id, u.username, u.full_name, u.email
+    FROM password_reset_requests pr
+    JOIN users u ON u.user_id = pr.user_id
+    WHERE pr.status = 'Pending'
+    ORDER BY pr.requested_at ASC
+")->fetchAll(PDO::FETCH_ASSOC);
 
 // ── License expiry alerts ─────────────────────────────────────────────────────
 $alerts = $pdo->query("
@@ -128,6 +135,13 @@ $alertCount  = count($alerts);
       </button>
     </li>
     <li class="nav-item" role="presentation">
+      <button class="usr-tab" id="tab-reset-requests" data-bs-toggle="tab"
+              data-bs-target="#pane-reset-requests" type="button" role="tab">
+        <i class="bi bi-key me-1"></i> Password Requests
+        <span class="usr-tab-count"><?= count($resetRequests) ?></span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
       <button class="usr-tab" id="tab-employees" data-bs-toggle="tab"
               data-bs-target="#pane-employees" type="button" role="tab">
         <i class="bi bi-person-lines-fill me-1"></i> Employees
@@ -137,6 +151,30 @@ $alertCount  = count($alerts);
   </ul>
 
   <div class="tab-content">
+    <div class="tab-pane fade" id="pane-reset-requests" role="tabpanel">
+      <div class="usr-table-wrap">
+        <?php if (!$resetRequests): ?>
+          <div class="usr-empty"><i class="bi bi-check-circle usr-empty-icon"></i><p>No pending password requests.</p></div>
+        <?php else: ?>
+        <table class="table usr-table">
+          <thead><tr><th>User</th><th>Email</th><th>Requested</th><th class="text-end">Actions</th></tr></thead>
+          <tbody>
+          <?php foreach ($resetRequests as $request): ?>
+            <tr>
+              <td><?= htmlspecialchars($request['full_name']) ?><br><span class="usr-username">@<?= htmlspecialchars($request['username']) ?></span></td>
+              <td><?= htmlspecialchars($request['email']) ?></td>
+              <td><?= date('M d, Y g:i A', strtotime($request['requested_at'])) ?></td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-success js-review-reset" data-id="<?= (int)$request['request_id'] ?>" data-status="Approved">Approve</button>
+                <button class="btn btn-sm btn-danger js-review-reset" data-id="<?= (int)$request['request_id'] ?>" data-status="Rejected">Reject</button>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+        <?php endif; ?>
+      </div>
+    </div>
 
     <!-- ── Users pane ────────────────────────────────────────────────────── -->
     <div class="tab-pane fade show active" id="pane-users" role="tabpanel">

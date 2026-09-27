@@ -295,6 +295,29 @@
       setBusy(submitResetPw, rpSpinner, false);
       showAlert(resetPwAlert, 'Network error. Please try again.');
     });
+
+    document.querySelectorAll('.js-review-reset').forEach(button => {
+      button.addEventListener('click', async () => {
+        const status = button.dataset.status;
+        const notes = status === 'Rejected' ? (prompt('Reason for rejection:') || '').trim() : '';
+        if (status === 'Rejected' && !notes) return;
+        if (!confirm(`${status} this password request?`)) return;
+        button.disabled = true;
+        try {
+          const result = await postAjax({
+            action: 'review_password_reset',
+            request_id: button.dataset.id,
+            status,
+            review_notes: notes,
+          });
+          if (result.success) window.location.reload();
+          else { alert(result.message || 'Could not review request.'); button.disabled = false; }
+        } catch {
+          alert('Network error. Please try again.');
+          button.disabled = false;
+        }
+      });
+    });
   });
 
   // ══════════════════════════════════════════════════════════════════════════

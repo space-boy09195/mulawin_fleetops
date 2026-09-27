@@ -18,9 +18,9 @@ function loginIsRateLimited(PDO $pdo, string $identifier, ?string $ip): bool {
     $stmt = $pdo->prepare(
         "SELECT COUNT(*) FROM login_attempts
          WHERE attempted_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
-           AND (identifier = ? OR (ip_address IS NOT NULL AND ip_address = ?))"
+           AND identifier = ?"
     );
-    $stmt->execute([$identifier, $ip]);
+    $stmt->execute([$identifier]);
     return (int)$stmt->fetchColumn() >= 10;
 }
 
@@ -69,15 +69,6 @@ $pdo = getDBConnection();
 $identifier = strtolower($username);
 $clientIp = loginClientIp();
 
-try {
-    if (loginIsRateLimited($pdo, $identifier, $clientIp)) {
-        header('Location: ' . APP_BASE . '/login.php?error=rate_limited');
-        exit;
-    }
-} catch (PDOException $e) {
-    error_log('Login rate limit check failed: ' . $e->getMessage());
-}
-
 $stmt = $pdo->prepare(
     "SELECT u.user_id, u.full_name, u.password_hash, u.is_active, u.role_id, r.role_name
        FROM users u
@@ -87,6 +78,16 @@ $stmt = $pdo->prepare(
 );
 $stmt->execute([':username' => $username]);
 $user = $stmt->fetch();
+
+try {
+    $isHeadManagement = $user && (int)$user['role_id'] === ROLE_HEAD_MANAGEMENT;
+    if (!$isHeadManagement && loginIsRateLimited($pdo, $identifier, $clientIp)) {
+        header('Location: ' . APP_BASE . '/login.php?error=rate_limited');
+        exit;
+    }
+} catch (PDOException $e) {
+    error_log('Login rate limit check failed: ' . $e->getMessage());
+}
 
 // ---- Verify password (constant-time) -----------------------
 // password_verify handles timing attacks inherently

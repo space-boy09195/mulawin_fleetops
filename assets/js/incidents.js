@@ -1,6 +1,6 @@
 /**
  * incidents.js — Mulawin FleetOps
- * Handles: log incident, client-side filtering, resolve with resolution notes.
+ * Handles: report trip problem, filtering, and resolution notes.
  */
 
 'use strict';
@@ -121,7 +121,7 @@
           bootstrap.Modal.getInstance(logModal)?.hide();
           window.location.reload();
         } else {
-          showAlert(incFormAlert, res.message ?? 'Failed to log incident.');
+          showAlert(incFormAlert, res.message ?? 'Failed to report the trip problem.');
         }
       })
       .catch(() => {
@@ -172,7 +172,7 @@
           bootstrap.Modal.getInstance(resolveModal)?.hide();
           updateRowResolved(pendingResolveId, notes);
         } else {
-          showAlert(resolveAlert, res.message ?? 'Failed to resolve incident.');
+          showAlert(resolveAlert, res.message ?? 'Failed to resolve the trip problem.');
         }
       })
       .catch(() => {

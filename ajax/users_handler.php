@@ -128,61 +128,60 @@ if ($action === 'edit_user') {
     }
 }
 
-// ── Reset password ────────────────────────────────────────────────────────────
-if ($action === 'reset_password') {
-
-    $userId   = requiredInt('user_id', 'User', 1);
-    $password = $_POST['password'] ?? '';
-    $confirm  = $_POST['confirm']  ?? '';
-
-    if (!$password) {
-        jsonFail('New password is required.');
-    }
-
-    if ($action === 'review_password_reset') {
-        $requestId = requiredInt('request_id', 'Request', 1);
-        $status = requiredEnum('status', ['Approved', 'Rejected'], 'Status');
-        $notes = optionalString('review_notes', null, 500);
-
+if ($action === 'review_password_reset') {
+    $requestId = requiredInt('request_id', 'Request', 1);
+    $status = requiredEnum('status', ['Approved', 'Rejected'], 'Status');
+    $notes = optionalString('review_notes', null, 500);
+    $pdo->beginTransaction();
+    try {
         $stmt = $pdo->prepare(
             "SELECT request_id, user_id, password_hash, status
              FROM password_reset_requests
              WHERE request_id = ? AND status = 'Pending'
              FOR UPDATE"
         );
-        $pdo->beginTransaction();
-        try {
-            $stmt->execute([$requestId]);
-            $request = $stmt->fetch(PDO::FETCH_ASSOC);
-            if (!$request) {
-                $pdo->rollBack();
-                jsonFail('Request not found or already reviewed.', 404);
-            }
-
-            if ($status === 'Approved') {
-                $pdo->prepare('UPDATE users SET password_hash = ? WHERE user_id = ? AND is_active = 1')
-                    ->execute([$request['password_hash'], $request['user_id']]);
-            }
-            $pdo->prepare(
-                'UPDATE password_reset_requests
-                 SET status = ?, reviewed_by = ?, reviewed_at = NOW(), review_notes = ?
-                 WHERE request_id = ?'
-            )->execute([$status, currentUserId(), $notes, $requestId]);
-            $pdo->commit();
-        } catch (Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
-            error_log('users_handler/review_password_reset: ' . $e->getMessage());
-            jsonFail('Could not review the password request.', 500);
+        $stmt->execute([$requestId]);
+        $request = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$request) {
+            $pdo->rollBack();
+            jsonFail('Request not found or already reviewed.', 404);
         }
 
-        auditLog('PASSWORD_RESET_' . strtoupper($status), 'password_reset_requests', $requestId, null, ['user_id' => (int)$request['user_id']]);
-        jsonOk([], "Password reset request {$status}.");
+        if ($status === 'Approved') {
+            $update = $pdo->prepare('UPDATE users SET password_hash = ? WHERE user_id = ? AND is_active = 1');
+            $update->execute([$request['password_hash'], $request['user_id']]);
+            if ($update->rowCount() !== 1) {
+                $pdo->rollBack();
+                jsonFail('The user account is inactive or no longer exists.', 409);
+            }
+        }
+        $pdo->prepare(
+            'UPDATE password_reset_requests
+             SET status = ?, reviewed_by = ?, reviewed_at = NOW(), review_notes = ?
+             WHERE request_id = ?'
+        )->execute([$status, currentUserId(), $notes, $requestId]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('users_handler/review_password_reset: ' . $e->getMessage());
+        jsonFail('Could not review the password request.', 500);
     }
 
+    auditLog('PASSWORD_RESET_' . strtoupper($status), 'password_reset_requests', $requestId, null, ['user_id' => (int)$request['user_id']]);
+    jsonOk([], "Password reset request {$status}.");
+}
+
+// ── Reset password ────────────────────────────────────────────────────────────
+if ($action === 'reset_password') {
+    $userId   = requiredInt('user_id', 'User', 1);
+    $password = $_POST['password'] ?? '';
+    $confirm  = $_POST['confirm']  ?? '';
+    if (!$password) {
+        jsonFail('New password is required.');
+    }
     if (strlen($password) < 8) {
         jsonFail('Password must be at least 8 characters.');
     }
-
     if ($password !== $confirm) {
         jsonFail('Passwords do not match.');
     }

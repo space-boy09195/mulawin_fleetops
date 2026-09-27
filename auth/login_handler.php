@@ -14,7 +14,7 @@ function loginClientIp(): ?string {
     return isset($_SERVER['REMOTE_ADDR']) ? substr((string)$_SERVER['REMOTE_ADDR'], 0, 45) : null;
 }
 
-function loginIsRateLimited(PDO $pdo, string $identifier, ?string $ip): bool {
+function loginIsRateLimited(PDO $pdo, string $identifier): bool {
     $stmt = $pdo->prepare(
         "SELECT COUNT(*) FROM login_attempts
          WHERE attempted_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
@@ -68,6 +68,7 @@ if ($username === '' || $password === '') {
 $pdo = getDBConnection();
 $identifier = strtolower($username);
 $clientIp = loginClientIp();
+$pdo->exec("DELETE FROM login_attempts WHERE attempted_at < DATE_SUB(NOW(), INTERVAL 1 DAY)");
 
 $stmt = $pdo->prepare(
     "SELECT u.user_id, u.full_name, u.password_hash, u.is_active, u.role_id, r.role_name
@@ -79,19 +80,17 @@ $stmt = $pdo->prepare(
 $stmt->execute([':username' => $username]);
 $user = $stmt->fetch();
 
-try {
-    $isHeadManagement = $user && (int)$user['role_id'] === ROLE_HEAD_MANAGEMENT;
-    if (!$isHeadManagement && loginIsRateLimited($pdo, $identifier, $clientIp)) {
-        header('Location: ' . APP_BASE . '/login.php?error=rate_limited');
-        exit;
-    }
-} catch (PDOException $e) {
-    error_log('Login rate limit check failed: ' . $e->getMessage());
-}
-
 // ---- Verify password (constant-time) -----------------------
 // password_verify handles timing attacks inherently
 if (!$user || !password_verify($password, $user['password_hash'])) {
+    try {
+        if (loginIsRateLimited($pdo, $identifier)) {
+            header('Location: ' . APP_BASE . '/login.php?error=rate_limited');
+            exit;
+        }
+    } catch (PDOException $e) {
+        error_log('Login rate limit check failed: ' . $e->getMessage());
+    }
     // Log failed attempt (user_id null since we don't know who this is yet)
     try {
         recordLoginFailure($pdo, $identifier, $clientIp);
@@ -108,6 +107,7 @@ if (!(bool)$user['is_active']) {
     header('Location: ' . APP_BASE . '/login.php?error=disabled');
     exit;
 }
+$pdo->prepare('DELETE FROM login_attempts WHERE identifier = ?')->execute([$identifier]);
 
 // ---- Regenerate session on login (prevents fixation) -------
 session_regenerate_id(true);

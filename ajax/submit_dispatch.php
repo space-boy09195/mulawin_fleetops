@@ -9,6 +9,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
+require_once __DIR__ . '/../includes/trip_number.php';
 
 header('Content-Type: application/json');
 
@@ -104,9 +105,9 @@ $pdo->beginTransaction();
 try {
     $stmt = $pdo->prepare(
         "INSERT INTO dispatch_requests
-           (truck_id, driver_id, helper_id, route_id, requested_by, approved_by, scheduled_at, status, remarks, client_name, reviewed_at)
+           (truck_id, driver_id, helper_id, route_id, requested_by, scheduled_at, status, remarks, client_name)
          VALUES
-           (:truck, :driver, :helper, :route, :user, :user, :scheduled, 'Approved', :remarks, :client_name, NOW())"
+           (:truck, :driver, :helper, :route, :user, :scheduled, 'Pending', :remarks, :client_name)"
     );
     $stmt->execute([
         ':truck' => $truckId, ':driver' => $driverId, ':helper' => $helperId,
@@ -115,25 +116,6 @@ try {
         ':client_name' => $clientName,
     ]);
     $newId = (int)$pdo->lastInsertId();
-    $year = date('Y');
-    $countStmt = $pdo->query("SELECT COUNT(*) FROM trips WHERE YEAR(created_at) = " . (int)$year);
-    $tripNumber = 'TRP-' . $year . '-' . str_pad((int)$countStmt->fetchColumn() + 1, 4, '0', STR_PAD_LEFT);
-    $pdo->prepare("INSERT INTO trips (dispatch_id, trip_number, status) VALUES (?, ?, 'Loading')")
-        ->execute([$newId, $tripNumber]);
-    $tripId = (int)$pdo->lastInsertId();
-    $pdo->prepare("UPDATE trucks SET status = 'Deployed' WHERE truck_id = ?")->execute([$truckId]);
-
-    $driverUser = $pdo->prepare("SELECT user_id FROM employees WHERE employee_id = ?");
-    $driverUser->execute([$driverId]);
-    if ($userId = $driverUser->fetchColumn()) {
-        $pdo->prepare("INSERT INTO notifications (user_id, title, message, link) VALUES (?, ?, ?, ?)")
-            ->execute([
-                (int)$userId,
-                'Dispatch confirmed',
-                "You have been assigned to trip {$tripNumber}.",
-                APP_BASE . '/pages/trip_monitor.php',
-            ]);
-    }
     $pdo->commit();
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
@@ -141,6 +123,5 @@ try {
     jsonFail('Could not confirm the dispatch.', 500);
 }
 
-auditLog('CREATE', 'dispatch_requests', $newId, null, ['status' => 'Approved', 'trip_id' => $tripId]);
-auditLog('CREATE', 'trips', $tripId, null, ['trip_number' => $tripNumber]);
-jsonOk(['trip_id' => $tripId], 'Dispatch confirmed and driver notified.');
+auditLog('CREATE', 'dispatch_requests', $newId, null, ['status' => 'Pending']);
+jsonOk(['dispatch_id' => $newId], 'Dispatch request submitted for Head Management approval.');

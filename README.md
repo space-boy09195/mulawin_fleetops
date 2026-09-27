@@ -63,3 +63,8 @@ local setup and Hostinger deployment steps. Quick version:
 - CSRF tokens are required on state-changing forms via `includes/csrf.php`.
 - Idle session timeout (default 30 min) and periodic session ID regeneration
   guard against fixation/hijacking.
+- Failed logins are rate-limited using the `login_attempts` table.
+- Dispatch requests stay pending until Head Management approves them; only
+  approval creates the trip and deploys the truck.
+- Uploaded documents are served through the authenticated download endpoint,
+  not as directly accessible public files.

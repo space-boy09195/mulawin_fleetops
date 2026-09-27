@@ -21,15 +21,15 @@ function storeUploadedDocument(
 
     $mimeType = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
     $allowedMimes = [
-        'application/pdf',
-        'image/jpeg',
-        'image/png',
-        'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/vnd.ms-excel',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/pdf' => 'pdf',
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'application/msword' => 'doc',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+        'application/vnd.ms-excel' => 'xls',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
     ];
-    if (!in_array($mimeType, $allowedMimes, true)) {
+    if (!isset($allowedMimes[$mimeType])) {
         throw new InvalidArgumentException('File type not allowed. Upload PDF, JPG, PNG, DOCX, or XLSX.');
     }
     if (!in_array($docType, DOCUMENT_TYPES, true)) {
@@ -45,7 +45,7 @@ function storeUploadedDocument(
     }
 
     $originalName = basename((string)$file['name']);
-    $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+    $extension = $allowedMimes[$mimeType];
     $storedName = bin2hex(random_bytes(16)) . ($extension !== '' ? '.' . $extension : '');
     $destination = $uploadDir . $storedName;
 

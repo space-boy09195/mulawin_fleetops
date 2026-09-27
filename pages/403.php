@@ -20,9 +20,14 @@ require_once __DIR__ . '/../includes/session.php';
     <i class="bi bi-shield-lock-fill text-danger" style="font-size: 4rem;"></i>
     <h1 class="mt-3 fw-bold">403 — Access Denied</h1>
     <p class="text-muted">You do not have permission to view this page.</p>
-    <a href="../auth/login_handler.php?action=logout" class="btn btn-outline-danger mt-2">
+    <form method="post" action="<?= APP_BASE ?>/auth/login_handler.php" class="mt-2"
+          onsubmit="return confirm('Log out of Mulawin FleetOps?')">
+      <?= csrfInput() ?>
+      <input type="hidden" name="action" value="logout">
+      <button type="submit" class="btn btn-outline-danger">
       <i class="bi bi-box-arrow-left me-1"></i> Log Out
-    </a>
+      </button>
+    </form>
   </div>
 </body>
 </html>

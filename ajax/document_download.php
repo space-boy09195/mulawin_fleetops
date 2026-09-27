@@ -42,6 +42,7 @@ if (!is_file($path)) {
 }
 
 header('Content-Type: application/octet-stream');
-header('Content-Disposition: inline; filename="' . addcslashes($document['file_name'], "\"\\") . '"');
+header('X-Content-Type-Options: nosniff');
+header('Content-Disposition: attachment; filename="' . addcslashes($document['file_name'], "\"\\") . '"');
 header('Content-Length: ' . filesize($path));
 readfile($path);

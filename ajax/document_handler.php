@@ -55,16 +55,16 @@ if ($action === 'upload') {
     $mimeType = $finfo->file($tmpPath);
 
     $allowedMimes = [
-        'application/pdf',
-        'image/jpeg',
-        'image/png',
-        'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/vnd.ms-excel',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/pdf' => 'pdf',
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'application/msword' => 'doc',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+        'application/vnd.ms-excel' => 'xls',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
     ];
 
-    if (!in_array($mimeType, $allowedMimes)) {
+    if (!isset($allowedMimes[$mimeType])) {
         jsonFail('File type not allowed. Upload PDF, JPG, PNG, DOCX, or XLSX.');
     }
 
@@ -75,7 +75,7 @@ if ($action === 'upload') {
     }
 
     // UUID-based stored filename to prevent collisions and enumeration
-    $ext        = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+    $ext        = $allowedMimes[$mimeType];
     $storedName = sprintf('%s.%s', bin2hex(random_bytes(16)), $ext);
     $destPath   = $uploadDir . $storedName;
     $filePath   = 'uploads/' . $storedName; // relative path stored in DB

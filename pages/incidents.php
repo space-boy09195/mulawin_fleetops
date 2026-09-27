@@ -7,7 +7,7 @@ requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE]);
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/incidents.js';
 
-layoutHead('Incidents', APP_BASE . '/assets/css/incidents.css');
+layoutHead('Trip Problem Reports', APP_BASE . '/assets/css/incidents.css');
 
 $pdo = getDBConnection();
 
@@ -63,12 +63,12 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
   <!-- Page header -->
   <div class="inc-header d-flex align-items-center justify-content-between mb-4">
     <div>
-      <h1 class="inc-title mb-0">Incidents</h1>
-      <p class="inc-subtitle mb-0">Log and track trip incidents</p>
+      <h1 class="inc-title mb-0">Trip Problem Reports</h1>
+      <p class="inc-subtitle mb-0">Record, monitor, and resolve problems related to trips</p>
     </div>
     <?php if (in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER])): ?>
     <button class="btn btn-incident" data-bs-toggle="modal" data-bs-target="#logIncidentModal">
-      <i class="bi bi-plus-lg me-1"></i> Log Incident
+      <i class="bi bi-plus-lg me-1"></i> Report a Problem
     </button>
     <?php endif; ?>
   </div>
@@ -90,12 +90,12 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
            placeholder="Search trip no., vehicle, driver…">
   </div>
 
-  <!-- Incidents table -->
+  <!-- Trip problem reports table -->
   <div class="inc-table-wrap">
     <?php if (empty($incidents)): ?>
       <div class="inc-empty">
         <i class="bi bi-shield-check inc-empty-icon"></i>
-        <p>No incidents logged yet.</p>
+        <p>No trip problem reports logged yet.</p>
       </div>
     <?php else: ?>
     <table class="table inc-table" id="incidentsTable">
@@ -174,7 +174,7 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
           <td colspan="9">
             <div class="no-results">
               <i class="bi bi-search"></i>
-              <span>No incidents match your filters.</span>
+              <span>No trip problem reports match your filters.</span>
             </div>
           </td>
         </tr>
@@ -184,13 +184,13 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
   </div>
 </div>
 
-<!-- Log Incident Modal -->
+<!-- Report Trip Problem Modal -->
 <div class="modal fade" id="logIncidentModal" tabindex="-1" aria-labelledby="logIncidentLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content inc-modal-content">
       <div class="modal-header inc-modal-header">
         <h5 class="modal-title" id="logIncidentLabel">
-          <i class="bi bi-exclamation-triangle me-2"></i>Log Incident
+          <i class="bi bi-exclamation-triangle me-2"></i>Report Trip Problem
         </h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>

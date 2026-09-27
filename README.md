@@ -68,3 +68,7 @@ local setup and Hostinger deployment steps. Quick version:
   approval creates the trip and deploys the truck.
 - Uploaded documents are served through the authenticated download endpoint,
   not as directly accessible public files.
+- Password changes requested from the login page are held for Head Management
+  approval before they are applied.
+- Trip Problem Reports reuse the existing incident records and Trip Monitoring
+  includes filters for trips with and without reported problems.

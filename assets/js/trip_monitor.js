@@ -31,11 +31,14 @@ document.addEventListener('DOMContentLoaded', () => {
     tbody.querySelectorAll('tr[data-status]').forEach((row) => {
       const status     = row.dataset.status || '';
       const isLate     = row.dataset.late   === '1';
+      const hasProblem = row.dataset.problem === '1';
       const searchData = row.dataset.search || '';
 
       let matchesFilter = false;
       if (activeFilter === 'all')        matchesFilter = true;
       else if (activeFilter === 'late')  matchesFilter = isLate;
+      else if (activeFilter === 'problem') matchesFilter = hasProblem;
+      else if (activeFilter === 'okay') matchesFilter = !hasProblem;
       else                               matchesFilter = status === activeFilter;
 
       const matchesSearch = searchTerm === '' || searchData.includes(searchTerm);

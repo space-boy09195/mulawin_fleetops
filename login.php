@@ -26,9 +26,14 @@ $messages = [
         'timeout' => 'Your session expired. Please log in again.',
     ],
 ];
+$resetMessages = [
+    'submitted' => 'If the account is eligible, the password request was sent to Head Management for approval.',
+    'invalid' => 'Enter a username and matching password with at least 8 characters.',
+];
 
 $errorMsg   = $messages['error'][$_GET['error'] ?? ''] ?? '';
 $reasonMsg  = $messages['reason'][$_GET['reason'] ?? ''] ?? '';
+$resetMsg   = $resetMessages[$_GET['reset'] ?? ''] ?? '';
 
 // ---- Dynamic employee access data with safe DB fallback --------
 $systemStatus = [
@@ -159,6 +164,12 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
         <span><?= htmlspecialchars($reasonMsg) ?></span>
       </div>
     <?php endif; ?>
+    <?php if ($resetMsg): ?>
+      <div class="alert alert-info d-flex align-items-center gap-2" role="alert">
+        <i class="bi bi-info-circle-fill"></i>
+        <span><?= htmlspecialchars($resetMsg) ?></span>
+      </div>
+    <?php endif; ?>
 
     <form method="POST" action="auth/login_handler.php" id="loginForm" novalidate>
       <?= csrfInput() ?>
@@ -205,6 +216,9 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
           <span class="spinner-border spinner-border-sm me-1" role="status"></span> Signing in...
         </span>
       </button>
+      <div class="text-center mt-3">
+        <a href="#" data-bs-toggle="modal" data-bs-target="#forgotPasswordModal">Forgot password?</a>
+      </div>
     </form>
 
     <p class="login-footer-text">
@@ -217,5 +231,32 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
 <script src="assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
 <!-- Custom Login JS (separate file as required) -->
 <script src="assets/js/login.js"></script>
+<div class="modal fade" id="forgotPasswordModal" tabindex="-1" aria-labelledby="forgotPasswordLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="forgotPasswordLabel">Request Password Change</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="auth/forgot_password_request_handler.php">
+        <div class="modal-body">
+          <?= csrfInput() ?>
+          <p class="text-muted small">Your request will be reviewed by Head Management before the password changes.</p>
+          <label class="form-label" for="resetUsername">Username</label>
+          <input class="form-control mb-3" id="resetUsername" name="username" required autocomplete="username">
+          <label class="form-label" for="resetPassword">New password</label>
+          <input class="form-control mb-3" type="password" id="resetPassword" name="password" minlength="8" required autocomplete="new-password">
+          <label class="form-label" for="resetConfirmPassword">Confirm new password</label>
+          <input class="form-control" type="password" id="resetConfirmPassword" name="confirm_password" minlength="8" required autocomplete="new-password">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Submit Request</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

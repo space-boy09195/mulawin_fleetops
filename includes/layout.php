@@ -179,9 +179,9 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     $initials    = userInitials();
     $fullName    = htmlspecialchars($_SESSION['full_name'] ?? '');
     $roleName    = htmlspecialchars($_SESSION['role_name'] ?? '');
-    $logoutUrl   = htmlspecialchars(APP_BASE . '/auth/login_handler.php?action=logout');
     $homeUrl     = htmlspecialchars(roleDashboardUrl());
     $base        = APP_BASE;
+    $csrfName    = htmlspecialchars(CSRF_TOKEN_NAME);
     $cssTag      = $extraCss ? "<link rel=\"stylesheet\" href=\"{$extraCss}\">" : '';
     $appBaseJs   = "<script>window.APP_BASE=\"{$base}\";</script>";
     $csrfToken   = generateCsrfToken();
@@ -314,11 +314,15 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
         <i class="bi bi-moon-fill toggle-icon" id="themeIcon"></i>
         <span class="theme-toggle-label" id="themeLabel">Dark Mode</span>
       </button>
-      <a href="{$logoutUrl}" class="logout-btn sidebar-logout-btn mt-2"
-         onclick="return confirm('Log out of Mulawin FleetOps?')">
+      <form method="post" action="{$base}/auth/login_handler.php" class="mt-2"
+            onsubmit="return confirm('Log out of Mulawin FleetOps?')">
+        <input type="hidden" name="action" value="logout">
+        <input type="hidden" name="{$csrfName}" value="{$csrfToken}">
+        <button type="submit" class="logout-btn sidebar-logout-btn w-100">
         <i class="bi bi-box-arrow-right"></i>
         <span>Log Out</span>
-      </a>
+        </button>
+      </form>
     </div>
 
   </aside>

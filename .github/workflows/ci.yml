@@ -1,0 +1,24 @@
+name: FleetOps checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+      - name: Lint PHP
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Check JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          find assets/js -type f -name '*.js' -print0 | xargs -0 -n1 node --check

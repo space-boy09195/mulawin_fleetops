@@ -45,6 +45,7 @@
    mysql -u root -p mulawin_fleetops < db/trip_report_document_visibility_migration.sql
    mysql -u root -p mulawin_fleetops < db/truck_image_migration.sql
    mysql -u root -p mulawin_fleetops < db/vehicle_inspection_migration.sql
+   mysql -u root -p mulawin_fleetops < db/system_hardening_migration.sql
    ```
    Whenever a new `*_migration.sql` file is added to `db/`, run it on every
    environment (local, Hostinger, and any Vercel preview database) before

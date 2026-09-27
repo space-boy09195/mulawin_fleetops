@@ -1,12 +1,15 @@
-The image set is configured inline in pages/maintenance.php in
-$inspectionImageSets. Replace a filename or use a complete https:// image URL.
+The sample truck-view illustrations are:
+- demo-truck-front.svg
+- demo-truck-side.svg
+- demo-truck-rear.svg
+- demo-truck-top.svg
 
-Available sets:
-- Closed Van: closed-van-front.png, closed-van-side.png, closed-van-rear.png, closed-van-top.png
-- Flatbed: flatbed-front.png, flatbed-side.png, flatbed-rear.png, flatbed-top.png
-- Reefer: reefer-front.png, reefer-side.png, reefer-rear.png, reefer-top.png
-- Wing Van: wing-van-front.png, wing-van-side.png, wing-van-rear.png, wing-van-top.png
-- Carrier: carrier-front.png, carrier-side.png, carrier-rear.png, carrier-top.png
+They are used in the fleet photo-upload previews and as the default inspection
+reference for Closed Van, Flatbed, Reefer, Wing Van, and Carrier trucks.
+Replace the SVG files with matching images, or edit $inspectionImageSets in
+pages/maintenance.php to point to another local filename or complete https://
+image URL. Uploaded truck photos take precedence over these defaults during
+vehicle inspections.
 
-Images are optional. If a configured image is missing, the built-in vector preview is used.
-Recommended format: transparent PNG, centered vehicle, and no watermark.
+The sample illustrations are generic placeholders, not photographs. For real
+inspection records, upload clear JPG, PNG, or WebP photos for each vehicle view.

@@ -116,7 +116,7 @@ function expectedFuel(array $row): float {
   </div>
   <div class="bil-table-wrap">
     <table class="table bil-table">
-      <thead><tr><th>Trip</th><th>Truck</th><th>Crew</th><th>Revenue</th><th>Expenses</th><th>Crew Pay</th><th>Net Profit</th><th>CPK</th><th>Fuel Analysis</th></tr></thead>
+      <thead><tr><th>Trip</th><th>Truck</th><th>Crew</th><th>Revenue</th><th>Expenses</th><th>Crew Pay</th><th>Net Profit</th><th>CPK</th><th>Fuel Analysis</th><th>Actions</th></tr></thead>
       <tbody>
       <?php foreach ($rows as $row):
         $expected = expectedFuel($row);
@@ -148,16 +148,7 @@ function expectedFuel(array $row): float {
           <?php if ($tripPayTableMissing): ?>
             <span class="text-muted">—</span>
           <?php else: ?>
-          <button type="button" class="btn btn-sm btn-outline-secondary crew-pay-btn"
-                  data-trip-id="<?= $row['trip_id'] ?>"
-                  data-trip="<?= htmlspecialchars($row['trip_number']) ?>"
-                  data-driver-id="<?= (int)$row['driver_id'] ?>"
-                  data-driver-name="<?= htmlspecialchars($row['driver_name'] ?? '') ?>"
-                  data-helper-id="<?= $row['helper_id'] !== null ? (int)$row['helper_id'] : '' ?>"
-                  data-helper-name="<?= htmlspecialchars($row['helper_name'] ?? '') ?>"
-                  data-existing="<?= htmlspecialchars(json_encode($tripPayEntries), ENT_QUOTES, 'UTF-8') ?>">
-            <?= $tripPayTotal > 0 ? '₱' . number_format($tripPayTotal, 2) : 'Log pay' ?> <span aria-hidden="true">...</span>
-          </button>
+            ₱<?= number_format($tripPayTotal, 2) ?>
           <?php endif; ?>
         </td>
         <td class="<?= $profit >= 0 ? 'text-success' : 'text-danger' ?>">₱<?= number_format($profit, 2) ?></td>
@@ -173,6 +164,20 @@ function expectedFuel(array $row): float {
             <small class="d-block text-muted"><?= number_format($variance, 1) ?>% variance</small>
           <?php endif; ?>
         </td>
+        <td class="text-end">
+          <?php if (!$tripPayTableMissing): ?>
+          <button type="button" class="btn btn-sm btn-outline-secondary crew-pay-btn"
+                  data-trip-id="<?= $row['trip_id'] ?>"
+                  data-trip="<?= htmlspecialchars($row['trip_number']) ?>"
+                  data-driver-id="<?= (int)$row['driver_id'] ?>"
+                  data-driver-name="<?= htmlspecialchars($row['driver_name'] ?? '') ?>"
+                  data-helper-id="<?= $row['helper_id'] !== null ? (int)$row['helper_id'] : '' ?>"
+                  data-helper-name="<?= htmlspecialchars($row['helper_name'] ?? '') ?>"
+                  data-existing="<?= htmlspecialchars(json_encode($tripPayEntries), ENT_QUOTES, 'UTF-8') ?>">
+            <i class="bi bi-pencil me-1"></i>Manage Pay
+          </button>
+          <?php endif; ?>
+        </td>
       </tr>
       <?php endforeach; ?>
       </tbody>
@@ -185,7 +190,7 @@ function expectedFuel(array $row): float {
       <div class="modal-header"><h5 class="modal-title" id="expenseBreakdownTitle">Expense Breakdown</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
       <div class="modal-body">
         <div class="table-responsive"><table class="table table-sm" id="expenseBreakdownTable">
-          <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Quantity</th><th>Notes</th><th>Recorded By</th><?php if ($isHead): ?><th></th><?php endif; ?></tr></thead>
+          <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Quantity</th><th>Notes</th><th>Recorded By</th><?php if ($isHead): ?><th>Actions</th><?php endif; ?></tr></thead>
           <tbody></tbody><tfoot><tr><th colspan="2">Total</th><th id="expenseBreakdownTotal"></th><th colspan="<?= $isHead ? 4 : 3 ?>"></th></tr></tfoot>
         </table></div>
         <div id="expenseBreakdownEmpty" class="text-muted d-none">No manually recorded expenses for this trip.</div>

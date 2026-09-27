@@ -33,6 +33,28 @@
 #fleetTable tbody tr.hidden-row { display: none; }
 #fleetTable td:first-child { font-size: 0.9rem; }
 
+.fleet-truck-thumb {
+  display: inline-block;
+  width: 64px;
+  height: 44px;
+  object-fit: cover;
+  vertical-align: middle;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  background: var(--content-bg);
+}
+
+.fleet-image-preview {
+  display: block;
+  width: 100%;
+  height: 105px;
+  margin-bottom: 0.5rem;
+  object-fit: contain;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--content-bg);
+}
+
 /* ---- No results / row count ------------------------------ */
 #noResults { 
   display:none; 

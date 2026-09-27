@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" role="img" aria-labelledby="title desc">
+  <title id="title">Sample delivery truck, side view</title>
+  <desc id="desc">Illustrated sample box truck side view for inspection and photo previews.</desc>
+  <defs>
+    <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#edf5fb"/><stop offset="1" stop-color="#dce9f2"/></linearGradient>
+    <linearGradient id="box" x2="0" y2="1"><stop stop-color="#f8fbfd"/><stop offset="1" stop-color="#c6d5df"/></linearGradient>
+    <linearGradient id="cab" x2="0" y2="1"><stop stop-color="#f8fbfd"/><stop offset="1" stop-color="#beced9"/></linearGradient>
+  </defs>
+  <rect width="960" height="520" rx="28" fill="url(#sky)"/>
+  <path d="M0 405h960v115H0z" fill="#d3dce1"/>
+  <ellipse cx="500" cy="425" rx="360" ry="34" fill="#aebbc2" opacity=".48"/>
+  <g stroke="#718493" stroke-linejoin="round" stroke-width="8">
+    <path d="M156 155q0-27 27-27h420q24 0 24 27v226H156z" fill="url(#box)"/>
+    <path d="M628 265h111q20 0 34 19l55 76q9 13 9 30v12H628z" fill="url(#cab)"/>
+    <path d="M663 286h69q12 0 19 10l33 47H663z" fill="#2d5b75"/>
+    <path d="M691 294v42m27-42 24 42" stroke="#78a2b8" stroke-width="5"/>
+    <path d="M171 162h435M180 375h418" stroke="#adbdc6" stroke-width="5"/>
+    <path d="M212 179v164m28-164v164m28-164v164" stroke="#d8e2e8" stroke-width="4"/>
+    <path d="M790 373h26" stroke="#f3bd53" stroke-width="15" stroke-linecap="round"/>
+    <path d="M624 388h216" stroke="#627583" stroke-width="12"/>
+  </g>
+  <g fill="#263746" stroke="#647786" stroke-width="9">
+    <circle cx="274" cy="392" r="55"/><circle cx="274" cy="392" r="23" fill="#9aabb5"/>
+    <circle cx="655" cy="392" r="55"/><circle cx="655" cy="392" r="23" fill="#9aabb5"/>
+    <circle cx="754" cy="392" r="55"/><circle cx="754" cy="392" r="23" fill="#9aabb5"/>
+  </g>
+  <path d="M302 388h303" stroke="#627583" stroke-width="12"/>
+  <text x="480" y="495" text-anchor="middle" fill="#536979" font-family="Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="3">SAMPLE SIDE VIEW</text>
+</svg>

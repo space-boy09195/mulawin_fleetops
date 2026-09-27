@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" role="img" aria-labelledby="title desc">
+  <title id="title">Sample delivery truck, rear view</title>
+  <desc id="desc">Illustrated sample truck rear cargo doors for inspection and photo previews.</desc>
+  <defs>
+    <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#edf5fb"/><stop offset="1" stop-color="#dce9f2"/></linearGradient>
+    <linearGradient id="box" x2="0" y2="1"><stop stop-color="#f8fbfd"/><stop offset="1" stop-color="#c7d6e1"/></linearGradient>
+  </defs>
+  <rect width="960" height="520" rx="28" fill="url(#sky)"/>
+  <path d="M0 408h960v112H0z" fill="#d3dce1"/>
+  <ellipse cx="480" cy="426" rx="248" ry="35" fill="#aebbc2" opacity=".48"/>
+  <g stroke="#718493" stroke-linejoin="round" stroke-width="8">
+    <path d="M284 84q0-23 23-23h346q23 0 23 23v300H284z" fill="url(#box)"/>
+    <path d="M319 99h148v250H319zM493 99h148v250H493z" fill="#d7e2e8"/>
+    <path d="M319 99h148v250H319zM493 99h148v250H493z" fill="none"/>
+    <path d="M338 120v210m110-210v210m64-210v210m110-210v210" stroke="#b0c0c9" stroke-width="4"/>
+    <path d="M480 94v258" stroke="#748895" stroke-width="6"/>
+    <path d="M455 196h25m0 0h25" stroke="#536979" stroke-width="9" stroke-linecap="round"/>
+    <path d="M261 183h23v112h-34q-13 0-10-14l8-82q2-16 13-16zm438 0h-23v112h34q13 0 10-14l-8-82q-2-16-13-16z" fill="#c5d3db"/>
+    <rect x="261" y="357" width="438" height="31" rx="8" fill="#657987"/>
+    <rect x="277" y="319" width="28" height="46" rx="5" fill="#e9a04b"/>
+    <rect x="655" y="319" width="28" height="46" rx="5" fill="#e9a04b"/>
+  </g>
+  <g fill="#263746" stroke="#647786" stroke-width="8">
+    <rect x="273" y="380" width="59" height="98" rx="17"/>
+    <rect x="628" y="380" width="59" height="98" rx="17"/>
+  </g>
+  <g fill="#8fa1ac"><circle cx="302" cy="429" r="15"/><circle cx="657" cy="429" r="15"/></g>
+  <text x="480" y="495" text-anchor="middle" fill="#536979" font-family="Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="3">SAMPLE REAR VIEW</text>
+</svg>

@@ -101,6 +101,106 @@
     });
   }
 
+  function showTableText(title, text) {
+    let modal = document.getElementById('tableTextModal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'tableTextModal';
+      modal.className = 'modal fade';
+      modal.tabIndex = -1;
+      modal.setAttribute('aria-hidden', 'true');
+      modal.innerHTML = `
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2 class="modal-title fs-5"></h2>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body table-text-modal-body"></div>
+          </div>
+        </div>`;
+      document.body.append(modal);
+    }
+
+    modal.querySelector('.modal-title').textContent = title;
+    modal.querySelector('.table-text-modal-body').textContent = text;
+    bootstrap.Modal.getOrCreateInstance(modal).show();
+  }
+
+  function enhanceTable(table) {
+    if (table.classList.contains('bil-print-table')) return;
+
+    const responsiveWrapper = table.closest('.table-responsive');
+    if (responsiveWrapper) {
+      responsiveWrapper.classList.add('app-table-scroll');
+    } else if (!table.parentElement?.classList.contains('app-table-scroll')) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'table-responsive app-table-scroll';
+      table.before(wrapper);
+      wrapper.append(table);
+    }
+
+    const headerRow = table.tHead?.rows[0];
+    if (!headerRow?.cells.length) return;
+
+    const lastHeader = headerRow.cells[headerRow.cells.length - 1];
+    const lastHeaderText = lastHeader.textContent.trim();
+    const hasRowActions = Array.from(table.tBodies).some((body) =>
+      Array.from(body.rows).some((row) => {
+        const cell = row.cells[row.cells.length - 1];
+        return cell?.querySelector('button, a[href], input[type="submit"]');
+      })
+    );
+
+    if (/^action$/i.test(lastHeaderText) || (!lastHeaderText && hasRowActions)) {
+      lastHeader.textContent = 'Actions';
+    }
+    if (/^actions?$/i.test(lastHeader.textContent.trim())) {
+      lastHeader.classList.add('table-actions-column');
+      Array.from(table.tBodies).forEach((body) => {
+        Array.from(body.rows).forEach((row) => {
+          row.cells[row.cells.length - 1]?.classList.add('table-actions-column');
+        });
+      });
+    }
+
+    const expandableColumns = Array.from(headerRow.cells)
+      .map((header, index) => ({
+        index,
+        title: header.textContent.trim(),
+      }))
+      .filter(({ title }) => /description|details?|notes?|remarks?|messages?|explanations?|addresses?/i.test(title));
+
+    expandableColumns.forEach(({ index, title }) => {
+      Array.from(table.tBodies).forEach((body) => {
+        Array.from(body.rows).forEach((row) => {
+          const cell = row.cells[index];
+          if (!cell || cell.dataset.textEnhanced || cell.querySelector('button, a, input, select, textarea')) return;
+          const fullText = cell.textContent.trim();
+          if (fullText.length <= 120) return;
+
+          cell.dataset.textEnhanced = 'true';
+          const preview = document.createElement('span');
+          preview.className = 'table-text-preview';
+          preview.textContent = fullText.slice(0, 112).trimEnd();
+
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'table-read-more';
+          button.textContent = '...';
+          button.setAttribute('aria-label', `Read full ${title.toLowerCase()}`);
+          button.addEventListener('click', () => showTableText(title, fullText));
+
+          cell.replaceChildren(preview, button);
+        });
+      });
+    });
+  }
+
+  function enhanceTables() {
+    document.querySelectorAll('.page-content table').forEach(enhanceTable);
+  }
+
   // ---- Init ------------------------------------------------
   document.addEventListener('DOMContentLoaded', () => {
     sidebar         = document.getElementById('appSidebar');
@@ -110,6 +210,29 @@
     themeIcon       = document.getElementById('themeIcon');
     themeLabel      = document.getElementById('themeLabel');
     overlay         = document.getElementById('sidebarOverlay');
+
+    const pageContent = document.querySelector('.page-content');
+    if (pageContent) {
+      enhanceTables();
+      const tableObserver = new MutationObserver((mutations) => {
+        const changedTables = new Set();
+        mutations.forEach((mutation) => {
+          if (mutation.target instanceof Element) {
+            const ownerTable = mutation.target.closest('table');
+            if (ownerTable) changedTables.add(ownerTable);
+          }
+          mutation.addedNodes.forEach((node) => {
+            if (!(node instanceof Element)) return;
+            const ownerTable = node.closest('table');
+            if (ownerTable) changedTables.add(ownerTable);
+            if (node.matches('table')) changedTables.add(node);
+            node.querySelectorAll('table').forEach((table) => changedTables.add(table));
+          });
+        });
+        changedTables.forEach(enhanceTable);
+      });
+      tableObserver.observe(pageContent, { childList: true, subtree: true });
+    }
 
     if (!sidebar || !appShell) return;
 

@@ -41,6 +41,10 @@ $trucks = $pdo->query("
         t.fuel_type,
         t.capacity_tons,
         t.image_path,
+        t.image_front_path,
+        t.image_side_path,
+        t.image_rear_path,
+        t.image_top_path,
         t.status,
         cur.trip_number,
         cur.driver_name,
@@ -201,9 +205,10 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
             </span>
           </td>
           <td>
-            <?php if (!empty($truck['image_path'])): ?>
-            <img src="<?= APP_BASE . '/' . htmlspecialchars($truck['image_path']) ?>" alt="" loading="lazy" decoding="async" style="width:42px;height:32px;object-fit:cover;border-radius:4px;" class="me-2">
-            <?php endif; ?>
+            <img
+              src="<?= !empty($truck['image_path']) ? APP_BASE . '/' . htmlspecialchars($truck['image_path']) : APP_BASE . '/assets/images/inspection/demo-truck-side.svg' ?>"
+              alt="<?= !empty($truck['image_path']) ? 'Photo of ' : 'Sample illustration of ' ?><?= htmlspecialchars($truck['brand'] . ' ' . $truck['model']) ?>"
+              loading="lazy" decoding="async" class="fleet-truck-thumb me-2">
             <div style="font-weight:600;"><?= htmlspecialchars($truck['brand'] . ' ' . $truck['model']) ?></div>
             <div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars($truck['year_model']) ?></div>
           </td>
@@ -252,7 +257,11 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
                       data-body="<?= htmlspecialchars($truck['body_type'] ?? '', ENT_QUOTES) ?>"
                       data-fuel="<?= htmlspecialchars($truck['fuel_type'], ENT_QUOTES) ?>"
                       data-capacity="<?= htmlspecialchars($truck['capacity_tons'] ?? '', ENT_QUOTES) ?>"
-                      data-status="<?= htmlspecialchars($truck['status'], ENT_QUOTES) ?>">
+                      data-status="<?= htmlspecialchars($truck['status'], ENT_QUOTES) ?>"
+                      data-image-front="<?= htmlspecialchars($truck['image_front_path'] ? APP_BASE . '/' . ltrim($truck['image_front_path'], '/') : '', ENT_QUOTES) ?>"
+                      data-image-side="<?= htmlspecialchars($truck['image_side_path'] ? APP_BASE . '/' . ltrim($truck['image_side_path'], '/') : (!empty($truck['image_path']) ? APP_BASE . '/' . ltrim($truck['image_path'], '/') : ''), ENT_QUOTES) ?>"
+                      data-image-rear="<?= htmlspecialchars($truck['image_rear_path'] ? APP_BASE . '/' . ltrim($truck['image_rear_path'], '/') : '', ENT_QUOTES) ?>"
+                      data-image-top="<?= htmlspecialchars($truck['image_top_path'] ? APP_BASE . '/' . ltrim($truck['image_top_path'], '/') : '', ENT_QUOTES) ?>">
                 <i class="bi bi-pencil"></i>
               </button>
               <?php endif; ?>
@@ -349,9 +358,13 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
           </div>
           <div class="col-12">
              <label class="fleet-label">Inspection View Photos (JPG, PNG, or WebP; max 10 MB each)</label>
+             <p class="small text-muted mb-2">Sample illustrations are shown until you choose your truck photos.</p>
              <div class="row g-2">
                <?php foreach (['front' => 'Front View', 'side' => 'Side View', 'rear' => 'Rear View', 'top' => 'Top View'] as $key => $label): ?>
                <div class="col-sm-6">
+                 <img class="fleet-image-preview" id="at_image_preview_<?= $key ?>"
+                      src="<?= APP_BASE ?>/assets/images/inspection/demo-truck-<?= $key ?>.svg"
+                      alt="Sample truck <?= strtolower($label) ?> illustration">
                  <label class="small text-muted" for="at_image_<?= $key ?>"><?= $label ?></label>
                  <input type="file" class="form-control fleet-input" id="at_image_<?= $key ?>" accept=".jpg,.jpeg,.png,.webp">
                </div>
@@ -432,9 +445,13 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
           </div>
           <div class="col-12">
             <label class="fleet-label">Replace Inspection View Photos (optional)</label>
+            <p class="small text-muted mb-2">Current photos or sample illustrations are shown below.</p>
             <div class="row g-2">
               <?php foreach (['front' => 'Front View', 'side' => 'Side View', 'rear' => 'Rear View', 'top' => 'Top View'] as $key => $label): ?>
               <div class="col-sm-6">
+                <img class="fleet-image-preview" id="et_image_preview_<?= $key ?>"
+                     src="<?= APP_BASE ?>/assets/images/inspection/demo-truck-<?= $key ?>.svg"
+                     alt="Sample truck <?= strtolower($label) ?> illustration">
                 <label class="small text-muted" for="et_image_<?= $key ?>"><?= $label ?></label>
                 <input type="file" class="form-control fleet-input" id="et_image_<?= $key ?>" accept=".jpg,.jpeg,.png,.webp">
               </div>

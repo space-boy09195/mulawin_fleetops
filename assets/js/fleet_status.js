@@ -146,10 +146,42 @@ document.addEventListener('DOMContentLoaded', () => {
   const atBtnSpinner  = document.getElementById('atBtnSpinner');
   const addAlert      = document.getElementById('addTruckAlert');
 
+  function setImagePreview(prefix, view, source = '') {
+    const preview = document.getElementById(`${prefix}_image_preview_${view}`);
+    if (!preview) return;
+    if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+    preview.dataset.objectUrl = '';
+    preview.src = source || `${BASE}/assets/images/inspection/demo-truck-${view}.svg`;
+  }
+
+  function bindImagePreviews(prefix, inputs) {
+    Object.entries(inputs).forEach(([view, input]) => {
+      input?.addEventListener('change', () => {
+        const file = input.files?.[0];
+        if (file) {
+          const objectUrl = URL.createObjectURL(file);
+          setImagePreview(prefix, view, objectUrl);
+          const preview = document.getElementById(`${prefix}_image_preview_${view}`);
+          if (preview) preview.dataset.objectUrl = objectUrl;
+        }
+      });
+    });
+  }
+
+  function resetImageInputs(prefix, inputs) {
+    Object.entries(inputs).forEach(([view, input]) => {
+      if (input) input.value = '';
+      setImagePreview(prefix, view);
+    });
+  }
+
+  bindImagePreviews('at', at_images);
+
   addModal?.addEventListener('hidden.bs.modal', () => {
     [at_plate, at_brand, at_model, at_year, at_body, at_capacity, at_chassis, at_engine].forEach(el => {
       if (el) el.value = '';
     });
+    resetImageInputs('at', at_images);
     if (at_fuel) at_fuel.value = 'Diesel';
     hideAlert(addAlert);
     setBusy(atBtnText, atBtnSpinner, false);
@@ -216,6 +248,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const etBtnSpinner  = document.getElementById('etBtnSpinner');
   const editAlert     = document.getElementById('editTruckAlert');
 
+  bindImagePreviews('et', et_images);
+
   // Populate edit modal from data attributes
   document.addEventListener('click', e => {
     const btn = e.target.closest('.btn-edit-truck');
@@ -232,6 +266,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (et_chassis)  et_chassis.value  = btn.dataset.chassis  ?? '';
     if (et_engine)   et_engine.value   = btn.dataset.engine   ?? '';
     if (et_status)   et_status.value   = btn.dataset.status   ?? 'Available';
+    Object.entries(et_images).forEach(([view, input]) => {
+      if (input) input.value = '';
+      const viewName = view[0].toUpperCase() + view.slice(1);
+      setImagePreview('et', view, btn.dataset[`image${viewName}`] ?? '');
+    });
 
     hideAlert(editAlert);
     setBusy(etBtnText, etBtnSpinner, false);

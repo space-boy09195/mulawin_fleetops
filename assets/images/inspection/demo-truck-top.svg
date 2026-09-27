@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" role="img" aria-labelledby="title desc">
+  <title id="title">Sample delivery truck, top view</title>
+  <desc id="desc">Illustrated sample truck roof and body from above for inspection and photo previews.</desc>
+  <defs>
+    <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#edf5fb"/><stop offset="1" stop-color="#dce9f2"/></linearGradient>
+    <linearGradient id="box" x2="1" y2="1"><stop stop-color="#f8fbfd"/><stop offset="1" stop-color="#c3d3dd"/></linearGradient>
+    <linearGradient id="cab" x2="1" y2="1"><stop stop-color="#d9e5eb"/><stop offset="1" stop-color="#aebfca"/></linearGradient>
+  </defs>
+  <rect width="960" height="520" rx="28" fill="url(#sky)"/>
+  <path d="M0 404h960v116H0z" fill="#d3dce1"/>
+  <ellipse cx="480" cy="422" rx="185" ry="32" fill="#aebbc2" opacity=".48"/>
+  <g stroke="#718493" stroke-linejoin="round" stroke-width="8">
+    <path d="M390 72h180q31 0 31 31v314q0 31-31 31H390q-31 0-31-31V103q0-31 31-31z" fill="url(#box)"/>
+    <path d="M401 91h158v225H401z" fill="#dce6eb" stroke-width="5"/>
+    <path d="M420 109h120v190H420z" fill="url(#box)" stroke="#afc0ca" stroke-width="4"/>
+    <path d="M401 320h158v95q0 14-14 14H415q-14 0-14-14z" fill="url(#cab)"/>
+    <path d="M421 339h118v45H421z" fill="#2d5b75" stroke-width="5"/>
+    <path d="M480 343v38" stroke="#8eb0c0" stroke-width="4"/>
+    <path d="M345 127h45m-45 58h45m-45 58h45m180-116h45m-45 58h45m-45 58h45" stroke="#657987" stroke-width="10" stroke-linecap="round"/>
+    <path d="M417 117h126m-126 35h126m-126 35h126m-126 35h126m-126 35h126m-126 35h126" stroke="#b8c7cf" stroke-width="3"/>
+  </g>
+  <g fill="#263746" stroke="#647786" stroke-width="7">
+    <rect x="339" y="138" width="27" height="78" rx="12"/>
+    <rect x="594" y="138" width="27" height="78" rx="12"/>
+    <rect x="339" y="276" width="27" height="78" rx="12"/>
+    <rect x="594" y="276" width="27" height="78" rx="12"/>
+  </g>
+  <text x="480" y="495" text-anchor="middle" fill="#536979" font-family="Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="3">SAMPLE TOP VIEW</text>
+</svg>

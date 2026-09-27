@@ -1079,6 +1079,10 @@ $GLOBALS['analytics_data'] = json_encode([
       <div class="an-donut-wrap">
         <div class="an-donut-canvas-wrap">
           <canvas id="tripStatusChart"></canvas>
+          <div class="an-donut-center" aria-label="<?= array_sum($statusData) ?> total trips">
+            <span class="an-donut-total"><?= number_format(array_sum($statusData)) ?></span>
+            <span class="an-donut-label">Total Trips</span>
+          </div>
         </div>
         <div class="an-donut-legend">
           <?php foreach ($statusLabels as $i => $lbl): ?>
@@ -1101,6 +1105,10 @@ $GLOBALS['analytics_data'] = json_encode([
       <div class="an-donut-wrap">
         <div class="an-donut-canvas-wrap">
           <canvas id="maintTypeChart"></canvas>
+          <div class="an-donut-center" aria-label="Total maintenance cost ₱<?= number_format(array_sum($maintTypeData), 2) ?>">
+            <span class="an-donut-total an-donut-total-cost">₱<?= number_format(array_sum($maintTypeData), 0) ?></span>
+            <span class="an-donut-label">Total Cost</span>
+          </div>
         </div>
         <div class="an-donut-legend">
           <?php foreach ($maintTypeLabels as $i => $lbl): ?>

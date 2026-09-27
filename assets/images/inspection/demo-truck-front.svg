@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" role="img" aria-labelledby="title desc">
+  <title id="title">Sample delivery truck, front view</title>
+  <desc id="desc">Illustrated sample truck front view for inspection and photo previews.</desc>
+  <defs>
+    <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#edf5fb"/><stop offset="1" stop-color="#dce9f2"/></linearGradient>
+    <linearGradient id="cab" x2="0" y2="1"><stop stop-color="#f8fbfd"/><stop offset="1" stop-color="#c7d6e1"/></linearGradient>
+    <linearGradient id="glass" x2="0" y2="1"><stop stop-color="#193b54"/><stop offset="1" stop-color="#38718d"/></linearGradient>
+  </defs>
+  <rect width="960" height="520" rx="28" fill="url(#sky)"/>
+  <path d="M0 408h960v112H0z" fill="#d3dce1"/>
+  <ellipse cx="480" cy="422" rx="238" ry="35" fill="#aebbc2" opacity=".48"/>
+  <g stroke="#718493" stroke-linejoin="round">
+    <path d="M333 141q12-62 66-62h162q54 0 66 62l45 227q5 28-22 36H310q-27-8-22-36z" fill="url(#cab)" stroke-width="8"/>
+    <path d="M365 135q9-31 38-31h154q29 0 38 31l23 103H342z" fill="url(#glass)" stroke-width="7"/>
+    <path d="M480 108v126" stroke="#8fa8b7" stroke-width="6"/>
+    <path d="M278 177h45v66h-63q-16 0-12-17l9-35q4-14 21-14zm404 0h-45v66h63q16 0 12-17l-9-35q-4-14-21-14z" fill="#dfe8ed" stroke-width="7"/>
+    <rect x="374" y="265" width="212" height="79" rx="14" fill="#d6e0e6" stroke-width="6"/>
+    <path d="M397 281h166v47H397z" fill="#5d7180" stroke-width="5"/>
+    <path d="M414 294h132m-132 20h132" stroke="#a9bac4" stroke-width="7"/>
+    <path d="M300 352h74v42h-85q-17-2-14-19l4-12q4-11 21-11zm286 0h74q17 0 21 11l4 12q3 17-14 19h-85z" fill="#fff2bf" stroke-width="6"/>
+    <path d="M330 369h31m269 0h31" stroke="#f2b544" stroke-width="12" stroke-linecap="round"/>
+    <path d="M365 394v45m230-45v45" stroke="#667987" stroke-width="9"/>
+  </g>
+  <g fill="#263746" stroke="#647786" stroke-width="8">
+    <rect x="296" y="380" width="63" height="94" rx="19"/>
+    <rect x="601" y="380" width="63" height="94" rx="19"/>
+  </g>
+  <g fill="#8fa1ac"><circle cx="327" cy="427" r="16"/><circle cx="632" cy="427" r="16"/></g>
+  <text x="480" y="495" text-anchor="middle" fill="#536979" font-family="Arial, sans-serif" font-size="20" font-weight="700" letter-spacing="3">SAMPLE FRONT VIEW</text>
+</svg>

@@ -489,6 +489,8 @@ HTML;
 function layoutFoot(): void {
     $base        = APP_BASE;
     $extraScript = '';
+    $layoutScriptPath = __DIR__ . '/../assets/js/layout.js';
+    $layoutScriptVersion = is_file($layoutScriptPath) ? (string)filemtime($layoutScriptPath) : (string)time();
     if (!empty($GLOBALS['page_js'])) {
         $scriptUrlPath = parse_url($GLOBALS['page_js'], PHP_URL_PATH);
         $scriptRelativePath = ltrim(str_replace(rtrim(APP_BASE, '/') . '/', '', $scriptUrlPath), '/');
@@ -505,7 +507,7 @@ function layoutFoot(): void {
 
 <script src="{$base}/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
 <script src="{$base}/assets/vendor/chartjs/chart.umd.min.js"></script>
-<script src="{$base}/assets/js/layout.js"></script>
+<script src="{$base}/assets/js/layout.js?v={$layoutScriptVersion}"></script>
 {$extraScript}
 </body>
 </html>

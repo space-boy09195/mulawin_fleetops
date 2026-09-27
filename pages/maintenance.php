@@ -127,34 +127,34 @@ $inspectionImageUrl = $pageBase . '/assets/images/inspection';
 // Default artwork is used only when a truck has no uploaded photo for the view.
 $inspectionImageSets = [
     'Closed Van' => [
-        'Front' => 'closed-van-front.png',
-        'Side'  => 'closed-van-side.png',
-        'Rear'  => 'closed-van-rear.png',
-        'Top'   => 'closed-van-top.png',
+        'Front' => 'demo-truck-front.svg',
+        'Side'  => 'demo-truck-side.svg',
+        'Rear'  => 'demo-truck-rear.svg',
+        'Top'   => 'demo-truck-top.svg',
     ],
     'Flatbed' => [
-        'Front' => 'flatbed-front.png',
-        'Side'  => 'flatbed-side.png',
-        'Rear'  => 'flatbed-rear.png',
-        'Top'   => 'flatbed-top.png',
+        'Front' => 'demo-truck-front.svg',
+        'Side'  => 'demo-truck-side.svg',
+        'Rear'  => 'demo-truck-rear.svg',
+        'Top'   => 'demo-truck-top.svg',
     ],
     'Reefer' => [
-        'Front' => 'reefer-front.png',
-        'Side'  => 'reefer-side.png',
-        'Rear'  => 'reefer-rear.png',
-        'Top'   => 'reefer-top.png',
+        'Front' => 'demo-truck-front.svg',
+        'Side'  => 'demo-truck-side.svg',
+        'Rear'  => 'demo-truck-rear.svg',
+        'Top'   => 'demo-truck-top.svg',
     ],
     'Wing Van' => [
-        'Front' => 'wing-van-front.png',
-        'Side'  => 'wing-van-side.png',
-        'Rear'  => 'wing-van-rear.png',
-        'Top'   => 'wing-van-top.png',
+        'Front' => 'demo-truck-front.svg',
+        'Side'  => 'demo-truck-side.svg',
+        'Rear'  => 'demo-truck-rear.svg',
+        'Top'   => 'demo-truck-top.svg',
     ],
     'Carrier' => [
-        'Front' => 'carrier-front.png',
-        'Side'  => 'carrier-side.png',
-        'Rear'  => 'carrier-rear.png',
-        'Top'   => 'carrier-top.png',
+        'Front' => 'demo-truck-front.svg',
+        'Side'  => 'demo-truck-side.svg',
+        'Rear'  => 'demo-truck-rear.svg',
+        'Top'   => 'demo-truck-top.svg',
     ],
 ];
 
@@ -409,8 +409,10 @@ $checklistItems = [
                 <button type="button" class="mnt-desc-text mnt-desc-btn"
                         data-truck="<?= htmlspecialchars($rec['plate_number'] . ' — ' . $rec['brand'] . ' ' . $rec['model']) ?>"
                         data-type="<?= htmlspecialchars($rec['maintenance_type']) ?>"
-                        data-description="<?= htmlspecialchars($rec['description']) ?>">
-                  <?= htmlspecialchars($rec['description']) ?>
+                        data-description="<?= htmlspecialchars($rec['description']) ?>"
+                        aria-label="Read full maintenance description">
+                  <span class="mnt-desc-preview"><?= htmlspecialchars($rec['description']) ?></span>
+                  <span class="mnt-desc-more" aria-hidden="true">...</span>
                 </button>
               </td>
               <td>

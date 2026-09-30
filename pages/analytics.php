@@ -1,7 +1,7 @@
 <?php
 // ============================================================
 // pages/analytics.php
-// Cross-functional analytics hub — Head Management only.
+// Cross-functional analytics hub — access is controlled by reports.view.
 // Pulls together Operations, Maintenance, and Accounting data
 // that no single role dashboard shows together.
 // ============================================================
@@ -11,7 +11,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/alerts.php';
 require_once __DIR__ . '/../includes/csrf.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE, ROLE_ACCOUNTING]);
+requirePermission('reports.view');
 $role   = currentRoleId();
 $isHead = $role === ROLE_HEAD_MANAGEMENT;
 

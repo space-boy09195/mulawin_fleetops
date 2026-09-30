@@ -3,7 +3,7 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]);
+requireAnyPermission(['parts.view', 'parts.manage']);
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/parts.js';
 
@@ -183,18 +183,18 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
     <!-- ── Stock Levels pane ─────────────────────────────────────────────── -->
     <div class="tab-pane fade show active" id="pane-stock" role="tabpanel">
       <div class="pts-filters d-flex flex-wrap gap-2 mb-3">
-        <select id="filterCategory" class="form-select pts-filter-select">
+        <select id="filterCategory" class="form-select pts-filter-select" data-persist-state>
           <option value="">All Categories</option>
           <?php foreach ($categories as $cat): ?>
           <option value="<?= htmlspecialchars($cat) ?>"><?= htmlspecialchars($cat) ?></option>
           <?php endforeach; ?>
         </select>
-        <select id="filterStock" class="form-select pts-filter-select">
+        <select id="filterStock" class="form-select pts-filter-select" data-persist-state>
           <option value="">All Stock Levels</option>
           <option value="low">Low / Out of Stock</option>
           <option value="ok">Adequate Stock</option>
         </select>
-        <input type="search" id="filterPartSearch" class="form-control pts-filter-search"
+        <input type="search" id="filterPartSearch" class="form-control pts-filter-search" data-persist-state
                placeholder="Search part name, number, supplier…">
       </div>
 

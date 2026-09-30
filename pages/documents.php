@@ -3,7 +3,7 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE, ROLE_ACCOUNTING]);
+requirePermission('documents.view');
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/documents.js';
 
@@ -29,13 +29,12 @@ $rangeStart = match ($period) {
 };
 $rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
 $docDateFilter = $rangeStartSql ? "AND d.uploaded_at >= ?" : '';
-$visibilityScopes = match (currentRoleId()) {
-    ROLE_HEAD_MANAGEMENT => null,
-    ROLE_DISPATCHER      => ['operations'],
-    ROLE_ACCOUNTING      => ['operations', 'accounting'],
-    ROLE_MAINTENANCE     => ['maintenance'],
-    default              => [''],
-};
+$visibilityScopes = currentUserHasAnyPermission(['legacy.role.1']) ? null : [];
+if ($visibilityScopes !== null) {
+    if (currentUserHasAnyPermission(['legacy.role.2'])) $visibilityScopes[] = 'operations';
+    if (currentUserHasAnyPermission(['legacy.role.3'])) $visibilityScopes[] = 'maintenance';
+    if (currentUserHasAnyPermission(['legacy.role.4'])) $visibilityScopes[] = 'accounting';
+}
 $visibilityFilter = $visibilityScopes === null
     ? ''
     : "AND (d.visibility_scope = 'all' OR d.visibility_scope IN ("
@@ -79,6 +78,24 @@ $trips = $pdo->query("
     ORDER BY trip_number DESC
     LIMIT 200
 ")->fetchAll(PDO::FETCH_ASSOC);
+$requestedTripId = filter_input(INPUT_GET, 'trip_id', FILTER_VALIDATE_INT);
+if ($requestedTripId) {
+    $tripIsListed = in_array(
+        $requestedTripId,
+        array_map(static fn($trip) => (int)$trip['trip_id'], $trips),
+        true
+    );
+    if (!$tripIsListed) {
+        $requestedTripQuery = $pdo->prepare('SELECT trip_id, trip_number FROM trips WHERE trip_id = ?');
+        $requestedTripQuery->execute([$requestedTripId]);
+        $requestedTrip = $requestedTripQuery->fetch(PDO::FETCH_ASSOC);
+        if ($requestedTrip) {
+            array_unshift($trips, $requestedTrip);
+        } else {
+            $requestedTripId = null;
+        }
+    }
+}
 
 $docTypes = [
     'OR/CR', 'Delivery Receipt', 'Waybill',
@@ -278,7 +295,9 @@ function mimeIcon(?string $mime): string {
             <select class="form-select doc-input" id="uploadTripId">
               <option value="">— None —</option>
               <?php foreach ($trips as $trip): ?>
-              <option value="<?= $trip['trip_id'] ?>"><?= htmlspecialchars($trip['trip_number']) ?></option>
+              <option value="<?= $trip['trip_id'] ?>" <?= $requestedTripId === (int)$trip['trip_id'] ? 'selected' : '' ?>>
+                <?= htmlspecialchars($trip['trip_number']) ?>
+              </option>
               <?php endforeach; ?>
             </select>
           </div>

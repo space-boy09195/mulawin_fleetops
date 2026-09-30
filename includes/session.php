@@ -34,9 +34,14 @@ if (session_status() === PHP_SESSION_NONE) {
 // ---- Idle Timeout ------------------------------------------
 if (isset($_SESSION['last_activity'])) {
     if ((time() - $_SESSION['last_activity']) > SESSION_TIMEOUT) {
+        $returnTo = validatedLocalReturnPath($_SERVER['REQUEST_URI'] ?? null);
         session_unset();
         session_destroy();
-        header('Location: ' . APP_BASE . '/login.php?reason=timeout');
+        $loginUrl = APP_BASE . '/login.php?reason=timeout';
+        if ($returnTo !== null) {
+            $loginUrl .= '&return_to=' . rawurlencode($returnTo);
+        }
+        header('Location: ' . $loginUrl);
         exit;
     }
 }
@@ -64,7 +69,12 @@ function isLoggedIn(): bool {
 // ============================================================
 function requireLogin(): void {
     if (!isLoggedIn()) {
-        header('Location: ' . APP_BASE . '/login.php');
+        $loginUrl = APP_BASE . '/login.php';
+        $returnTo = validatedLocalReturnPath($_SERVER['REQUEST_URI'] ?? null);
+        if ($returnTo !== null) {
+            $loginUrl .= '?return_to=' . rawurlencode($returnTo);
+        }
+        header('Location: ' . $loginUrl);
         exit;
     }
 }
@@ -75,11 +85,87 @@ function requireLogin(): void {
 // ============================================================
 function requireRole(array $allowedRoles): void {
     requireLogin();
-    if (!in_array($_SESSION['role_id'], $allowedRoles, true)) {
+    $permissionKeys = array_map(
+        static fn(int $roleId): string => 'legacy.role.' . $roleId,
+        array_values(array_filter($allowedRoles, 'is_int'))
+    );
+    if (!$permissionKeys || !currentUserHasAnyPermission($permissionKeys)) {
         http_response_code(403);
         include __DIR__ . '/../pages/403.php';
         exit;
     }
+}
+
+function requirePermission(string $permissionKey): void {
+    requireLogin();
+    if (!currentUserHasAnyPermission([$permissionKey])) {
+        http_response_code(403);
+        include __DIR__ . '/../pages/403.php';
+        exit;
+    }
+}
+
+function requireAnyPermission(array $permissionKeys): void {
+    requireLogin();
+    if (!$permissionKeys || !currentUserHasAnyPermission($permissionKeys)) {
+        http_response_code(403);
+        include __DIR__ . '/../pages/403.php';
+        exit;
+    }
+}
+
+function currentUserHasAnyPermission(array $permissionKeys): bool {
+    static $requestCache = [];
+    $roleId = currentRoleId();
+    $cacheKey = $roleId . ':' . implode(',', $permissionKeys);
+    if (array_key_exists($cacheKey, $requestCache)) {
+        return $requestCache[$cacheKey];
+    }
+
+    require_once __DIR__ . '/../config/database.php';
+    $placeholders = implode(',', array_fill(0, count($permissionKeys), '?'));
+    try {
+        $stmt = getDBConnection()->prepare(
+            "SELECT 1
+             FROM role_permissions rp
+             JOIN permissions p ON p.permission_id = rp.permission_id
+             WHERE rp.role_id = ? AND p.permission_key IN ($placeholders)
+             LIMIT 1"
+        );
+        $stmt->execute(array_merge([$roleId], $permissionKeys));
+        return $requestCache[$cacheKey] = (bool)$stmt->fetchColumn();
+    } catch (PDOException $e) {
+        error_log('Permission check failed: ' . $e->getMessage());
+        http_response_code(503);
+        exit('Access permissions are temporarily unavailable. Please try again later.');
+    }
+}
+
+function validatedLocalReturnPath(?string $candidate): ?string {
+    if ($candidate === null || $candidate === '' || preg_match('/[\r\n\\\\]/', $candidate)) {
+        return null;
+    }
+
+    $parts = parse_url($candidate);
+    if ($parts === false || isset($parts['scheme']) || isset($parts['host']) || isset($parts['user'])) {
+        return null;
+    }
+
+    $path = $parts['path'] ?? '';
+    if ($path === '' || !str_starts_with($path, '/') || str_starts_with($path, '//')) {
+        return null;
+    }
+
+    $basePath = rtrim(APP_BASE, '/');
+    if ($basePath !== '' && $basePath !== '/' && $path !== $basePath && !str_starts_with($path, $basePath . '/')) {
+        return null;
+    }
+
+    $returnPath = $path;
+    if (isset($parts['query'])) {
+        $returnPath .= '?' . $parts['query'];
+    }
+    return $returnPath;
 }
 
 // ============================================================
@@ -87,6 +173,33 @@ function requireRole(array $allowedRoles): void {
 // ============================================================
 function currentRoleId(): int {
     return (int)($_SESSION['role_id'] ?? 0);
+}
+
+function dashboardUrlForRole(string $roleName, int $roleId): string {
+    $target = match ($roleName) {
+        'Admin', 'Head Management', 'Management / Head' => '/pages/dashboard_head.php',
+        'Operations Head' => '/pages/dashboard_operations_head.php',
+        'Dispatcher' => '/pages/dashboard_dispatcher.php',
+        'Car Carrier Dispatcher - Day',
+        'Car Carrier Dispatcher - Night',
+        'Container & Wing Van Dispatcher - Day',
+        'Container & Wing Van Dispatcher - Night' => '/pages/dispatch_inbox.php',
+        'Maintenance' => '/pages/dashboard_maintenance.php',
+        'Purchasing Officer' => '/pages/parts.php',
+        'Accounting' => '/pages/dashboard_accounting.php',
+        'Finance' => '/pages/trip_costs.php',
+        'Billing and Collection' => '/pages/billing.php',
+        'Payroll' => '/pages/payroll.php',
+        'Admin Officer' => '/pages/documents.php',
+        default => match ($roleId) {
+            ROLE_ADMIN => '/pages/dashboard_head.php',
+            ROLE_DISPATCHER => '/pages/dashboard_dispatcher.php',
+            ROLE_MAINTENANCE => '/pages/dashboard_maintenance.php',
+            ROLE_ACCOUNTING => '/pages/dashboard_accounting.php',
+            default => '/pages/403.php',
+        },
+    };
+    return APP_BASE . $target;
 }
 
 // ============================================================

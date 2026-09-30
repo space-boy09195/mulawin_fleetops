@@ -1,5 +1,3 @@
-USE mulawin_fleetops;
-
 CREATE TABLE IF NOT EXISTS trip_number_counters (
   `year` INT UNSIGNED NOT NULL,
   next_number INT UNSIGNED NOT NULL DEFAULT 1,

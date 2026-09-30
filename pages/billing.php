@@ -3,7 +3,7 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]);
+requireAnyPermission(['billing.view', 'billing.manage']);
 $isHead = currentRoleId() === ROLE_HEAD_MANAGEMENT;
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/billing.js';
@@ -251,6 +251,40 @@ $paymentModes = ['Cash', 'Check', 'Bank Transfer', 'GCash', 'Other'];
 function isOverdue(string $dueDate, string $status): bool {
     return $status !== 'Paid' && strtotime($dueDate) < strtotime('today');
 }
+
+$agingBuckets = [
+    'Current' => 0.0,
+    '1-30 days' => 0.0,
+    '31-60 days' => 0.0,
+    '61-90 days' => 0.0,
+    '91+ days' => 0.0,
+];
+$overdueClients = [];
+$today = new DateTimeImmutable('today');
+foreach ($billings as $billing) {
+    $balance = (float)$billing['balance'];
+    if ($balance <= 0) {
+        continue;
+    }
+    $daysPastDue = (int)(new DateTimeImmutable($billing['due_date']))->diff($today)->format('%r%a');
+    if ($daysPastDue <= 0) {
+        $bucket = 'Current';
+    } elseif ($daysPastDue <= 30) {
+        $bucket = '1-30 days';
+    } elseif ($daysPastDue <= 60) {
+        $bucket = '31-60 days';
+    } elseif ($daysPastDue <= 90) {
+        $bucket = '61-90 days';
+    } else {
+        $bucket = '91+ days';
+    }
+    $agingBuckets[$bucket] += $balance;
+    if ($daysPastDue > 0) {
+        $client = $billing['client_name'] ?: 'Unassigned client';
+        $overdueClients[$client] = ($overdueClients[$client] ?? 0) + $balance;
+    }
+}
+arsort($overdueClients);
 ?>
 
 <div class="bil-page">
@@ -309,6 +343,49 @@ function isOverdue(string $dueDate, string $status): bool {
     <div class="bil-card <?= $unpaidCount > 0 ? 'bil-card-warn' : '' ?>">
       <div class="bil-card-value"><?= $unpaidCount ?></div>
       <div class="bil-card-label">Unpaid Billings</div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-lg-7">
+      <div class="bil-table-wrap h-100">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h2 class="h5 mb-0">Receivables aging</h2>
+          <span class="text-muted small">Outstanding balances by due date</span>
+        </div>
+        <div class="table-responsive">
+          <table class="table bil-table mb-0">
+            <thead><tr><th>Bucket</th><th class="text-end">Balance</th></tr></thead>
+            <tbody>
+            <?php foreach ($agingBuckets as $bucket => $amount): ?>
+              <tr><td><?= htmlspecialchars($bucket) ?></td><td class="text-end">₱<?= number_format($amount, 2) ?></td></tr>
+            <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="bil-table-wrap h-100">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h2 class="h5 mb-0">Overdue by client</h2>
+          <span class="text-muted small"><?= count($overdueClients) ?> clients</span>
+        </div>
+        <?php if (!$overdueClients): ?>
+          <p class="text-muted mb-0">No overdue balances in this period.</p>
+        <?php else: ?>
+          <div class="table-responsive">
+            <table class="table bil-table mb-0">
+              <thead><tr><th>Client</th><th class="text-end">Overdue</th></tr></thead>
+              <tbody>
+              <?php foreach (array_slice($overdueClients, 0, 10, true) as $client => $amount): ?>
+                <tr><td><?= htmlspecialchars($client) ?></td><td class="text-end text-danger">₱<?= number_format($amount, 2) ?></td></tr>
+              <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        <?php endif; ?>
+      </div>
     </div>
   </div>
 

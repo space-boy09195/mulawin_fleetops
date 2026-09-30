@@ -6,10 +6,17 @@ require_once __DIR__ . '/includes/session.php';
 require_once __DIR__ . '/includes/csrf.php';
 require_once __DIR__ . '/includes/env.php';
 
+$returnTo = validatedLocalReturnPath($_GET['return_to'] ?? $_SESSION['return_to'] ?? null);
+if ($returnTo !== null) {
+    $_SESSION['return_to'] = $returnTo;
+}
+
 // Already logged in? Send to dashboard
 if (isLoggedIn()) {
     $dashboards = ROLE_DASHBOARDS;
-    header('Location: ' . ($dashboards[currentRoleId()] ?? APP_BASE . '/pages/dashboard_head.php'));
+    $destination = $returnTo ?? ($dashboards[currentRoleId()] ?? APP_BASE . '/pages/dashboard_head.php');
+    unset($_SESSION['return_to']);
+    header('Location: ' . $destination);
     exit;
 }
 
@@ -173,6 +180,9 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
 
     <form method="POST" action="auth/login_handler.php" id="loginForm" novalidate>
       <?= csrfInput() ?>
+      <?php if ($returnTo !== null): ?>
+      <input type="hidden" name="return_to" value="<?= htmlspecialchars($returnTo, ENT_QUOTES) ?>">
+      <?php endif; ?>
 
       <div class="mb-3">
         <label for="username" class="form-label">Username</label>

@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!tbody) return;
     tbody.querySelectorAll('tr[data-status]').forEach((row) => {
       const status     = row.dataset.status || '';
+      const shift      = row.dataset.shift || '';
       const isLate     = row.dataset.late   === '1';
       const hasProblem = row.dataset.problem === '1';
       const searchData = row.dataset.search || '';
@@ -39,6 +40,8 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (activeFilter === 'late')  matchesFilter = isLate;
       else if (activeFilter === 'problem') matchesFilter = hasProblem;
       else if (activeFilter === 'okay') matchesFilter = !hasProblem;
+      else if (activeFilter === 'shift:Day') matchesFilter = shift === 'Day';
+      else if (activeFilter === 'shift:Night') matchesFilter = shift === 'Night';
       else                               matchesFilter = status === activeFilter;
 
       const matchesSearch = searchTerm === '' || searchData.includes(searchTerm);
@@ -74,6 +77,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalTripId    = document.getElementById('modalTripId');
   const modalStatus    = document.getElementById('modalStatus');
   const modalNotes     = document.getElementById('modalNotes');
+  const modalNotesLabel = document.getElementById('modalNotesLabel');
+  const modalLocation  = document.getElementById('modalLocation');
   const confirmBtn     = document.getElementById('confirmUpdateBtn');
   const btnText        = document.getElementById('updateBtnText');
   const btnSpinner     = document.getElementById('updateBtnSpinner');
@@ -84,13 +89,38 @@ document.addEventListener('DOMContentLoaded', () => {
   let bsModal = null;
   if (modal) bsModal = new bootstrap.Modal(modal);
 
+  function syncUpdateRequirements() {
+    const cancelled = modalStatus?.value === 'Cancelled';
+    if (modalNotes) modalNotes.required = cancelled;
+    if (modalNotesLabel) {
+      modalNotesLabel.innerHTML = cancelled
+        ? 'Cancellation Reason <span class="text-danger">(required)</span>'
+        : 'Notes <span class="text-muted fw-400">(optional)</span>';
+    }
+    attachments?.classList.toggle('d-none', modalStatus?.value !== 'Completed');
+  }
+
+  modalStatus?.addEventListener('change', syncUpdateRequirements);
+
   window.openUpdateModal = function(tripId, tripNumber, currentStatus) {
     if (!bsModal) return;
     modalTripNum.textContent  = tripNumber;
     modalTripId.value         = tripId;
-    modalStatus.value         = currentStatus;
+    const nextStatuses = {
+      'Loading': ['In Transit', 'Cancelled'],
+      'In Transit': ['Unloading', 'Cancelled'],
+      'Unloading': ['Completed', 'Cancelled'],
+    }[currentStatus] || [];
+    modalStatus.replaceChildren(...nextStatuses.map(status => {
+      const option = document.createElement('option');
+      option.value = status;
+      option.textContent = status;
+      return option;
+    }));
+    modalStatus.value = nextStatuses[0] || '';
     if (modalNotes)    modalNotes.value    = '';
-    attachments?.classList.toggle('d-none', currentStatus === 'Completed');
+    if (modalLocation) modalLocation.value = '';
+    syncUpdateRequirements();
     if (deliveryReceipt) deliveryReceipt.value = '';
     if (waybill) waybill.value = '';
     bsModal.show();
@@ -101,8 +131,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const tripId   = modalTripId.value;
       const status   = modalStatus.value;
       const notes    = modalNotes    ? modalNotes.value.trim()    : '';
+      const location = modalLocation ? modalLocation.value.trim() : '';
 
       if (!tripId || !status) return;
+      if (status === 'Cancelled' && !notes) {
+        alert('Enter a cancellation reason before cancelling this trip.');
+        return;
+      }
 
       btnText.classList.add('d-none');
       btnSpinner.classList.remove('d-none');
@@ -113,19 +148,27 @@ document.addEventListener('DOMContentLoaded', () => {
         fd.append('trip_id',       tripId);
         fd.append('status',        status);
         fd.append('notes',         notes);
+        fd.append('location_note', location);
         if (status === 'Completed') {
           if (deliveryReceipt?.files?.[0]) fd.append('delivery_receipt', deliveryReceipt.files[0]);
           if (waybill?.files?.[0]) fd.append('waybill', waybill.files[0]);
         }
         fd.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
-
-        const res    = await fetch(window.APP_BASE + '/ajax/update_trip_status.php', { method: 'POST', body: fd });
+        const scope = `trip.status:${tripId}`;
+        const headers = window.fleetOpsIdempotencyHeaders(scope);
+        const res = await fetch(window.APP_BASE + '/ajax/update_trip_status.php', {
+          method: 'POST',
+          headers,
+          body: fd,
+        });
         const result = await res.json();
 
         if (result.success) {
+          window.fleetOpsCompleteIdempotency(scope);
           bsModal.hide();
           window.location.reload();
         } else {
+          if (res.status === 409) window.fleetOpsCompleteIdempotency(scope);
           alert('Error: ' + (result.message || 'Could not update trip.'));
         }
       } catch (err) {

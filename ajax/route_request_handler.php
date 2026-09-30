@@ -14,7 +14,7 @@ $pdo = getDBConnection();
 $action = $_POST['action'] ?? '';
 
 if ($action === 'request') {
-    requireRole([ROLE_DISPATCHER]);
+    requirePermission('routes.request');
     $name = requiredString('route_name', 'Route name', 150);
     $origin = requiredString('origin', 'Origin', 150);
     $destination = requiredString('destination', 'Destination', 150);
@@ -36,11 +36,11 @@ if ($action === 'request') {
     $stmt->execute([$name, $origin, $destination, $distance, $requestNotes, currentUserId()]);
     $id = (int)$pdo->lastInsertId();
     auditLog('REQUEST_ROUTE', 'routes', $id, null, ['route_name' => $name]);
-    jsonOk(['id' => $id], 'Route request submitted for Head Management approval.');
+    jsonOk(['id' => $id], 'Route request submitted for Operations Head approval.');
 }
 
 if ($action === 'review') {
-    requireRole([ROLE_HEAD_MANAGEMENT]);
+    requirePermission('routes.approve');
     $routeId = requiredInt('route_id', 'Route', 1);
     $status = requiredEnum('status', ['Approved', 'Rejected'], 'Status');
     $route = findOrFail($pdo, 'routes', 'route_id', $routeId, 'Route not found.');

@@ -4,7 +4,7 @@ require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/recommendations.php';
 
-requireRole([ROLE_DISPATCHER]);
+requirePermission('trips.view');
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard_dispatcher.js';
 layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_dispatcher.css');

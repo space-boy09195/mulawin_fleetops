@@ -3,7 +3,7 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_ACCOUNTING]);
+requireAnyPermission(['trips.view', 'billing.view']);
 
 $tripId = filter_input(INPUT_GET, 'trip_id', FILTER_VALIDATE_INT);
 if (!$tripId) {
@@ -13,7 +13,7 @@ if (!$tripId) {
 
 $pdo = getDBConnection();
 $tripStmt = $pdo->prepare("
-    SELECT t.trip_number, t.status, t.actual_arrival, tr.plate_number,
+    SELECT t.trip_id, t.trip_number, t.status, t.actual_arrival, tr.plate_number,
            e.full_name AS driver_name, r.origin, r.destination
     FROM trips t
     JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
@@ -37,6 +37,14 @@ $docsStmt = $pdo->prepare("
 ");
 $docsStmt->execute([$tripId]);
 $documents = $docsStmt->fetchAll(PDO::FETCH_ASSOC);
+$deliveryStmt = $pdo->prepare(
+    'SELECT delivered_unit_count, delivery_receipt_number, shared_waybill_reference,
+            co_load_reference, delivery_notes, return_location, return_notes
+     FROM trip_delivery_return_details
+     WHERE trip_id = ?'
+);
+$deliveryStmt->execute([$tripId]);
+$deliveryReturn = $deliveryStmt->fetch(PDO::FETCH_ASSOC) ?: null;
 
 layoutHead('Trip Report', APP_BASE . '/assets/css/trip_monitor.css');
 ?>
@@ -46,7 +54,10 @@ layoutHead('Trip Report', APP_BASE . '/assets/css/trip_monitor.css');
       <h1 class="h3 mb-1">Closed Trip Report</h1>
       <p class="text-muted mb-0"><?= htmlspecialchars($trip['trip_number']) ?></p>
     </div>
-    <span class="badge bg-success"><?= htmlspecialchars($trip['status']) ?></span>
+    <div class="d-flex gap-2 align-items-center">
+      <span class="badge bg-success"><?= htmlspecialchars($trip['status']) ?></span>
+      <a class="btn btn-sm btn-outline-primary" href="<?= APP_BASE ?>/pages/trip_workflow.php?trip_id=<?= (int)$trip['trip_id'] ?>">Workflow timeline</a>
+    </div>
   </div>
   <hr>
   <dl class="row mb-4">
@@ -59,6 +70,27 @@ layoutHead('Trip Report', APP_BASE . '/assets/css/trip_monitor.css');
     <dt class="col-sm-3">Completed</dt>
     <dd class="col-sm-9"><?= $trip['actual_arrival'] ? date('M j, Y g:i A', strtotime($trip['actual_arrival'])) : '—' ?></dd>
   </dl>
+  <h2 class="h5">Delivery and return details</h2>
+  <?php if (!$deliveryReturn): ?>
+    <p class="text-muted">No delivery/return detail record is available for this trip.</p>
+  <?php else: ?>
+    <dl class="row">
+      <dt class="col-sm-3">Delivered units</dt>
+      <dd class="col-sm-9"><?= $deliveryReturn['delivered_unit_count'] === null ? '—' : htmlspecialchars((string)$deliveryReturn['delivered_unit_count']) ?></dd>
+      <dt class="col-sm-3">Delivery receipt</dt>
+      <dd class="col-sm-9"><?= htmlspecialchars($deliveryReturn['delivery_receipt_number'] ?? '—') ?></dd>
+      <dt class="col-sm-3">Shared waybill</dt>
+      <dd class="col-sm-9"><?= htmlspecialchars($deliveryReturn['shared_waybill_reference'] ?? '—') ?></dd>
+      <dt class="col-sm-3">Co-load reference</dt>
+      <dd class="col-sm-9"><?= htmlspecialchars($deliveryReturn['co_load_reference'] ?? '—') ?></dd>
+      <dt class="col-sm-3">Delivery details</dt>
+      <dd class="col-sm-9"><?= nl2br(htmlspecialchars($deliveryReturn['delivery_notes'])) ?></dd>
+      <dt class="col-sm-3">Return location</dt>
+      <dd class="col-sm-9"><?= htmlspecialchars($deliveryReturn['return_location'] ?? '—') ?></dd>
+      <dt class="col-sm-3">Return details</dt>
+      <dd class="col-sm-9"><?= nl2br(htmlspecialchars($deliveryReturn['return_notes'])) ?></dd>
+    </dl>
+  <?php endif; ?>
   <h2 class="h5">Delivery documents</h2>
   <?php if (!$documents): ?>
     <p class="text-muted">No delivery receipt or waybill was attached.</p>

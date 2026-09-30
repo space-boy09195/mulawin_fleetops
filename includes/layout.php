@@ -10,13 +10,10 @@ require_once __DIR__ . '/csrf.php';
 
 // ---- Role → dashboard URL map ----------------------------
 function roleDashboardUrl(): string {
-    $map = [
-        ROLE_HEAD_MANAGEMENT => '/pages/dashboard_head.php',
-        ROLE_DISPATCHER      => '/pages/dashboard_dispatcher.php',
-        ROLE_MAINTENANCE     => '/pages/dashboard_maintenance.php',
-        ROLE_ACCOUNTING      => '/pages/dashboard_accounting.php',
-    ];
-    return APP_BASE . ($map[currentRoleId()] ?? '/pages/dashboard_head.php');
+    return dashboardUrlForRole(
+        (string)($_SESSION['role_name'] ?? ''),
+        currentRoleId()
+    );
 }
 
 // ---- Navigation definition --------------------------------
@@ -25,28 +22,41 @@ function roleDashboardUrl(): string {
 function getNavItems(): array {
     return [
         ['section' => 'Insights'],
-        ['label' => 'Analytics',           'href' => '/pages/analytics.php',    'icon' => 'bi-graph-up-arrow',      'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE, ROLE_ACCOUNTING]],
+        ['label' => 'Operations Dashboard', 'href' => '/pages/dashboard_operations_head.php', 'icon' => 'bi-speedometer2', 'permission' => 'operations.dashboard.view'],
+        ['label' => 'Operations Performance', 'href' => '/pages/operations_performance.php', 'icon' => 'bi-bar-chart-line', 'permission' => 'operations.reports.view'],
+        ['label' => 'Analytics',           'href' => '/pages/analytics.php',    'icon' => 'bi-graph-up-arrow',      'permission' => 'reports.view'],
         ['section' => 'Operations'],
-        ['label' => 'Fleet Status',        'href' => '/pages/fleet_status.php', 'icon' => 'bi-truck',               'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE]],
-        ['label' => 'Trip Monitoring',     'href' => '/pages/trip_monitor.php', 'icon' => 'bi-map',                 'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
-        ['label' => 'Dispatch',            'href' => '/pages/dispatch.php',     'icon' => 'bi-send',                'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
-        ['label' => 'Requests',            'href' => '/pages/requests.php',     'icon' => 'bi-inbox',               'roles' => [ROLE_HEAD_MANAGEMENT]],
-        ['label' => 'Trip Problem Reports', 'href' => '/pages/incidents.php',    'icon' => 'bi-exclamation-triangle','roles' => [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]],
+        ['label' => 'Fleet Status',        'href' => '/pages/fleet_status.php', 'icon' => 'bi-truck',               'permission' => 'fleet.view'],
+        ['label' => 'Trip Monitoring',     'href' => '/pages/trip_monitor.php', 'icon' => 'bi-map',                 'permission' => 'trips.view'],
+        ['label' => 'Dispatch',            'href' => '/pages/dispatch.php',     'icon' => 'bi-send',                'permission' => 'trips.view'],
+        ['label' => 'Dispatch Planning',   'href' => '/pages/dispatch_planning.php', 'icon' => 'bi-list-check',    'permission' => 'dispatch.instructions.manage'],
+        ['label' => 'Dispatcher Queue',    'href' => '/pages/dispatch_inbox.php', 'icon' => 'bi-inbox',             'permission' => 'dispatch.instructions.encode'],
+        ['label' => 'Requests',            'href' => '/pages/requests.php',     'icon' => 'bi-inbox',               'permission' => 'approvals.review'],
+        ['label' => 'Trip Problem Reports', 'href' => '/pages/incidents.php',    'icon' => 'bi-exclamation-triangle','permission' => 'incidents.manage'],
         ['section' => 'Maintenance'],
         //['label' => 'Checklists',          'href' => '/pages/checklists.php',   'icon' => 'bi-clipboard-check',     'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]],
-        ['label' => 'Maintenance Records', 'href' => '/pages/maintenance.php',  'icon' => 'bi-tools',               'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]],
-        ['label' => 'Parts Inventory',     'href' => '/pages/parts.php',        'icon' => 'bi-box-seam',            'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]],
+        ['label' => 'Maintenance Records', 'href' => '/pages/maintenance.php',  'icon' => 'bi-tools',               'permission' => 'maintenance.view'],
+        ['label' => 'Maintenance Reports', 'href' => '/pages/maintenance_reports.php', 'icon' => 'bi-clipboard-data', 'permission' => 'maintenance.reports.view'],
+        ['label' => 'Parts Inventory',     'href' => '/pages/parts.php',        'icon' => 'bi-box-seam',            'permission' => 'parts.view'],
+        ['label' => 'Purchasing',          'href' => '/pages/purchasing.php',   'icon' => 'bi-cart-check',          'permission' => 'purchasing.view'],
+        ['section' => 'People & Admin'],
+        ['label' => 'Attendance',          'href' => '/pages/attendance.php',   'icon' => 'bi-calendar-check',     'permission' => 'hr.attendance.view', 'also_linked_employee' => true],
+        ['label' => 'Recruitment',         'href' => '/pages/recruitment.php',  'icon' => 'bi-person-plus',        'permission' => 'hr.recruitment.view'],
+        ['label' => 'Office Supplies',     'href' => '/pages/office_supplies.php', 'icon' => 'bi-clipboard2-check','permission' => 'admin.supplies.view'],
         ['section' => 'Accounting'],
-        ['label' => 'Billing',             'href' => '/pages/billing.php',      'icon' => 'bi-receipt',             'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
-        ['label' => 'Clients',             'href' => '/pages/clients.php',      'icon' => 'bi-person-vcard',         'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
-        ['label' => 'Trip Costs',           'href' => '/pages/trip_costs.php',    'icon' => 'bi-fuel-pump',            'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
+        ['label' => 'Billing',             'href' => '/pages/billing.php',      'icon' => 'bi-receipt',             'permission' => 'billing.view'],
+        ['label' => 'Payroll',             'href' => '/pages/payroll.php',      'icon' => 'bi-cash-stack',          'permission' => 'payroll.view'],
+        ['label' => 'Clients',             'href' => '/pages/clients.php',      'icon' => 'bi-person-vcard',         'permission' => 'clients.view'],
+        ['label' => 'Trip Costs',           'href' => '/pages/trip_costs.php',    'icon' => 'bi-fuel-pump',            'permission' => 'finance.view'],
+        ['label' => 'Finance',              'href' => '/pages/finance.php',       'icon' => 'bi-wallet2',               'permission' => 'finance.funds.view'],
         //['label' => 'Collections',         'href' => '/pages/collections.php',  'icon' => 'bi-cash-stack',          'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
         ['section' => 'Repository'],
         ['label' => 'Documents',           'href' => '/pages/documents.php',    'icon' => 'bi-folder2-open',        'roles' => []],
         ['section' => 'Admin'],
-        ['label' => 'User Management',     'href' => '/pages/users.php',        'icon' => 'bi-people',              'roles' => [ROLE_HEAD_MANAGEMENT]],
-        ['label' => 'Recycle Bin',         'href' => '/pages/recycle_bin.php',  'icon' => 'bi-trash3',              'roles' => [ROLE_HEAD_MANAGEMENT]],
-        ['label' => 'Automation',          'href' => '/pages/automation.php',   'icon' => 'bi-gear-wide-connected','roles' => [ROLE_HEAD_MANAGEMENT]],
+        ['label' => 'User Management',     'href' => '/pages/users.php',        'icon' => 'bi-people',              'permission' => 'users.manage'],
+        ['label' => 'Role Permissions',    'href' => '/pages/permissions.php',  'icon' => 'bi-shield-lock',         'roles' => [], 'permission' => 'permissions.manage'],
+        ['label' => 'Recycle Bin',         'href' => '/pages/recycle_bin.php',  'icon' => 'bi-trash3',              'permission' => 'audit.view'],
+        ['label' => 'Automation',          'href' => '/pages/automation.php',   'icon' => 'bi-gear-wide-connected','permission' => 'roles.manage'],
     ];
 }
 
@@ -57,13 +67,24 @@ function userInitials(): string {
     if (count($parts) >= 2) {
         return strtoupper(substr($parts[0], 0, 1) . substr(end($parts), 0, 1));
     }
+
+    function currentUserHasActiveEmployee(): bool {
+        static $linked = null;
+        if ($linked !== null) {
+            return $linked;
+        }
+        $stmt = getDBConnection()->prepare(
+            'SELECT 1 FROM employees WHERE user_id = ? AND is_active = 1 LIMIT 1'
+        );
+        $stmt->execute([currentUserId()]);
+        return $linked = (bool)$stmt->fetchColumn();
+    }
     return strtoupper(substr($name, 0, 2));
 }
 
 // ---- Build sidebar nav HTML (sections hidden if no visible children)
 function buildSidebarNav(): string {
     $navItems    = getNavItems();
-    $userRole    = currentRoleId();
     $currentPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
     $html        = '';
 
@@ -83,10 +104,13 @@ function buildSidebarNav(): string {
             continue;
         }
 
-        // Skip if user's role isn't allowed
-        if (!empty($item['roles']) && !in_array($userRole, $item['roles'], true)) {
+        if (isset($item['permission']) && !currentUserHasAnyPermission([$item['permission']])
+            && !(($item['also_linked_employee'] ?? false) && currentUserHasActiveEmployee())) {
             continue;
         }
+
+        // Transitional role-based links remain available for legacy pages.
+        if (!isset($item['permission']) && !empty($item['roles']) && !in_array(currentRoleId(), $item['roles'], true)) continue;
 
         // Flush buffered section label now that we have a visible item
         if ($pendingSection !== '') {
@@ -147,7 +171,7 @@ function getLatestAnnouncements(): array {
                 ROLE_MAINTENANCE => 'maintenance',
                 ROLE_ACCOUNTING  => 'accounting',
                 ROLE_DISPATCHER  => 'operations',
-                default          => 'all',
+                default          => ($_SESSION['role_name'] ?? '') === 'Operations Head' ? 'operations' : 'all',
             };
             $where[] = "(a.audience = 'all' OR a.audience = :audience)";
             $params[':audience'] = $audience;
@@ -183,7 +207,9 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     $base        = APP_BASE;
     $csrfName    = htmlspecialchars(CSRF_TOKEN_NAME);
     $cssTag      = $extraCss ? "<link rel=\"stylesheet\" href=\"{$extraCss}\">" : '';
-    $appBaseJs   = "<script>window.APP_BASE=\"{$base}\";</script>";
+    $appBaseJs   = '<script>window.APP_BASE='
+        . json_encode(APP_BASE, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
+        . ';window.CURRENT_USER_ID=' . currentUserId() . ';</script>';
     $csrfToken   = generateCsrfToken();
     $csrfJs      = "<script>window.CSRF_TOKEN=\"{$csrfToken}\";window.CSRF_TOKEN_NAME=\"" . CSRF_TOKEN_NAME . "\";</script>";
 
@@ -227,7 +253,7 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
   <script>window.IS_HEAD_MANAGEMENT = {$isHead};</script>
   <script>
     (function(){
-      var t = localStorage.getItem('mulawin_theme');
+      var t = localStorage.getItem('mulawin_theme_' + window.CURRENT_USER_ID);
       if (t === 'dark') document.documentElement.setAttribute('data-theme','dark');
     })();
   </script>
@@ -238,7 +264,7 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     // what made the previous attempt (a script placed after the sidebar
     // markup) still occasionally show a flash on real page loads.
     (function(){
-      if (window.innerWidth > 768 && localStorage.getItem('mulawin_sidebar_collapsed') === '1') {
+      if (window.innerWidth > 768 && localStorage.getItem('mulawin_sidebar_collapsed_' + window.CURRENT_USER_ID) === '1') {
         document.documentElement.classList.add('sidebar-precollapsed');
       }
     })();
@@ -491,6 +517,10 @@ function layoutFoot(): void {
     $extraScript = '';
     $layoutScriptPath = __DIR__ . '/../assets/js/layout.js';
     $layoutScriptVersion = is_file($layoutScriptPath) ? (string)filemtime($layoutScriptPath) : (string)time();
+    $stateScriptPath = __DIR__ . '/../assets/js/state_persistence.js';
+    $stateScriptVersion = is_file($stateScriptPath) ? (string)filemtime($stateScriptPath) : (string)time();
+    $filterInputScriptPath = __DIR__ . '/../assets/js/filter_inputs.js';
+    $filterInputScriptVersion = is_file($filterInputScriptPath) ? (string)filemtime($filterInputScriptPath) : (string)time();
     if (!empty($GLOBALS['page_js'])) {
         $scriptUrlPath = parse_url($GLOBALS['page_js'], PHP_URL_PATH);
         $scriptRelativePath = ltrim(str_replace(rtrim(APP_BASE, '/') . '/', '', $scriptUrlPath), '/');
@@ -507,6 +537,8 @@ function layoutFoot(): void {
 
 <script src="{$base}/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
 <script src="{$base}/assets/vendor/chartjs/chart.umd.min.js"></script>
+<script src="{$base}/assets/js/filter_inputs.js?v={$filterInputScriptVersion}"></script>
+<script src="{$base}/assets/js/state_persistence.js?v={$stateScriptVersion}"></script>
 <script src="{$base}/assets/js/layout.js?v={$layoutScriptVersion}"></script>
 {$extraScript}
 </body>

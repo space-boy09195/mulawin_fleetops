@@ -1,6 +1,9 @@
 <?php
 
 require_once __DIR__ . '/../config/enums.php';
+require_once __DIR__ . '/attachments.php';
+require_once __DIR__ . '/document_storage.php';
+require_once __DIR__ . '/upload_validation.php';
 
 function storeUploadedDocument(
     PDO $pdo,
@@ -11,27 +14,7 @@ function storeUploadedDocument(
     string $visibilityScope,
     int $uploadedBy
 ): int {
-    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-        throw new InvalidArgumentException('The uploaded file could not be read.');
-    }
-
-    if ((int)$file['size'] > 10 * 1024 * 1024) {
-        throw new InvalidArgumentException('File exceeds the 10 MB limit.');
-    }
-
-    $mimeType = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
-    $allowedMimes = [
-        'application/pdf' => 'pdf',
-        'image/jpeg' => 'jpg',
-        'image/png' => 'png',
-        'application/msword' => 'doc',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
-        'application/vnd.ms-excel' => 'xls',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
-    ];
-    if (!isset($allowedMimes[$mimeType])) {
-        throw new InvalidArgumentException('File type not allowed. Upload PDF, JPG, PNG, DOCX, or XLSX.');
-    }
+    $upload = inspectDocumentUpload($file);
     if (!in_array($docType, DOCUMENT_TYPES, true)) {
         throw new InvalidArgumentException('Invalid document type.');
     }
@@ -39,13 +22,11 @@ function storeUploadedDocument(
         throw new InvalidArgumentException('Invalid document visibility.');
     }
 
-    $uploadDir = dirname(__DIR__) . '/uploads/';
-    if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
-        throw new RuntimeException('Upload directory could not be created.');
-    }
+    $uploadDir = documentStorageDirectory() . DIRECTORY_SEPARATOR;
 
-    $originalName = basename((string)$file['name']);
-    $extension = $allowedMimes[$mimeType];
+    $originalName = $upload['original_name'];
+    $mimeType = $upload['mime_type'];
+    $extension = $upload['extension'];
     $storedName = bin2hex(random_bytes(16)) . ($extension !== '' ? '.' . $extension : '');
     $destination = $uploadDir . $storedName;
 
@@ -53,6 +34,10 @@ function storeUploadedDocument(
         throw new RuntimeException('Failed to save the uploaded file.');
     }
 
+    $ownsTransaction = !$pdo->inTransaction();
+    if ($ownsTransaction) {
+        $pdo->beginTransaction();
+    }
     try {
         $stmt = $pdo->prepare("
             INSERT INTO documents
@@ -66,18 +51,36 @@ function storeUploadedDocument(
             $docType,
             $originalName,
             $storedName,
-            'uploads/' . $storedName,
-            (int)$file['size'],
+            documentStorageReference($storedName),
+            $upload['size'],
             $mimeType,
             $description,
             $visibilityScope,
         ]);
+        $documentId = (int)$pdo->lastInsertId();
+        if ($tripId !== null) {
+            attachDocumentToEntity(
+                $pdo,
+                $documentId,
+                'trip',
+                $tripId,
+                $docType,
+                $uploadedBy,
+                $description
+            );
+        }
+        if ($ownsTransaction) {
+            $pdo->commit();
+        }
     } catch (Throwable $e) {
+        if ($ownsTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         if (is_file($destination)) {
             unlink($destination);
         }
         throw $e;
     }
 
-    return (int)$pdo->lastInsertId();
+    return $documentId;
 }

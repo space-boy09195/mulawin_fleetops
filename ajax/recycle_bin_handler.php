@@ -11,6 +11,7 @@ require_once __DIR__ . '/../includes/soft_delete.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
+require_once __DIR__ . '/../includes/document_storage.php';
 
 header('Content-Type: application/json');
 
@@ -47,22 +48,48 @@ if ($action === 'purge') {
         jsonFail('Archive record not found, or it was already restored.', 404);
     }
 
-    // Documents keep their physical file on disk until this point — a
-    // permanent purge is the point of no return, so the file goes too.
+    $documentData = null;
+    $physicalPath = null;
     if ($archived['original_table'] === 'documents') {
-        $data = json_decode($archived['record_data'], true);
-        if (is_array($data) && !empty($data['stored_name'])) {
-            $physicalPath = dirname(__DIR__) . '/uploads/' . $data['stored_name'];
-            if (file_exists($physicalPath)) {
-                unlink($physicalPath);
-            }
+        $documentData = json_decode($archived['record_data'], true);
+        if (is_array($documentData) && !empty($documentData['stored_name'])) {
+            $physicalPath = documentStorageFile(
+                (string)$documentData['stored_name'],
+                $documentData['file_path'] ?? null
+            );
         }
     }
 
     $ok = permanentlyDeleteArchive($pdo, $archiveId);
 
     if ($ok) {
+        $fileCleanupFailed = false;
+        if ($archived['original_table'] === 'payroll_records') {
+            try {
+                $pdo->prepare('DELETE FROM payroll_deductions WHERE payroll_id = ?')
+                    ->execute([(int)$archived['original_id']]);
+            } catch (PDOException $e) {
+                $fileCleanupFailed = true;
+                error_log('recycle_bin_handler: could not purge payroll deduction details: ' . $e->getMessage());
+            }
+        }
+        if ($archived['original_table'] === 'documents') {
+            $pdo->prepare('DELETE FROM attachment_versions WHERE document_id = ?')
+                ->execute([(int)$archived['original_id']]);
+            $pdo->exec(
+                'DELETE a FROM attachments a
+                 LEFT JOIN attachment_versions av ON av.attachment_id = a.attachment_id
+                 WHERE av.attachment_id IS NULL'
+            );
+            if ($physicalPath !== null && is_file($physicalPath) && !unlink($physicalPath)) {
+                $fileCleanupFailed = true;
+                error_log('recycle_bin_handler: could not purge document file ' . $physicalPath);
+            }
+        }
         auditLog('PURGE', 'deleted_records', $archiveId);
+        if ($fileCleanupFailed) {
+            jsonFail('The record was purged, but related data could not be fully removed. Contact an administrator.', 500);
+        }
         jsonOk([], 'Permanently deleted.');
     }
 

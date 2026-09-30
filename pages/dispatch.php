@@ -7,14 +7,35 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/dispatcher_scope.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]);
+requirePermission('trips.view');
+
+$instruction = null;
+$instructionId = filter_input(INPUT_GET, 'instruction_id', FILTER_VALIDATE_INT);
+if ($instructionId !== null && $instructionId !== false && $instructionId > 0) {
+    $instructionQuery = getDBConnection()->prepare(
+        "SELECT i.instruction_id, i.client_id, i.route_id, i.scheduled_at, i.shift,
+                i.unit_count, i.instruction_notes, r.route_name, r.origin, r.destination
+         FROM dispatch_instructions i
+         JOIN routes r ON r.route_id = i.route_id
+         WHERE i.instruction_id = ? AND i.status = 'Open'"
+    );
+    $instructionQuery->execute([$instructionId]);
+    $instruction = $instructionQuery->fetch(PDO::FETCH_ASSOC);
+    if (!$instruction || !currentUserHasAnyPermission(['dispatch.instructions.encode'])) {
+        header('Location: ' . APP_BASE . '/pages/dispatch_inbox.php?instruction_error=unavailable');
+        exit;
+    }
+}
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/dispatch.js';
 $pdo = getDBConnection();
 
-$isHead       = currentRoleId() === ROLE_HEAD_MANAGEMENT;
-$isDispatcher = currentRoleId() === ROLE_DISPATCHER;
+$canManageRoutes = currentUserHasAnyPermission(['routes.manage']);
+$canApproveRoutes = currentUserHasAnyPermission(['routes.approve']);
+$isDispatcher = currentUserHasAnyPermission(['trips.create']);
+$canReview    = currentUserHasAnyPermission(['approvals.review']);
 
 // ── Period filter (scopes the Dispatch Requests list below) ──────────────────
 $periods = [
@@ -36,10 +57,19 @@ $rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
 $reqDateFilter = $rangeStartSql ? "AND dr.requested_at >= :rangeStart" : '';
 
 // ── Dropdown data ─────────────────────────────────────────────────────────────
-$availableTrucks = $pdo->query("
-    SELECT truck_id, plate_number, brand, model FROM trucks
-    WHERE status = 'Available' ORDER BY plate_number
-")->fetchAll();
+$scope = dispatcherScope();
+$truckSql = "SELECT truck_id, plate_number, brand, model, truck_type
+             FROM trucks WHERE status = 'Available'";
+$truckParams = [];
+if ($scope) {
+    $typePlaceholders = implode(',', array_fill(0, count($scope['truck_types']), '?'));
+    $truckSql .= " AND truck_type IN ($typePlaceholders)";
+    $truckParams = $scope['truck_types'];
+}
+$truckSql .= ' ORDER BY plate_number';
+$truckQuery = $pdo->prepare($truckSql);
+$truckQuery->execute($truckParams);
+$availableTrucks = $truckQuery->fetchAll(PDO::FETCH_ASSOC);
 
 $drivers = $pdo->query("
     SELECT employee_id, full_name, license_number FROM employees
@@ -57,7 +87,15 @@ $routes = $pdo->query("
     FROM routes WHERE is_active = 1 AND approval_status = 'Approved' ORDER BY route_name
 ")->fetchAll();
 
-$clients = $pdo->query("SELECT client_name FROM clients WHERE is_active = 1 ORDER BY client_name")->fetchAll(PDO::FETCH_COLUMN);
+$clients = $pdo->query("
+    SELECT client_id, client_name, parent_client_id
+    FROM clients WHERE is_active = 1 ORDER BY client_name
+")->fetchAll();
+$clientLocations = $pdo->query("
+    SELECT location_id, client_id, location_name, location_type, address
+    FROM client_locations WHERE is_active = 1
+    ORDER BY client_id, location_name
+")->fetchAll();
 
 // ── All routes for management tab ─────────────────────────────────────────────
 $allRoutes = $pdo->query("
@@ -73,16 +111,23 @@ $reqStmt = $pdo->prepare("
     SELECT
         dr.dispatch_id,
         dr.status,
+        dr.shift,
         dr.scheduled_at,
         dr.remarks,
         dr.client_name,
+        dr.booking_reference,
+        dr.waybill_reference,
+        dr.unit_count,
         dr.requested_at,
         dr.reviewed_at,
         tr.plate_number,
         tr.brand,
         tr.model,
         e_d.full_name   AS driver_name,
+        e_sd.full_name  AS second_driver_name,
         e_h.full_name   AS helper_name,
+        origin.location_name AS origin_location_name,
+        destination.location_name AS destination_location_name,
         r.route_name,
         r.origin,
         r.destination,
@@ -91,7 +136,10 @@ $reqStmt = $pdo->prepare("
     FROM dispatch_requests dr
     JOIN trucks tr          ON dr.truck_id     = tr.truck_id
     JOIN employees e_d      ON dr.driver_id    = e_d.employee_id
+    LEFT JOIN employees e_sd ON dr.second_driver_id = e_sd.employee_id
     LEFT JOIN employees e_h ON dr.helper_id    = e_h.employee_id
+    LEFT JOIN client_locations origin ON dr.origin_location_id = origin.location_id
+    LEFT JOIN client_locations destination ON dr.destination_location_id = destination.location_id
     JOIN routes r           ON dr.route_id     = r.route_id
     JOIN users u_req        ON dr.requested_by = u_req.user_id
     LEFT JOIN users u_apr   ON dr.approved_by  = u_apr.user_id
@@ -112,6 +160,16 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
   <div>
     <h1 class="page-title">Dispatch</h1>
     <p class="page-subtitle">
+      <?php if ($instruction): ?>
+        Encoding Operations Head instruction #<?= (int)$instruction['instruction_id'] ?> —
+        <?= htmlspecialchars($instruction['shift']) ?> Shift.
+      <?php else: ?>
+        <?php if (currentRoleId() === ROLE_DISPATCHER): ?>
+          Choose an instruction from the Dispatcher Queue to encode.
+        <?php elseif ($canReview && currentRoleId() !== ROLE_ADMIN): ?>
+          Review trip requests submitted by Dispatchers.
+        <?php endif; ?>
+      <?php endif; ?>
       <?= $pendingCount ?> pending request<?= $pendingCount !== 1 ? 's' : '' ?> awaiting review
     </p>
   </div>
@@ -123,7 +181,12 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
         <?php endforeach; ?>
       </select>
     </form>
-    <?php if ($isDispatcher): ?>
+    <?php if ($isDispatcher && currentRoleId() === ROLE_DISPATCHER && !$instruction): ?>
+    <a class="btn btn-primary btn-sm d-flex align-items-center gap-2"
+       href="<?= APP_BASE ?>/pages/dispatch_inbox.php">
+      <i class="bi bi-inbox"></i> Dispatch Queue
+    </a>
+    <?php elseif ($isDispatcher): ?>
     <button class="btn btn-primary btn-sm d-flex align-items-center gap-2"
             data-bs-toggle="modal" data-bs-target="#newDispatchModal">
      <i class="bi bi-plus-lg"></i> Dispatch
@@ -133,7 +196,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
      <i class="bi bi-signpost-2"></i> New Route Request
     </button>
     <?php endif; ?>
-    <?php if ($isHead): ?>
+    <?php if ($canManageRoutes): ?>
     <button class="btn btn-success btn-sm d-flex align-items-center gap-2"
             data-bs-toggle="modal" data-bs-target="#addRouteModal">
       <i class="bi bi-signpost-2"></i> Add Route
@@ -168,7 +231,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
     <!-- Filter bar -->
     <div class="card mb-4">
       <div class="card-body-custom">
-        <div class="d-flex flex-wrap gap-2 align-items-center">
+        <div class="d-flex flex-wrap gap-2 align-items-center" data-persist-filter="dispatch_status">
           <span class="text-muted" style="font-size:.8rem;">Filter:</span>
           <button class="filter-btn active" data-filter="all">All</button>
           <button class="filter-btn" data-filter="Pending">
@@ -195,10 +258,11 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
               <th>Driver</th>
               <th>Route</th>
               <th>Client</th>
+              <th>Shift</th>
               <th>Scheduled</th>
               <th>Status</th>
               <th>Reviewed By</th>
-              <?php if ($isHead): ?>
+              <?php if ($canReview): ?>
               <th>Action</th>
               <?php endif; ?>
             </tr>
@@ -206,7 +270,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
           <tbody id="dispatchBody">
             <?php if (empty($requests)): ?>
             <tr>
-              <td colspan="<?= $isHead ? 9 : 8 ?>" class="text-center text-muted py-4">
+              <td colspan="<?= $canReview ? 10 : 9 ?>" class="text-center text-muted py-4">
               
               </td>
             </tr>
@@ -234,6 +298,11 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
               </td>
               <td>
                 <div><?= htmlspecialchars($req['driver_name']) ?></div>
+                <?php if ($req['second_driver_name']): ?>
+                <div class="text-muted" style="font-size:.78rem;">
+                  Second driver: <?= htmlspecialchars($req['second_driver_name']) ?>
+                </div>
+                <?php endif; ?>
                 <?php if ($req['helper_name']): ?>
                 <div class="text-muted" style="font-size:.78rem;">
                   Helper: <?= htmlspecialchars($req['helper_name']) ?>
@@ -247,9 +316,25 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                   <i class="bi bi-arrow-right"></i>
                   <?= htmlspecialchars($req['destination']) ?>
                 </div>
+                <?php if ($req['origin_location_name'] || $req['destination_location_name']): ?>
+                <div class="text-muted small">
+                  <?= htmlspecialchars($req['origin_location_name'] ?? '—') ?>
+                  <i class="bi bi-arrow-right"></i>
+                  <?= htmlspecialchars($req['destination_location_name'] ?? '—') ?>
+                </div>
+                <?php endif; ?>
               </td>
               <td style="font-size:.82rem;">
                 <?= $req['client_name'] ? htmlspecialchars($req['client_name']) : '<span class="text-muted">—</span>' ?>
+                <?php if ($req['booking_reference'] || $req['waybill_reference']): ?>
+                <div class="text-muted small">
+                  <?= $req['booking_reference'] ? 'Booking: ' . htmlspecialchars($req['booking_reference']) : '' ?>
+                  <?= $req['waybill_reference'] ? 'Waybill: ' . htmlspecialchars($req['waybill_reference']) : '' ?>
+                </div>
+                <?php endif; ?>
+              </td>
+              <td style="font-size:.82rem;">
+                <span class="badge text-bg-<?= $req['shift'] === 'Day' ? 'info' : 'dark' ?>"><?= htmlspecialchars($req['shift']) ?></span>
               </td>
               <td style="font-size:.82rem;">
                 <?= $req['scheduled_at']
@@ -272,7 +357,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                 </div>
                 <?php endif; ?>
               </td>
-              <?php if ($isHead): ?>
+              <?php if ($canReview): ?>
               <td>
                 <?php if ($req['status'] === 'Pending'): ?>
                 <div class="d-flex gap-1">
@@ -321,7 +406,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
       <div class="disp-no-results">
         <i class="bi bi-signpost-2"></i>
         <span>No routes added yet.
-          <?php if ($isHead): ?>
+          <?php if ($canManageRoutes): ?>
           <a href="#" data-bs-toggle="modal" data-bs-target="#addRouteModal">Add the first route.</a>
           <?php endif; ?>
         </span>
@@ -336,9 +421,9 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
               <th>Destination</th>
               <th>Distance</th>
               <th>Requester Note</th>
-              <th>Status</th>
+              <th>Approval Status</th>
               <th>Map</th>
-              <?php if ($isHead): ?>
+              <?php if ($canManageRoutes || $canApproveRoutes): ?>
               <th>Actions</th>
               <?php endif; ?>
             </tr>
@@ -360,15 +445,6 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                   : '<span class="text-muted">—</span>' ?>
               </td>
               <td>
-                <?php if (!empty($rt['request_notes'])): ?>
-                <span class="text-muted small" title="Requester note">
-                  <i class="bi bi-chat-left-text me-1"></i><?= htmlspecialchars($rt['request_notes']) ?>
-                </span>
-                <?php else: ?>
-                <span class="text-muted">—</span>
-                <?php endif; ?>
-              </td>
-              <td>
                 <span class="status-badge <?= $rt['approval_status'] === 'Approved' && $rt['is_active'] ? 'available' : ($rt['approval_status'] === 'Pending' ? 'maintenance' : 'inactive') ?>">
                   <?= htmlspecialchars($rt['approval_status']) ?><?= $rt['approval_status'] === 'Approved' && $rt['is_active'] ? ' / Active' : '' ?>
                 </span>
@@ -383,10 +459,10 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                   <i class="bi bi-map"></i>
                 </button>
               </td>
-              <?php if ($isHead): ?>
+              <?php if ($canManageRoutes || $canApproveRoutes): ?>
               <td>
                 <div class="d-flex gap-1">
-                  <?php if ($rt['approval_status'] === 'Pending'): ?>
+                  <?php if ($canApproveRoutes && $rt['approval_status'] === 'Pending'): ?>
                   <button class="btn btn-sm btn-outline-success btn-review-route" data-id="<?= $rt['route_id'] ?>" data-status="Approved" title="Approve route">
                     <i class="bi bi-check-lg"></i>
                   </button>
@@ -394,6 +470,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                     <i class="bi bi-x-lg"></i>
                   </button>
                   <?php endif; ?>
+                  <?php if ($canManageRoutes): ?>
                   <button class="btn btn-sm btn-outline-primary btn-edit-route"
                           title="Edit route"
                           data-id="<?= $rt['route_id'] ?>"
@@ -409,6 +486,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                           data-active="<?= $rt['is_active'] ?>">
                     <i class="bi <?= $rt['is_active'] ? 'bi-toggle-on' : 'bi-toggle-off' ?>"></i>
                   </button>
+                  <?php endif; ?>
                 </div>
               </td>
               <?php endif; ?>
@@ -424,7 +502,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
 </div><!-- /tab-content -->
 
 <!-- ══ New Dispatch Modal ══════════════════════════════════════════════════ -->
-<?php if ($isDispatcher): ?>
+<?php if ($isDispatcher && (!$instructionId || $instruction)): ?>
 <div class="modal fade" id="newDispatchModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content disp-modal">
@@ -434,6 +512,13 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
       </div>
       <div class="modal-body disp-modal-body">
         <div id="dispatchFormError" class="alert alert-danger d-none"></div>
+        <?php if ($instruction): ?>
+        <div class="alert alert-info">
+          Encoding instruction #<?= (int)$instruction['instruction_id'] ?> from the Operations Head.
+          Shift: <strong><?= htmlspecialchars($instruction['shift']) ?></strong>.
+        </div>
+        <?php endif; ?>
+        <input type="hidden" id="d_instruction_id" value="<?= $instruction ? (int)$instruction['instruction_id'] : '' ?>">
         <div class="row g-3">
           <div class="col-md-6">
             <label class="disp-label">Truck <span class="text-danger">*</span></label>
@@ -453,9 +538,10 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
           </div>
           <div class="col-md-6">
             <label class="disp-label">Route <span class="text-danger">*</span></label>
-            <input type="hidden" id="d_route_id">
+            <input type="hidden" id="d_route_id" value="<?= $instruction ? (int)$instruction['route_id'] : '' ?>">
             <input class="form-control disp-input" id="d_route" list="approvedRoutesList"
-                   placeholder="Type to search approved routes" autocomplete="off">
+                   placeholder="Type to search approved routes" autocomplete="off"
+                   value="<?= $instruction ? htmlspecialchars($instruction['route_name'] . ' — ' . $instruction['origin'] . ' → ' . $instruction['destination'], ENT_QUOTES) : '' ?>">
             <datalist id="approvedRoutesList">
               <?php foreach ($routes as $rt): ?>
               <option value="<?= htmlspecialchars($rt['route_name'] . ' — ' . $rt['origin'] . ' → ' . $rt['destination'], ENT_QUOTES) ?>"
@@ -464,7 +550,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             </datalist>
             <?php if (empty($routes)): ?>
             <div class="form-text text-warning">
-              <i class="bi bi-exclamation-triangle me-1"></i>No active routes available. Contact Head Management.
+              <i class="bi bi-exclamation-triangle me-1"></i>No active routes available. Contact the Operations Head.
             </div>
             <?php endif; ?>
           </div>
@@ -481,6 +567,12 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             </datalist>
           </div>
           <div class="col-md-6">
+            <label class="disp-label">Second Driver <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <input type="hidden" id="d_second_driver_id">
+            <input class="form-control disp-input" id="d_second_driver" list="activeDriversList"
+                   placeholder="Type to search second driver" autocomplete="off">
+          </div>
+          <div class="col-md-6">
             <label class="disp-label">Helper <span class="text-muted" style="font-weight:400;">(optional)</span></label>
             <input type="hidden" id="d_helper_id">
             <input class="form-control disp-input" id="d_helper" list="activeHelpersList"
@@ -494,23 +586,85 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
           </div>
           <div class="col-md-6">
             <label class="disp-label">Client <span class="text-danger">*</span></label>
-            <input class="form-control disp-input" id="d_client" list="billingClientsList"
-                   maxlength="150" placeholder="Type or select a registered client" autocomplete="off" required>
-            <datalist id="billingClientsList">
+            <select class="form-select disp-input" id="d_client" required>
+              <option value="">— Select active client —</option>
               <?php foreach ($clients as $client): ?>
-              <option value="<?= htmlspecialchars($client, ENT_QUOTES) ?>"></option>
+              <option value="<?= (int)$client['client_id'] ?>"
+                      data-parent="<?= (int)($client['parent_client_id'] ?? 0) ?>"
+                      <?= $instruction && (int)$instruction['client_id'] === (int)$client['client_id'] ? 'selected' : '' ?>>
+                <?= htmlspecialchars($client['client_name']) ?>
+              </option>
               <?php endforeach; ?>
-            </datalist>
-            <div class="form-text">Suggestions come from clients previously added by Accounting.</div>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label">Billing Client <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <select class="form-select disp-input" id="d_billing_client">
+              <option value="">— Use client’s parent, or the selected client —</option>
+              <?php foreach ($clients as $client): ?>
+              <option value="<?= (int)$client['client_id'] ?>"><?= htmlspecialchars($client['client_name']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label">Pickup Location <span class="text-danger">*</span></label>
+            <select class="form-select disp-input" id="d_origin_location" disabled required>
+              <option value="">— Select client first —</option>
+              <?php foreach ($clientLocations as $location): ?>
+              <?php if (in_array($location['location_type'], ['Pickup', 'Both'], true)): ?>
+              <option value="<?= (int)$location['location_id'] ?>" data-client="<?= (int)$location['client_id'] ?>">
+                <?= htmlspecialchars($location['location_name'] . ' — ' . $location['address']) ?>
+              </option>
+              <?php endif; ?>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label">Delivery Location <span class="text-danger">*</span></label>
+            <select class="form-select disp-input" id="d_destination_location" disabled required>
+              <option value="">— Select client first —</option>
+              <?php foreach ($clientLocations as $location): ?>
+              <?php if (in_array($location['location_type'], ['Delivery', 'Both'], true)): ?>
+              <option value="<?= (int)$location['location_id'] ?>" data-client="<?= (int)$location['client_id'] ?>">
+                <?= htmlspecialchars($location['location_name'] . ' — ' . $location['address']) ?>
+              </option>
+              <?php endif; ?>
+              <?php endforeach; ?>
+            </select>
           </div>
           <div class="col-md-6">
             <label class="disp-label">Scheduled Departure <span class="text-danger">*</span></label>
-            <input type="datetime-local" class="form-control disp-input" id="d_scheduled" min="<?= date('Y-m-d\TH:i') ?>">
+            <input type="datetime-local" class="form-control disp-input" id="d_scheduled" min="<?= date('Y-m-d\TH:i') ?>"
+                   value="<?= $instruction ? date('Y-m-d\TH:i', strtotime($instruction['scheduled_at'])) : '' ?>">
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label" for="d_shift">Shift</label>
+            <select class="form-select disp-input" id="d_shift" <?= $instruction ? 'disabled' : '' ?>>
+              <option value="Day" <?= !$instruction || $instruction['shift'] === 'Day' ? 'selected' : '' ?>>Day Shift</option>
+              <option value="Night" <?= $instruction && $instruction['shift'] === 'Night' ? 'selected' : '' ?>>Night Shift</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label">Expected Arrival <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <input type="datetime-local" class="form-control disp-input" id="d_expected_arrival">
+          </div>
+          <div class="col-md-4">
+            <label class="disp-label">Booking / Nomination Ref.</label>
+            <input class="form-control disp-input" id="d_booking_reference" maxlength="100">
+          </div>
+          <div class="col-md-4">
+            <label class="disp-label">Waybill / DR Ref.</label>
+            <input class="form-control disp-input" id="d_waybill_reference" maxlength="100">
+          </div>
+          <div class="col-md-4">
+            <label class="disp-label">Unit Count</label>
+            <input type="number" min="0.01" step="0.01" class="form-control disp-input" id="d_unit_count"
+                   value="<?= $instruction && $instruction['unit_count'] !== null ? htmlspecialchars((string)$instruction['unit_count']) : '' ?>">
           </div>
           <div class="col-12">
             <label class="disp-label">Remarks <span class="text-muted" style="font-weight:400;">(optional)</span></label>
             <textarea class="form-control disp-input" id="d_remarks" rows="2"
-                      placeholder="Any notes for this dispatch…"></textarea>
+                      placeholder="Any notes for this dispatch…"><?= $instruction ? htmlspecialchars($instruction['instruction_notes'] ?? '') : '' ?></textarea>
           </div>
         </div>
       </div>
@@ -544,7 +698,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
         <input type="number" min="0" step="0.1" class="form-control disp-input" id="rr_distance" placeholder="Distance (km, optional)">
         <label class="disp-label mt-2" for="rr_notes">Side note <span class="text-muted" style="font-weight:400;">(optional)</span></label>
         <textarea class="form-control disp-input" id="rr_notes" rows="2" maxlength="500"
-                  placeholder="Add context or special instructions for Head Management…"></textarea>
+                  placeholder="Add context or special instructions for the Operations Head…"></textarea>
         <div class="row g-2 mt-2">
           <div class="col-md-6">
             <div class="route-map-wrap" id="rr_origin_map_wrap">
@@ -585,7 +739,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
 <?php endif; ?>
 
 <!-- ══ Reject Modal ════════════════════════════════════════════════════════ -->
-<?php if ($isHead): ?>
+<?php if ($canReview): ?>
 <div class="modal fade" id="rejectModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content disp-modal">

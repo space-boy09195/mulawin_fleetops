@@ -9,6 +9,7 @@
 // ============================================================
 
 define('TRUCK_STATUSES', ['Available', 'Deployed', 'Under Maintenance', 'Inactive']);
+define('TRUCK_CATEGORIES', ['Car Carrier', 'Container', 'Wing Van']);
 
 define('TRUCK_FUEL_TYPES', ['Diesel', 'Gasoline', 'LPG', 'Electric']);
 

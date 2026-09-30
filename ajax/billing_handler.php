@@ -9,7 +9,7 @@ require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]);
+requirePermission('billing.manage');
 requirePostMethod();
 enforceCsrf();
 

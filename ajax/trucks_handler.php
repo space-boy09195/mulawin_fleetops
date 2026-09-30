@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
+require_once __DIR__ . '/../includes/truck_status_history.php';
 
 header('Content-Type: application/json');
 
@@ -30,7 +31,33 @@ function extractTruckFields(): array {
         'capacity_tons'  => optionalFloat('capacity_tons'),
         'chassis_number' => optionalString('chassis_number'),
         'engine_number'  => optionalString('engine_number'),
+        'unit_number'    => optionalString('unit_number', null, 30),
+        'truck_type'     => requiredEnum('truck_type', TRUCK_CATEGORIES, 'Truck category'),
+        'mv_file_number' => optionalString('mv_file_number', null, 50),
+        'registration_expiry' => optionalString('registration_expiry', null, 10),
+        'insurance_provider' => optionalString('insurance_provider', null, 150),
+        'insurance_policy_number' => optionalString('insurance_policy_number', null, 80),
+        'insurance_expiry' => optionalString('insurance_expiry', null, 10),
+        'warranty_expiry' => optionalString('warranty_expiry', null, 10),
     ];
+}
+
+function validateTruckExpiryDates(array $fields): void {
+    foreach ([
+        'registration_expiry' => 'Registration expiry',
+        'insurance_expiry' => 'Insurance expiry',
+        'warranty_expiry' => 'Warranty expiry',
+    ] as $key => $label) {
+        if ($fields[$key] !== null && !isValidDate($fields[$key])) {
+            jsonFail($label . ' must be a valid date.');
+        }
+    }
+}
+
+function validateUniqueTruckIdentifiers(PDO $pdo, array $fields, ?int $truckId = null): void {
+    if ($fields['unit_number'] !== null && existsWhere($pdo, 'trucks', 'unit_number', $fields['unit_number'], $truckId, 'truck_id')) {
+        jsonFail('Another truck already has that unit number.');
+    }
 }
 
 function storeTruckImage(?array $file, ?string $existingPath = null): ?string {
@@ -127,6 +154,7 @@ function storeTruckViewImages(array $files, array $existing = []): array {
 // ── Add truck ─────────────────────────────────────────────────────────────────
 if ($action === 'add') {
     $f = extractTruckFields();
+    validateTruckExpiryDates($f);
     $images = storeTruckViewImages($_FILES['truck_images'] ?? []);
 
     if ($f['capacity_tons'] !== null && $f['capacity_tons'] < 0) {
@@ -139,14 +167,18 @@ if ($action === 'add') {
     if ($f['chassis_number'] && existsWhere($pdo, 'trucks', 'chassis_number', $f['chassis_number'])) {
         jsonFail('A truck with that chassis number already exists.');
     }
+    validateUniqueTruckIdentifiers($pdo, $f);
 
     try {
+        $pdo->beginTransaction();
         $stmt = $pdo->prepare("
             INSERT INTO trucks
                 (plate_number, chassis_number, engine_number, brand, model,
                  year_model, body_type, fuel_type, capacity_tons, image_path,
-                 image_front_path, image_side_path, image_rear_path, image_top_path, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Available')
+                 image_front_path, image_side_path, image_rear_path, image_top_path, status,
+                 unit_number, truck_type, mv_file_number, registration_expiry,
+                 insurance_provider, insurance_policy_number, insurance_expiry, warranty_expiry)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Available', ?, ?, ?, ?, ?, ?, ?, ?)
         ");
         $stmt->execute([
             $f['plate_number'], $f['chassis_number'], $f['engine_number'],
@@ -154,8 +186,18 @@ if ($action === 'add') {
             $f['body_type'], $f['fuel_type'], $f['capacity_tons'],
             $images['front'] ?? null, $images['front'] ?? null, $images['side'] ?? null,
             $images['rear'] ?? null, $images['top'] ?? null,
+            $f['unit_number'], $f['truck_type'], $f['mv_file_number'], $f['registration_expiry'],
+            $f['insurance_provider'], $f['insurance_policy_number'], $f['insurance_expiry'], $f['warranty_expiry'],
         ]);
         $newId = (int)$pdo->lastInsertId();
+        recordTruckStatusHistory(
+            $pdo,
+            $newId,
+            null,
+            'Available',
+            'Truck registered and added to fleet.'
+        );
+        $pdo->commit();
 
         auditLog('ADD_TRUCK', 'trucks', $newId, null, [
             'plate_number' => $f['plate_number'],
@@ -165,6 +207,11 @@ if ($action === 'add') {
 
         jsonOk(['id' => $newId], 'Truck added successfully.');
     } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('trucks_handler/add: ' . $e->getMessage());
+        jsonFail('A database error occurred. Please try again.', 500);
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('trucks_handler/add: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
     }
@@ -174,7 +221,9 @@ if ($action === 'add') {
 if ($action === 'edit') {
     $truckId = requiredInt('truck_id', 'Truck ID', 1);
     $status  = requiredEnum('status', TRUCK_STATUSES, 'Status');
+    $statusReason = optionalString('status_reason', null, 500);
     $f       = extractTruckFields();
+    validateTruckExpiryDates($f);
 
     if ($f['capacity_tons'] !== null && $f['capacity_tons'] < 0) {
         jsonFail('Capacity cannot be negative.');
@@ -194,31 +243,62 @@ if ($action === 'edit') {
     if ($f['chassis_number'] && existsWhere($pdo, 'trucks', 'chassis_number', $f['chassis_number'], $truckId, 'truck_id')) {
         jsonFail('Another truck already has that chassis number.');
     }
+    validateUniqueTruckIdentifiers($pdo, $f, $truckId);
 
     try {
+        $pdo->beginTransaction();
+        $statusLock = $pdo->prepare('SELECT status FROM trucks WHERE truck_id = ? FOR UPDATE');
+        $statusLock->execute([$truckId]);
+        $lockedStatus = $statusLock->fetchColumn();
+        if ($lockedStatus === false) {
+            $pdo->rollBack();
+            jsonFail('Truck not found.', 404);
+        }
+        if ($lockedStatus !== $status && $statusReason === null) {
+            $pdo->rollBack();
+            jsonFail('Explain why the truck status is changing.');
+        }
         $pdo->prepare("
             UPDATE trucks SET
                 plate_number   = ?, chassis_number = ?, engine_number  = ?,
                 brand          = ?, model          = ?, year_model     = ?,
                 body_type      = ?, fuel_type      = ?, capacity_tons  = ?, image_path = ?,
                 image_front_path = ?, image_side_path = ?, image_rear_path = ?, image_top_path = ?,
-                status         = ?
+                status         = ?, unit_number = ?, truck_type = ?, mv_file_number = ?,
+                registration_expiry = ?, insurance_provider = ?, insurance_policy_number = ?,
+                insurance_expiry = ?, warranty_expiry = ?
             WHERE truck_id     = ?
         ")->execute([
             $f['plate_number'], $f['chassis_number'], $f['engine_number'],
             $f['brand'], $f['model'], $f['year_model'],
             $f['body_type'], $f['fuel_type'], $f['capacity_tons'], $images['front'] ?? null,
             $images['front'] ?? null, $images['side'] ?? null, $images['rear'] ?? null, $images['top'] ?? null,
-            $status, $truckId,
+            $status, $f['unit_number'], $f['truck_type'], $f['mv_file_number'], $f['registration_expiry'],
+            $f['insurance_provider'], $f['insurance_policy_number'], $f['insurance_expiry'], $f['warranty_expiry'], $truckId,
         ]);
+        if ($lockedStatus !== $status) {
+            recordTruckStatusHistory(
+                $pdo,
+                $truckId,
+                (string)$lockedStatus,
+                $status,
+                $statusReason
+            );
+        }
+        $pdo->commit();
 
         auditLog('EDIT_TRUCK', 'trucks', $truckId,
             ['plate_number' => $oldData['plate_number'], 'status' => $oldData['status']],
-            ['plate_number' => $f['plate_number'],       'status' => $status]
+            ['plate_number' => $f['plate_number'], 'status' => $status, 'status_reason' => $statusReason]
         );
 
         jsonOk([], 'Truck updated successfully.');
     } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('trucks_handler/edit: ' . $e->getMessage());
+        jsonFail('A database error occurred. Please try again.', 500);
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('trucks_handler/edit: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
     }

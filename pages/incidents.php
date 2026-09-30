@@ -3,7 +3,7 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE]);
+requireAnyPermission(['incidents.manage', 'legacy.role.3']);
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/incidents.js';
 

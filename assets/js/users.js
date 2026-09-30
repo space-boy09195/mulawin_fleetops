@@ -333,15 +333,27 @@
   const aeLicExpiry   = document.getElementById('aeLicenseExpiry');
   const aeLicType     = document.getElementById('aeLicenseType');
   const aeDateHired   = document.getElementById('aeDateHired');
+  const aeEmploymentType = document.getElementById('aeEmploymentType');
+  const aeContractorCompany = document.getElementById('aeContractorCompany');
+  const aeDateResigned = document.getElementById('aeDateResigned');
+  const aeResignationReason = document.getElementById('aeResignationReason');
+  const aeContractorCompanyWrap = document.getElementById('aeContractorCompanyWrap');
   const submitAddEmp  = document.getElementById('submitAddEmpBtn');
   const aeSpinner     = document.getElementById('aeBtnSpinner');
   const addEmpAlert   = document.getElementById('addEmpAlert');
 
   addEmpModal?.addEventListener('hidden.bs.modal', () => {
-    clearInputs(aeCode, aeName, aePosition, aeContact, aeAddress, aeLicense, aeLicExpiry, aeLicType, aeDateHired);
+    clearInputs(aeCode, aeName, aePosition, aeContact, aeAddress, aeLicense, aeLicExpiry, aeLicType, aeDateHired,
+      aeContractorCompany, aeDateResigned, aeResignationReason);
+    if (aeEmploymentType) aeEmploymentType.value = 'Employee';
+    aeContractorCompanyWrap?.classList.add('d-none');
     if (aeAddress) aeAddress.value = '';
     hideAlert(addEmpAlert);
     setBusy(submitAddEmp, aeSpinner, false);
+  });
+
+  aeEmploymentType?.addEventListener('change', () => {
+    aeContractorCompanyWrap?.classList.toggle('d-none', aeEmploymentType.value !== 'Contractor');
   });
 
   submitAddEmp?.addEventListener('click', () => {
@@ -365,6 +377,10 @@
       license_expiry:  aeLicExpiry?.value        ?? '',
       license_type:    aeLicType?.value.trim()  ?? '',
       date_hired:      aeDateHired?.value        ?? '',
+      employment_type: aeEmploymentType?.value ?? 'Employee',
+      contractor_company: aeContractorCompany?.value.trim() ?? '',
+      date_resigned: aeDateResigned?.value ?? '',
+      resignation_reason: aeResignationReason?.value.trim() ?? '',
     }).then(res => {
       setBusy(submitAddEmp, aeSpinner, false);
       if (res.success) { bootstrap.Modal.getInstance(addEmpModal)?.hide(); window.location.reload(); }
@@ -389,6 +405,11 @@
   const eeLicExpiry   = document.getElementById('eeLicenseExpiry');
   const eeLicType     = document.getElementById('eeLicenseType');
   const eeDateHired   = document.getElementById('eeDateHired');
+  const eeEmploymentType = document.getElementById('eeEmploymentType');
+  const eeContractorCompany = document.getElementById('eeContractorCompany');
+  const eeDateResigned = document.getElementById('eeDateResigned');
+  const eeResignationReason = document.getElementById('eeResignationReason');
+  const eeContractorCompanyWrap = document.getElementById('eeContractorCompanyWrap');
   const eeActive      = document.getElementById('eeActive');
   const submitEditEmp = document.getElementById('submitEditEmpBtn');
   const eeSpinner     = document.getElementById('eeBtnSpinner');
@@ -408,12 +429,20 @@
     if (eeLicExpiry) eeLicExpiry.value = btn.dataset.licenseExpiry ?? '';
     if (eeLicType)   eeLicType.value   = btn.dataset.licenseType   ?? '';
     if (eeDateHired) eeDateHired.value = btn.dataset.hired         ?? '';
+    if (eeEmploymentType) eeEmploymentType.value = btn.dataset.employmentType ?? 'Employee';
+    if (eeContractorCompany) eeContractorCompany.value = btn.dataset.contractorCompany ?? '';
+    if (eeDateResigned) eeDateResigned.value = btn.dataset.dateResigned ?? '';
+    if (eeResignationReason) eeResignationReason.value = btn.dataset.resignationReason ?? '';
+    eeContractorCompanyWrap?.classList.toggle('d-none', eeEmploymentType?.value !== 'Contractor');
     if (eeActive)    eeActive.checked  = btn.dataset.active        === '1';
     if (eeActive)    eeActive.dataset.original = btn.dataset.active === '1' ? '1' : '0';
 
     hideAlert(editEmpAlert);
     setBusy(submitEditEmp, eeSpinner, false);
     new bootstrap.Modal(editEmpModal).show();
+  });
+  eeEmploymentType?.addEventListener('change', () => {
+    eeContractorCompanyWrap?.classList.toggle('d-none', eeEmploymentType.value !== 'Contractor');
   });
 
   editEmpModal?.addEventListener('hidden.bs.modal', () => {
@@ -451,7 +480,11 @@
       license_expiry:  eeLicExpiry?.value        ?? '',
       license_type:    eeLicType?.value.trim()  ?? '',
       date_hired:      eeDateHired?.value        ?? '',
-      is_active:       eeActive?.checked ? '1' : '0',
+      employment_type: eeEmploymentType?.value ?? 'Employee',
+      contractor_company: eeContractorCompany?.value.trim() ?? '',
+      date_resigned: eeDateResigned?.value ?? '',
+      resignation_reason: eeResignationReason?.value.trim() ?? '',
+      is_active:       eeDateResigned?.value ? '0' : (eeActive?.checked ? '1' : '0'),
     }).then(res => {
       setBusy(submitEditEmp, eeSpinner, false);
       if (res.success) { bootstrap.Modal.getInstance(editEmpModal)?.hide(); window.location.reload(); }

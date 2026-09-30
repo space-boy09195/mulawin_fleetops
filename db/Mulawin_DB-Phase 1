@@ -5,17 +5,12 @@
 -- ------------------------------------------------------------
 -- Charset : utf8mb4 | Collation: utf8mb4_unicode_ci
 -- Engine  : InnoDB   | Normalized to 3NF
+-- Import into an already selected database.
 -- Revised : Drivers/helpers separated from system users,
 --           parts movement history added, billings decoupled
 --           from single document, trucks enriched for ops,
 --           checklist linked to dispatch, employees table added
 -- ============================================================
-
-CREATE DATABASE IF NOT EXISTS mulawin_fleetops
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
-
-USE mulawin_fleetops;
 
 SET FOREIGN_KEY_CHECKS = 0;
 
@@ -357,7 +352,7 @@ CREATE TABLE vehicle_inspection_findings (
   inspection_id INT UNSIGNED NOT NULL,
   view_name     ENUM('Front','Side','Rear','Top') NOT NULL,
   part_name     VARCHAR(80) NOT NULL,
-  condition     ENUM('Good','Needs Attention','Damaged','Missing','Leaking','Worn','Not Checked') NOT NULL DEFAULT 'Not Checked',
+  `condition`   ENUM('Good','Needs Attention','Damaged','Missing','Leaking','Worn','Not Checked') NOT NULL DEFAULT 'Not Checked',
   notes         VARCHAR(255) NULL,
   PRIMARY KEY (finding_id),
   UNIQUE KEY uq_inspection_part (inspection_id, view_name, part_name),

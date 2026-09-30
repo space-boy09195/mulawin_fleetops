@@ -14,23 +14,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
   function postAjax(url, data) {
-    return fetch(url, {
+    const scope = `${url}:${data.dispatch_id ?? data.route_id ?? data.action ?? 'create'}`;
+    const request = fetch(url, {
       method:  'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...window.fleetOpsIdempotencyHeaders(scope),
+      },
       body:    new URLSearchParams({ ...data, [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN }),
     }).then(async response => {
       const text = await response.text();
       try {
-        return JSON.parse(text);
+        const result = JSON.parse(text);
+        if (result.success || response.status === 409) {
+          window.fleetOpsCompleteIdempotency(scope);
+        }
+        return result;
       } catch {
         throw new Error(`Server returned HTTP ${response.status} instead of JSON.`);
       }
     });
+    return request;
   }
 
   function postForm(url, formData) {
     formData.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
-    return fetch(url, { method: 'POST', body: formData }).then(r => r.json());
+    const scope = `${url}:${formData.get('dispatch_id') ?? formData.get('route_id') ?? 'create'}`;
+    return fetch(url, {
+      method: 'POST',
+      headers: window.fleetOpsIdempotencyHeaders(scope),
+      body: formData,
+    }).then(async response => {
+      const result = await response.json();
+      if (result.success || response.status === 409) {
+        window.fleetOpsCompleteIdempotency(scope);
+      }
+      return result;
+    });
   }
 
   function showAlert(el, msg, type = 'danger') {
@@ -93,11 +113,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Driver → Helper exclusion ────────────────────────────────────────────────
   const driverSel = document.getElementById('d_driver');
+  const secondDriverSel = document.getElementById('d_second_driver');
   const helperSel = document.getElementById('d_helper');
   const routeInput = document.getElementById('d_route');
   const routeIdInput = document.getElementById('d_route_id');
   const driverIdInput = document.getElementById('d_driver_id');
+  const secondDriverIdInput = document.getElementById('d_second_driver_id');
   const helperIdInput = document.getElementById('d_helper_id');
+  const clientSelect = document.getElementById('d_client');
+  const originLocationSelect = document.getElementById('d_origin_location');
+  const destinationLocationSelect = document.getElementById('d_destination_location');
 
   function syncDatalistId(input, hiddenInput, listId) {
     if (!input || !hiddenInput) return;
@@ -109,38 +134,82 @@ document.addEventListener('DOMContentLoaded', () => {
 
   routeInput?.addEventListener('input', () => syncDatalistId(routeInput, routeIdInput, 'approvedRoutesList'));
   driverSel?.addEventListener('input', () => syncDatalistId(driverSel, driverIdInput, 'activeDriversList'));
+  secondDriverSel?.addEventListener('input', () => syncDatalistId(secondDriverSel, secondDriverIdInput, 'activeDriversList'));
   helperSel?.addEventListener('input', () => syncDatalistId(helperSel, helperIdInput, 'activeHelpersList'));
 
   function syncHelperOptions() {
-    if (!driverIdInput || !helperIdInput) return;
-    if (helperIdInput.value === driverIdInput.value) {
+    const selectedCrew = [
+      [driverIdInput, driverSel],
+      [secondDriverIdInput, secondDriverSel],
+    ].map(([input]) => input?.value).filter(Boolean);
+    if (helperIdInput && selectedCrew.includes(helperIdInput.value)) {
       helperSel.value = '';
       helperIdInput.value = '';
     }
   }
   helperSel?.addEventListener('input', syncHelperOptions);
+  secondDriverSel?.addEventListener('input', syncHelperOptions);
+
+  clientSelect?.addEventListener('change', () => {
+    [originLocationSelect, destinationLocationSelect].forEach(select => {
+      if (!select) return;
+      select.value = '';
+      select.disabled = !clientSelect.value;
+      Array.from(select.options).forEach(option => {
+        if (!option.value) return;
+        option.hidden = option.dataset.client !== clientSelect.value;
+        option.disabled = option.hidden;
+      });
+      const firstOption = select.options[0];
+      if (firstOption) {
+        firstOption.textContent = clientSelect.value ? '— Select location —' : '— Select client first —';
+      }
+    });
+  });
+  if (clientSelect?.value) {
+    clientSelect.dispatchEvent(new Event('change'));
+  }
 
   function clearDispatchFields() {
     if (routeInput) routeInput.value = '';
     if (routeIdInput) routeIdInput.value = '';
     if (driverSel) driverSel.value = '';
     if (driverIdInput) driverIdInput.value = '';
+    if (secondDriverSel) secondDriverSel.value = '';
+    if (secondDriverIdInput) secondDriverIdInput.value = '';
     if (helperSel) helperSel.value = '';
     if (helperIdInput) helperIdInput.value = '';
-    const client = document.getElementById('d_client');
-    if (client) client.value = '';
+    if (clientSelect) clientSelect.value = '';
+    const billingClient = document.getElementById('d_billing_client');
+    if (billingClient) billingClient.value = '';
+    [originLocationSelect, destinationLocationSelect].forEach(select => {
+      if (!select) return;
+      select.value = '';
+      select.disabled = true;
+      Array.from(select.options).forEach(option => {
+        option.hidden = false;
+        option.disabled = false;
+      });
+      if (select.options[0]) select.options[0].textContent = '— Select client first —';
+    });
     const route = document.getElementById('d_route');
     const truck = document.getElementById('d_truck');
     const scheduled = document.getElementById('d_scheduled');
+    const expectedArrival = document.getElementById('d_expected_arrival');
+    const bookingReference = document.getElementById('d_booking_reference');
+    const waybillReference = document.getElementById('d_waybill_reference');
+    const unitCount = document.getElementById('d_unit_count');
     const remarks = document.getElementById('d_remarks');
     if (route) route.value = '';
     if (truck) truck.value = '';
     if (scheduled) scheduled.value = '';
+    const shift = document.getElementById('d_shift');
+    if (shift && !shift.disabled) shift.value = 'Day';
+    if (expectedArrival) expectedArrival.value = '';
+    if (bookingReference) bookingReference.value = '';
+    if (waybillReference) waybillReference.value = '';
+    if (unitCount) unitCount.value = '';
     if (remarks) remarks.value = '';
-    if (helperIdInput.value === driverIdInput.value) {
-      helperSel.value = '';
-      helperIdInput.value = '';
-    }
   }
 
   // ── Submit new dispatch request ──────────────────────────────────────────────
@@ -150,7 +219,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   newDispatchModal?.addEventListener('hidden.bs.modal', () => {
     hideAlert(dispatchFormError);
-    clearDispatchFields();
+    if (!document.getElementById('d_instruction_id')?.value) clearDispatchFields();
   });
 
   submitDispatchBtn?.addEventListener('click', async () => {
@@ -159,21 +228,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const truck     = document.getElementById('d_truck')?.value      ?? '';
     const route     = routeIdInput?.value                            ?? '';
     const driver    = driverIdInput?.value                           ?? '';
+    const secondDriver = secondDriverIdInput?.value                  ?? '';
     const helper    = helperIdInput?.value                           ?? '';
-    const client    = document.getElementById('d_client')?.value.trim() ?? '';
+    const client    = clientSelect?.value                             ?? '';
+    const billingClient = document.getElementById('d_billing_client')?.value ?? '';
+    const originLocation = originLocationSelect?.value                ?? '';
+    const destinationLocation = destinationLocationSelect?.value      ?? '';
     const scheduled = document.getElementById('d_scheduled')?.value  ?? '';
+    const shift = document.getElementById('d_shift')?.value ?? '';
+    const instructionId = document.getElementById('d_instruction_id')?.value ?? '';
+    const expectedArrival = document.getElementById('d_expected_arrival')?.value ?? '';
+    const bookingReference = document.getElementById('d_booking_reference')?.value.trim() ?? '';
+    const waybillReference = document.getElementById('d_waybill_reference')?.value.trim() ?? '';
+    const unitCount = document.getElementById('d_unit_count')?.value ?? '';
     const remarks   = document.getElementById('d_remarks')?.value.trim() ?? '';
 
-    if (!truck || !route || !driver || !scheduled || !client) {
-      showAlert(dispatchFormError, 'Please choose a registered client, approved route, active driver, truck, and scheduled departure.');
+    if (!truck || !route || !driver || !scheduled || !shift || !client || !originLocation || !destinationLocation) {
+      showAlert(dispatchFormError, 'Please choose an active client and locations, approved route, active driver, truck, and scheduled departure.');
       return;
     }
-    if (client.length > 150) {
-      showAlert(dispatchFormError, 'Client name must be 150 characters or fewer.');
+    if ([driver, secondDriver, helper].filter(Boolean).length !== new Set([driver, secondDriver, helper].filter(Boolean)).size) {
+      showAlert(dispatchFormError, 'Each assigned crew member must be different.');
       return;
     }
-    if (helper && helper === driver) {
-      showAlert(dispatchFormError, 'Driver and helper must be different employees.');
+    if (expectedArrival && new Date(expectedArrival) <= new Date(scheduled)) {
+      showAlert(dispatchFormError, 'Expected arrival must be later than scheduled departure.');
       return;
     }
     if (!window.confirm('Confirm and submit this dispatch request?')) return;
@@ -187,10 +266,20 @@ document.addEventListener('DOMContentLoaded', () => {
       fd.append('truck_id',     truck);
       fd.append('route_id',     route);
       fd.append('driver_id',    driver);
+      fd.append('second_driver_id', secondDriver);
       fd.append('helper_id',    helper);
+      fd.append('client_id',    client);
+      fd.append('billing_client_id', billingClient);
+      fd.append('origin_location_id', originLocation);
+      fd.append('destination_location_id', destinationLocation);
       fd.append('scheduled_at', scheduled);
+      fd.append('shift', shift);
+      fd.append('instruction_id', instructionId);
+      fd.append('expected_arrival', expectedArrival);
+      fd.append('booking_reference', bookingReference);
+      fd.append('waybill_reference', waybillReference);
+      fd.append('unit_count', unitCount);
       fd.append('remarks',      remarks);
-      fd.append('client_name',  client);
 
       const result = await postForm(DISPATCH_URL, fd);
 
@@ -205,6 +294,10 @@ document.addEventListener('DOMContentLoaded', () => {
       setBusy(btnText, btnSpinner, false);
     }
   });
+
+  if (newDispatchModal && document.getElementById('d_instruction_id')?.value) {
+    bootstrap.Modal.getOrCreateInstance(newDispatchModal).show();
+  }
 
   const routeRequestModal = document.getElementById('routeRequestModal');
   const rrOrigin = document.getElementById('rr_origin');

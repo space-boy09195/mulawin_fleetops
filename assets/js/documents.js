@@ -234,6 +234,9 @@
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', AJAX_URL);
+    const idempotencyScope = 'document-upload';
+    const requestHeaders = window.fleetOpsIdempotencyHeaders(idempotencyScope);
+    xhr.setRequestHeader('Idempotency-Key', requestHeaders['Idempotency-Key']);
 
     xhr.upload.addEventListener('progress', e => {
       if (e.lengthComputable && uploadProgressBar) {
@@ -247,6 +250,9 @@
 
       try {
         const res = JSON.parse(xhr.responseText);
+        if (res.success || xhr.status === 409) {
+          window.fleetOpsCompleteIdempotency(idempotencyScope);
+        }
         if (res.success) {
           bootstrap.Modal.getInstance(uploadModal)?.hide();
           window.location.reload();

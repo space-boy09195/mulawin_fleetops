@@ -41,13 +41,21 @@ $partsSql = "
         p.quantity,
         p.reorder_level,
         p.unit_cost,
+        p.warranty_expiry,
         p.supplier,
         p.updated_at,
-        (p.quantity <= p.reorder_level) AS is_low_stock
+        (p.quantity <= p.reorder_level) AS is_low_stock,
+        (p.warranty_expiry IS NOT NULL AND p.warranty_expiry <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)) AS warranty_expiring
     FROM parts_inventory p
     ORDER BY p.category ASC, p.part_name ASC
 ";
 $parts = $pdo->query($partsSql)->fetchAll(PDO::FETCH_ASSOC);
+$inventoryValue = array_reduce(
+    $parts,
+    static fn($carry, $part) => $carry + ($part['unit_cost'] !== null ? $part['unit_cost'] * $part['quantity'] : 0),
+    0.0
+);
+$warrantyExpiringCount = count(array_filter($parts, fn($p) => $p['warranty_expiring']));
 
 // ── Recent movements ──────────────────────────────────────────────────────────
 $movementsSql = "
@@ -149,6 +157,16 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
       <div class="pts-card-value"><?= count($movements) ?></div>
       <div class="pts-card-label">Recent Movements</div>
     </div>
+    <div class="pts-card">
+      <div class="pts-card-value">₱<?= number_format($inventoryValue, 2) ?></div>
+      <div class="pts-card-label">Est. Stock Value (at last recorded cost)</div>
+    </div>
+    <?php if ($warrantyExpiringCount > 0): ?>
+    <div class="pts-card pts-card-alert">
+      <div class="pts-card-value"><?= $warrantyExpiringCount ?></div>
+      <div class="pts-card-label">Warranties Expiring ≤30 Days</div>
+    </div>
+    <?php endif; ?>
   </div>
 
   <!-- Tabs -->
@@ -173,6 +191,15 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
               data-bs-target="#pane-alerts" type="button" role="tab">
         <i class="bi bi-exclamation-triangle me-1"></i> Low Stock
         <span class="pts-tab-count pts-tab-count-alert"><?= $lowStockCount ?></span>
+      </button>
+    </li>
+    <?php endif; ?>
+    <?php if ($warrantyExpiringCount > 0): ?>
+    <li class="nav-item" role="presentation">
+      <button class="pts-tab" id="tab-warranty" data-bs-toggle="tab"
+              data-bs-target="#pane-warranty" type="button" role="tab">
+        <i class="bi bi-shield-exclamation me-1"></i> Warranty Expiring
+        <span class="pts-tab-count pts-tab-count-alert"><?= $warrantyExpiringCount ?></span>
       </button>
     </li>
     <?php endif; ?>
@@ -215,6 +242,7 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
               <th>Unit Cost</th>
               <th>Stock</th>
               <th>Reorder At</th>
+              <th>Warranty Exp.</th>
               <th>Status</th>
               <th>Last Updated</th>
             </tr>
@@ -266,6 +294,15 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
               </td>
               <td class="pts-reorder">
                 <?= number_format($part['reorder_level']) ?> <?= htmlspecialchars($part['unit']) ?>
+              </td>
+              <td class="pts-date">
+                <?php if ($part['warranty_expiry']): ?>
+                <span class="<?= $part['warranty_expiring'] ? 'text-danger fw-semibold' : '' ?>">
+                  <?= date('M d, Y', strtotime($part['warranty_expiry'])) ?>
+                </span>
+                <?php else: ?>
+                <span class="text-muted">—</span>
+                <?php endif; ?>
               </td>
               <td><span class="pts-status-badge <?= $statusCls ?>"><?= $statusLabel ?></span></td>
               <td class="pts-date"><?= date('M d, Y', strtotime($part['updated_at'])) ?></td>
@@ -407,6 +444,46 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
     </div>
     <?php endif; ?>
 
+    <!-- ── Warranty Expiring pane ───────────────────────────────────────── -->
+    <?php if ($warrantyExpiringCount > 0): ?>
+    <div class="tab-pane fade" id="pane-warranty" role="tabpanel">
+      <div class="pts-table-wrap">
+        <table class="table pts-table">
+          <thead>
+            <tr>
+              <th>Part</th>
+              <th>Category</th>
+              <th>Supplier</th>
+              <th>Current Stock</th>
+              <th>Warranty Expiry</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($parts as $part):
+              if (!$part['warranty_expiring']) continue;
+              $isExpired = strtotime($part['warranty_expiry']) < strtotime('today');
+            ?>
+            <tr>
+              <td class="pts-part-name"><?= htmlspecialchars($part['part_name']) ?></td>
+              <td><span class="pts-category-chip"><?= htmlspecialchars($part['category']) ?></span></td>
+              <td><?= $part['supplier'] ? htmlspecialchars($part['supplier']) : '<span class="text-muted">—</span>' ?></td>
+              <td>
+                <?= number_format($part['quantity']) ?> <?= htmlspecialchars($part['unit']) ?>
+              </td>
+              <td>
+                <span class="pts-status-badge <?= $isExpired ? 'pts-badge-out' : 'pts-badge-low' ?>">
+                  <?= date('M d, Y', strtotime($part['warranty_expiry'])) ?>
+                  <?= $isExpired ? '(Expired)' : '' ?>
+                </span>
+              </td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <?php endif; ?>
+
   </div><!-- /tab-content -->
 </div>
 
@@ -467,6 +544,10 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
             <label class="form-label pts-label" for="apSupplier">Supplier</label>
             <input type="text" class="form-control pts-input" id="apSupplier"
                    placeholder="Optional">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label pts-label" for="apWarrantyExpiry">Warranty Expiry</label>
+            <input type="date" class="form-control pts-input" id="apWarrantyExpiry">
           </div>
         </div>
       </div>
@@ -538,10 +619,11 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
         <div class="row g-3 mb-3">
           <div class="col-6">
             <label class="form-label pts-label" for="movQty">
-              Quantity <span class="text-danger">*</span> <span id="movUnitLabel" class="pts-unit-hint"></span>
+              <span id="movQtyLabel">Quantity</span> <span class="text-danger">*</span> <span id="movUnitLabel" class="pts-unit-hint"></span>
             </label>
             <input type="number" class="form-control pts-input" id="movQty"
                    min="1" placeholder="0" required>
+            <div id="movQtyHint" class="pts-unit-hint mt-1 d-none"></div>
           </div>
           <div class="col-6">
             <label class="form-label pts-label" for="movUnitCost">Unit Cost (₱)</label>

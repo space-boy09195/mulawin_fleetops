@@ -43,6 +43,8 @@ $billingSql = "
     SELECT
         b.billing_id,
         b.billing_number,
+        b.invoice_number,
+        b.invoice_date,
         b.client_name,
         b.amount,
         b.due_date,
@@ -101,6 +103,23 @@ $tripsSql = "
     ORDER BY t.trip_number DESC
 ";
 $completedTrips = $pdo->query($tripsSql)->fetchAll(PDO::FETCH_ASSOC);
+
+// ── Unbilled trips dashboard (completed trips with zero billing records) ──────
+// Distinct from the dropdown above (which intentionally still lists trips
+// that already have a billing, in case Accounting needs to issue a second/
+// supplementary billing for the same trip) — this view is specifically for
+// finding work that hasn't been billed at all yet.
+$unbilledSql = "
+    SELECT t.trip_id, t.trip_number, r.origin, r.destination,
+           dr.client_name, dr.scheduled_at
+    FROM trips t
+    JOIN dispatch_requests dr ON t.dispatch_id = dr.dispatch_id
+    JOIN routes r             ON dr.route_id   = r.route_id
+    LEFT JOIN billings b      ON b.trip_id     = t.trip_id
+    WHERE t.status = 'Completed' AND b.billing_id IS NULL
+    ORDER BY t.trip_number DESC
+";
+$unbilledTrips = $pdo->query($unbilledSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Active employees (for the Log Payroll Payment form) ───────────────────────
 // Drivers and Helpers are on-call, not fixed-salary — they're already paid
@@ -399,6 +418,13 @@ arsort($overdueClients);
       </button>
     </li>
     <li class="nav-item" role="presentation">
+      <button class="bil-tab" id="tab-unbilled" data-bs-toggle="tab"
+              data-bs-target="#pane-unbilled" type="button" role="tab">
+        <i class="bi bi-exclamation-circle me-1"></i> Unbilled Trips
+        <span class="bil-tab-count"><?= count($unbilledTrips) ?></span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
       <button class="bil-tab" id="tab-collections" data-bs-toggle="tab"
               data-bs-target="#pane-collections" type="button" role="tab">
         <i class="bi bi-cash-stack me-1"></i> Collections
@@ -434,6 +460,9 @@ arsort($overdueClients);
         </select>
         <input type="search" id="filterBilSearch" class="form-control bil-filter-search"
                placeholder="Search billing no., trip, client…">
+        <a class="btn btn-bil-outline ms-auto" href="<?= APP_BASE ?>/ajax/billing_export.php?period=<?= urlencode($period) ?>">
+          <i class="bi bi-download me-1"></i> Download AR Report (CSV)
+        </a>
       </div>
 
       <div class="bil-table-wrap">
@@ -447,6 +476,7 @@ arsort($overdueClients);
           <thead>
             <tr>
               <th>Billing No.</th>
+              <th>Invoice No.</th>
               <th>Trip</th>
               <th>Client</th>
               <th>Amount</th>
@@ -465,12 +495,15 @@ arsort($overdueClients);
             <tr
               data-status="<?= htmlspecialchars($bil['status']) ?>"
               data-search="<?= htmlspecialchars(strtolower(
-                $bil['billing_number'] . ' ' . $bil['trip_number'] . ' ' . ($bil['client_name'] ?? '')
+                $bil['billing_number'] . ' ' . $bil['trip_number'] . ' ' . ($bil['client_name'] ?? '') . ' ' . ($bil['invoice_number'] ?? '')
               )) ?>"
               data-id="<?= $bil['billing_id'] ?>"
             >
               <td>
                 <span class="bil-number"><?= htmlspecialchars($bil['billing_number']) ?></span>
+              </td>
+              <td class="bil-invoice-number">
+                <?= $bil['invoice_number'] ? htmlspecialchars($bil['invoice_number']) : '<span class="text-muted">—</span>' ?>
               </td>
               <td>
                 <span class="bil-trip-ref"><?= htmlspecialchars($bil['trip_number']) ?></span>
@@ -519,6 +552,47 @@ arsort($overdueClients);
         </div>
         <?php endif; ?>
       </div>
+    </div>
+
+    <!-- ── Unbilled Trips pane ───────────────────────────────────────────── -->
+    <div class="tab-pane fade" id="pane-unbilled" role="tabpanel">
+      <?php if (empty($unbilledTrips)): ?>
+      <div class="bil-empty">
+        <i class="bi bi-check-circle bil-empty-icon"></i>
+        <p>All completed trips have been billed.</p>
+      </div>
+      <?php else: ?>
+      <div class="bil-table-wrap">
+        <table class="table bil-table">
+          <thead>
+            <tr>
+              <th>Trip</th>
+              <th>Route</th>
+              <th>Client</th>
+              <th>Scheduled</th>
+              <th class="text-end">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($unbilledTrips as $ut): ?>
+            <tr>
+              <td><span class="bil-trip-ref"><?= htmlspecialchars($ut['trip_number']) ?></span></td>
+              <td><?= htmlspecialchars($ut['origin']) ?> → <?= htmlspecialchars($ut['destination']) ?></td>
+              <td><?= $ut['client_name'] ? htmlspecialchars($ut['client_name']) : '<span class="text-muted">—</span>' ?></td>
+              <td><?= $ut['scheduled_at'] ? date('M d, Y', strtotime($ut['scheduled_at'])) : '<span class="text-muted">—</span>' ?></td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-bil-primary bil-unbilled-create-btn"
+                        data-trip-id="<?= $ut['trip_id'] ?>"
+                        data-bs-toggle="modal" data-bs-target="#createBillingModal">
+                  Create Billing
+                </button>
+              </td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+      <?php endif; ?>
     </div>
 
     <!-- ── Collections pane ─────────────────────────────────────────────── -->
@@ -872,6 +946,15 @@ arsort($overdueClients);
             <label class="form-label bil-label" for="bilBillingNumber">Billing No.</label>
             <input type="text" class="form-control bil-input" id="bilBillingNumber"
                    placeholder="e.g. BIL-2025-0001" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label bil-label" for="bilInvoiceNumber">Client Invoice No. (optional)</label>
+            <input type="text" class="form-control bil-input" id="bilInvoiceNumber"
+                   maxlength="50" placeholder="Client's own invoice reference">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label bil-label" for="bilInvoiceDate">Invoice Date (optional)</label>
+            <input type="date" class="form-control bil-input" id="bilInvoiceDate">
           </div>
           <div class="col-12">
             <label class="form-label bil-label" for="bilNotes">Notes (optional)</label>

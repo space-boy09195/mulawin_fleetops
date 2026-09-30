@@ -80,6 +80,24 @@
   color: var(--bs-body-color);
 }
 
+.btn-bil-outline {
+  background: transparent;
+  border: 1.5px solid var(--bs-primary);
+  color: var(--bs-primary);
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.45rem 1rem;
+  border-radius: 8px;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+
+.btn-bil-outline:hover,
+.btn-bil-outline:focus {
+  background: var(--bs-primary);
+  color: #fff;
+}
+
 .btn-bil-collect {
   background: transparent;
   border: 1.5px solid #198754;

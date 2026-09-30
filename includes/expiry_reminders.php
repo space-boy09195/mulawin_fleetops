@@ -32,11 +32,12 @@ function deliverExpiryReminder(
             (recipient_user_id, entity_type, entity_id, reminder_days, due_date)
          VALUES (?, ?, ?, ?, ?)'
     );
-    $legacyFingerprint = hash(
-        'sha256',
-        ($entityType === 'document' ? 'document:' : 'license:')
-            . $entityId . ':' . $dueDate
-    );
+    $legacyPrefix = match ($entityType) {
+        'document' => 'document:',
+        'employee_license' => 'license:',
+        default => $entityType . ':',
+    };
+    $legacyFingerprint = hash('sha256', $legacyPrefix . $entityId . ':' . $dueDate);
     $legacyDelivery = $pdo->prepare(
         'SELECT 1
          FROM automation_deliveries

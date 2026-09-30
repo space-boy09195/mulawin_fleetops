@@ -3,7 +3,7 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]);
+requireAnyPermission(['finance.view', 'finance.manage']);
 layoutHead('Trip Costs & Fuel Analysis', APP_BASE . '/assets/css/billing.css');
 $pdo = getDBConnection();
 

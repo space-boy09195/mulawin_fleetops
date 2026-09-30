@@ -2,6 +2,8 @@
 // Read-only automation runner. Intended for CLI/Task Scheduler, never a page request.
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/document_storage.php';
+require_once __DIR__ . '/expiry_reminders.php';
 
 function automationTableExists(PDO $pdo, string $table): bool {
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?");
@@ -77,17 +79,11 @@ function runFleetOpsAutomations(): array {
     }
 
     if (($settings['expiry_reminders'] ?? '0') === '1') {
-        $results[] = automationRunJob($pdo, 'expiry_reminders', function () use ($pdo, $head, $maintenance, $today) {
-            $count = 0;
-            $stmt = $pdo->query("SELECT employee_id, full_name, license_expiry FROM employees WHERE is_active = 1 AND license_expiry IS NOT NULL AND license_expiry BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)");
-            foreach ($stmt as $row) $count += automationNotify($pdo, 'expiry_reminders', hash('sha256', 'license:' . $row['employee_id'] . ':' . $row['license_expiry']), array_merge($head, $maintenance), 'License expiry reminder', $row['full_name'] . '\'s license expires on ' . $row['license_expiry'] . '.', '/pages/users.php');
-            if (automationColumnExists($pdo, 'documents', 'expiry_date')) {
-                foreach ($pdo->query("SELECT document_id, file_name, expiry_date FROM documents WHERE expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)") as $row) {
-                    $count += automationNotify($pdo, 'expiry_reminders', hash('sha256', 'document:' . $row['document_id'] . ':' . $row['expiry_date']), $head, 'Document expiry reminder', $row['file_name'] . ' expires on ' . $row['expiry_date'] . '.', '/pages/documents.php');
-                }
-            }
-            return $count;
-        });
+        $results[] = automationRunJob(
+            $pdo,
+            'expiry_reminders',
+            static fn(): int => runConfiguredExpiryReminders($pdo)
+        );
     }
 
     if (($settings['maintenance_due_reminders'] ?? '0') === '1') {
@@ -128,7 +124,7 @@ function runFleetOpsAutomations(): array {
             $missing = array_values(array_filter($required, fn($table) => !automationTableExists($pdo, $table)));
             $missingFiles = 0;
             if (!$missing && automationTableExists($pdo, 'documents')) {
-                foreach ($pdo->query("SELECT stored_name FROM documents WHERE stored_name IS NOT NULL") as $doc) if (!is_file(dirname(__DIR__) . '/uploads/' . basename($doc['stored_name']))) $missingFiles++;
+                foreach ($pdo->query("SELECT stored_name, file_path FROM documents WHERE stored_name IS NOT NULL") as $doc) if (!is_file(documentStorageFile($doc['stored_name'], $doc['file_path']))) $missingFiles++;
             }
             if (!$missing && $missingFiles === 0) return 0;
             $message = $missing ? 'Missing database tables: ' . implode(', ', $missing) . '.' : "$missingFiles document file(s) are missing from uploads.";

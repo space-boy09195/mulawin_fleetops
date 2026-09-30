@@ -7,10 +7,14 @@ require_once __DIR__ . '/../includes/soft_delete.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
+require_once __DIR__ . '/../includes/attachments.php';
+require_once __DIR__ . '/../includes/document_storage.php';
+require_once __DIR__ . '/../includes/upload_validation.php';
+require_once __DIR__ . '/../includes/idempotency.php';
 
 header('Content-Type: application/json');
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE, ROLE_ACCOUNTING]);
+requireLogin();
 requirePostMethod();
 enforceCsrf();
 
@@ -19,15 +23,9 @@ $action = $_POST['action'] ?? '';
 
 // ── Upload document ───────────────────────────────────────────────────────────
 if ($action === 'upload') {
+    requirePermission('documents.upload');
 
-    if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-        $errMsg = match($_FILES['file']['error'] ?? -1) {
-            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'File exceeds maximum allowed size.',
-            UPLOAD_ERR_NO_FILE => 'No file was uploaded.',
-            default            => 'Upload failed. Please try again.',
-        };
-        jsonFail($errMsg);
-    }
+    if (empty($_FILES['file'])) jsonFail('No file was uploaded.');
 
     $docType     = requiredEnum('doc_type', DOCUMENT_TYPES, 'Document type');
     $tripId      = filter_input(INPUT_POST, 'trip_id', FILTER_VALIDATE_INT) ?: null;
@@ -40,58 +38,63 @@ if ($action === 'upload') {
         }
     }
 
-    $file     = $_FILES['file'];
-    $origName = basename($file['name']);
+    $file = $_FILES['file'];
+    try {
+        $upload = inspectDocumentUpload($file);
+    } catch (InvalidArgumentException $e) {
+        jsonFail($e->getMessage());
+    }
+    $origName = $upload['original_name'];
     $tmpPath  = $file['tmp_name'];
-    $fileSize = (int)$file['size'];
+    $fileSize = $upload['size'];
+    $mimeType = $upload['mime_type'];
 
-    // Max 10 MB
-    if ($fileSize > 10 * 1024 * 1024) {
-        jsonFail('File exceeds the 10 MB limit.');
-    }
-
-    // MIME validation via finfo
-    $finfo    = new finfo(FILEINFO_MIME_TYPE);
-    $mimeType = $finfo->file($tmpPath);
-
-    $allowedMimes = [
-        'application/pdf' => 'pdf',
-        'image/jpeg' => 'jpg',
-        'image/png' => 'png',
-        'application/msword' => 'doc',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
-        'application/vnd.ms-excel' => 'xls',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
-    ];
-
-    if (!isset($allowedMimes[$mimeType])) {
-        jsonFail('File type not allowed. Upload PDF, JPG, PNG, DOCX, or XLSX.');
-    }
-
-    // Build upload directory: /uploads/ relative to project root
-    $uploadDir = dirname(__DIR__) . '/uploads/';
-    if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0755, true);
+    try {
+        $uploadDir = documentStorageDirectory() . DIRECTORY_SEPARATOR;
+    } catch (Throwable $e) {
+        error_log('document_handler/storage: ' . $e->getMessage());
+        jsonFail('Document storage is unavailable. Please contact an administrator.', 500);
     }
 
     // UUID-based stored filename to prevent collisions and enumeration
-    $ext        = $allowedMimes[$mimeType];
+    $ext        = $upload['extension'];
     $storedName = sprintf('%s.%s', bin2hex(random_bytes(16)), $ext);
     $destPath   = $uploadDir . $storedName;
-    $filePath   = 'uploads/' . $storedName; // relative path stored in DB
+    $filePath   = documentStorageReference($storedName);
+    $requestKey = requestIdempotencyKey();
+    if ($requestKey === null) {
+        jsonFail('Missing or invalid request idempotency key.', 400);
+    }
 
     if (!move_uploaded_file($tmpPath, $destPath)) {
         error_log('document_handler: move_uploaded_file failed for ' . $origName);
         jsonFail('Failed to save file. Please try again.');
     }
 
+    $pdo->beginTransaction();
     try {
+        if (!claimIdempotencyKey($pdo, 'document.upload', $requestKey)) {
+            $pdo->rollBack();
+            if (is_file($destPath)) unlink($destPath);
+            jsonFail('This document upload has already been processed.', 409);
+        }
         // Requires db/document_expiry_migration.sql to have been applied — see
         // instructions/instructions.md, which now runs every db/*_migration.sql
         // file as a required setup step rather than a hand-picked subset.
         $stmt = $pdo->prepare("INSERT INTO documents (uploaded_by, trip_id, doc_type, file_name, stored_name, file_path, file_size, mime_type, description, expiry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([currentUserId(), $tripId, $docType, $origName, $storedName, $filePath, $fileSize, $mimeType, $description, $expiryDate]);
         $newId = (int)$pdo->lastInsertId();
+        if ($tripId !== null) {
+            attachDocumentToEntity(
+                $pdo,
+                $newId,
+                'trip',
+                $tripId,
+                $docType,
+                currentUserId(),
+                $description
+            );
+        }
 
         auditLog('UPLOAD_DOCUMENT', 'documents', $newId, null, [
             'file_name' => $origName,
@@ -99,9 +102,13 @@ if ($action === 'upload') {
             'file_size' => $fileSize,
             'trip_id'   => $tripId,
         ]);
+        $pdo->commit();
 
         jsonOk(['id' => $newId], 'Document uploaded successfully.');
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         // Clean up orphaned file if DB insert fails
         if (file_exists($destPath)) unlink($destPath);
         error_log('document_handler/upload: ' . $e->getMessage());
@@ -111,11 +118,7 @@ if ($action === 'upload') {
 
 // ── Delete document ───────────────────────────────────────────────────────────
 if ($action === 'delete') {
-
-    // Only Head Management and Accounting can delete
-    if (!in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING], true)) {
-        jsonFail('You are not authorised to delete documents.', 403);
-    }
+    requirePermission('documents.manage');
 
     $docId = requiredInt('document_id', 'Document ID', 1);
 
@@ -136,10 +139,8 @@ if ($action === 'delete') {
         jsonFail('Document not found or could not be deleted.', 404);
     }
 
-    // Note: the physical file on disk is intentionally NOT removed here.
-    // It stays in /uploads/ so a restore from the Recycle Bin still has a
-    // file to point to. It's only removed if the archive entry is later
-    // permanently deleted (see recycle_bin_handler.php).
+    // The physical file stays in configured storage so a recycle-bin restore
+    // can recover the archived document row.
 
     auditLog('DELETE_DOCUMENT', 'documents', $docId, ['file_name' => $doc['file_name']], null);
 

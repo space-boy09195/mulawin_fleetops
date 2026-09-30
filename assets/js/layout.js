@@ -13,7 +13,8 @@
       themeIcon, themeLabel, overlay;
 
   // ---- Theme -----------------------------------------------
-  const THEME_KEY = 'mulawin_theme';
+  const USER_SCOPE = String(window.CURRENT_USER_ID ?? 'guest');
+  const THEME_KEY = `mulawin_theme_${USER_SCOPE}`;
   const THEMES    = { light: 'light', dark: 'dark' };
 
   function applyTheme(theme) {
@@ -41,8 +42,8 @@
   }
 
   // ---- Sidebar Collapse ------------------------------------
-  const COLLAPSED_KEY = 'mulawin_sidebar_collapsed';
-  const SCROLL_KEY = 'mulawin_sidebar_scroll_top';
+  const COLLAPSED_KEY = `mulawin_sidebar_collapsed_${USER_SCOPE}`;
+  const SCROLL_KEY = `mulawin_sidebar_scroll_top_${USER_SCOPE}`;
 
   function setSidebarCollapsed(collapsed) {
     if (!sidebar || !appShell) return;

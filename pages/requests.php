@@ -7,13 +7,13 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+requirePermission('approvals.review');
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/requests.js';
 $pdo = getDBConnection();
 
 $dispatchRequests = $pdo->query("
-    SELECT dr.dispatch_id, dr.requested_at, dr.scheduled_at, dr.remarks, dr.client_name,
+    SELECT dr.dispatch_id, dr.requested_at, dr.scheduled_at, dr.shift, dr.remarks, dr.client_name,
            tr.plate_number, tr.brand, tr.model,
            e_d.full_name AS driver_name, e_h.full_name AS helper_name,
            r.route_name, r.origin, r.destination,
@@ -84,12 +84,12 @@ layoutHead('Requests', APP_BASE . '/assets/css/dispatch.css');
       <thead>
         <tr>
           <th>Requester</th><th>Truck</th><th>Driver</th><th>Route</th>
-          <th>Client</th><th>Scheduled</th><th>Remarks</th><th>Action</th>
+          <th>Client</th><th>Shift</th><th>Scheduled</th><th>Remarks</th><th>Action</th>
         </tr>
       </thead>
       <tbody>
       <?php if (!$dispatchRequests): ?>
-        <tr><td colspan="8" class="text-center text-muted py-4">No dispatch requests are waiting for approval.</td></tr>
+        <tr><td colspan="9" class="text-center text-muted py-4">No dispatch requests are waiting for approval.</td></tr>
       <?php else: foreach ($dispatchRequests as $request): ?>
         <tr>
           <td><?= htmlspecialchars($request['requested_by']) ?><br>
@@ -105,6 +105,7 @@ layoutHead('Requests', APP_BASE . '/assets/css/dispatch.css');
             <span class="text-muted small"><?= htmlspecialchars($request['origin']) ?> <i class="bi bi-arrow-right"></i> <?= htmlspecialchars($request['destination']) ?></span>
           </td>
           <td class="small"><?= $request['client_name'] ? htmlspecialchars($request['client_name']) : '—' ?></td>
+          <td><span class="badge text-bg-<?= $request['shift'] === 'Day' ? 'info' : 'dark' ?>"><?= htmlspecialchars($request['shift']) ?></span></td>
           <td class="small"><?= $request['scheduled_at'] ? date('M j, Y g:i A', strtotime($request['scheduled_at'])) : '—' ?></td>
           <td class="small"><?= $request['remarks'] ? htmlspecialchars($request['remarks']) : '<span class="text-muted">—</span>' ?></td>
           <td>

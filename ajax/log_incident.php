@@ -9,7 +9,7 @@ require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE]);
+requireAnyPermission(['incidents.manage', 'legacy.role.3']);
 requirePostMethod();
 enforceCsrf();
 
@@ -19,7 +19,7 @@ $action = $_POST['action'] ?? '';
 // ── Log a new incident ────────────────────────────────────────────────────────
 if ($action === 'log') {
 
-    if (!in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER], true)) {
+    if (!currentUserHasAnyPermission(['incidents.manage'])) {
         jsonFail('You are not authorised to report trip problems.', 403);
     }
 

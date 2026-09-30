@@ -5,15 +5,40 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
+require_once __DIR__ . '/../includes/app_settings.php';
 
 header('Content-Type: application/json');
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+requirePermission('users.manage');
 requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
 $action = $_POST['action'] ?? '';
+
+function assertSingleActiveOperationsHead(PDO $pdo, int $roleId, int $active, ?int $excludeUserId = null): void {
+    if ($active !== 1) {
+        return;
+    }
+    $operationsRole = $pdo->prepare("SELECT role_id FROM roles WHERE role_name = 'Operations Head' FOR UPDATE");
+    $operationsRole->execute();
+    $operationsRoleId = $operationsRole->fetchColumn();
+    if (!$operationsRoleId || (int)$operationsRoleId !== $roleId) {
+        return;
+    }
+
+    $sql = 'SELECT COUNT(*) FROM users WHERE role_id = ? AND is_active = 1';
+    $params = [$roleId];
+    if ($excludeUserId !== null) {
+        $sql .= ' AND user_id <> ?';
+        $params[] = $excludeUserId;
+    }
+    $activeHeads = $pdo->prepare($sql);
+    $activeHeads->execute($params);
+    if ((int)$activeHeads->fetchColumn() > 0) {
+        throw new DomainException('Only one active Operations Head account is allowed.');
+    }
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // USER ACTIONS
@@ -26,6 +51,9 @@ if ($action === 'add_user') {
     $username = requiredString('username', 'Username', 100);
     $email    = requiredString('email', 'Email', 150);
     $roleId   = requiredInt('role_id', 'Role', 1);
+    if ($roleId === ROLE_ADMIN && currentRoleId() !== ROLE_ADMIN) {
+        jsonFail('Only an Admin can assign the Admin role.', 403);
+    }
     $password = $_POST['password'] ?? '';
     $confirm  = $_POST['confirm']  ?? '';
 
@@ -35,6 +63,10 @@ if ($action === 'add_user') {
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         jsonFail('Invalid email address.');
+    }
+    $emailDomain = getAppSetting($pdo, 'company_email_domain', COMPANY_EMAIL_DOMAIN) ?? COMPANY_EMAIL_DOMAIN;
+    if (!isCompanyEmail($email, $emailDomain)) {
+        jsonFail('Use an email address ending in @' . $emailDomain . '.');
     }
 
     if (strlen($password) < 8) {
@@ -56,7 +88,9 @@ if ($action === 'add_user') {
         jsonFail('Email already in use.');
     }
 
+    $pdo->beginTransaction();
     try {
+        assertSingleActiveOperationsHead($pdo, $roleId, 1);
         $hash = password_hash($password, PASSWORD_BCRYPT);
         $stmt = $pdo->prepare("
             INSERT INTO users (role_id, username, full_name, email, password_hash, is_active)
@@ -64,6 +98,7 @@ if ($action === 'add_user') {
         ");
         $stmt->execute([$roleId, $username, $fullName, $email, $hash]);
         $newId = (int)$pdo->lastInsertId();
+        $pdo->commit();
 
         auditLog('ADD_USER', 'users', $newId, null, [
             'username'  => $username,
@@ -73,8 +108,12 @@ if ($action === 'add_user') {
 
         jsonOk(['id' => $newId], 'User created successfully.');
     } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('users_handler/add_user: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
+    } catch (DomainException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        jsonFail($e->getMessage(), 409);
     }
 }
 
@@ -86,10 +125,17 @@ if ($action === 'edit_user') {
     $username = requiredString('username', 'Username', 100);
     $email    = requiredString('email', 'Email', 150);
     $roleId   = requiredInt('role_id', 'Role', 1);
+    if ($roleId === ROLE_ADMIN && currentRoleId() !== ROLE_ADMIN) {
+        jsonFail('Only an Admin can assign the Admin role.', 403);
+    }
     $isActive = isset($_POST['is_active']) && $_POST['is_active'] === '1' ? 1 : 0;
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         jsonFail('Invalid email address.');
+    }
+    $emailDomain = getAppSetting($pdo, 'company_email_domain', COMPANY_EMAIL_DOMAIN) ?? COMPANY_EMAIL_DOMAIN;
+    if (!isCompanyEmail($email, $emailDomain)) {
+        jsonFail('Use an email address ending in @' . $emailDomain . '.');
     }
 
     // Prevent deactivating own account
@@ -99,6 +145,9 @@ if ($action === 'edit_user') {
 
     // Fetch old record for audit
     $oldData = findOrFail($pdo, 'users', 'user_id', $userId, 'User not found.');
+    if ((int)$oldData['role_id'] === ROLE_ADMIN && currentRoleId() !== ROLE_ADMIN) {
+        jsonFail('Only an Admin can edit or deactivate an Admin account.', 403);
+    }
 
     // Unique checks excluding self
     if (existsWhere($pdo, 'users', 'username', $username, $userId, 'user_id')) {
@@ -108,13 +157,16 @@ if ($action === 'edit_user') {
         jsonFail('Email already in use.');
     }
 
+    $pdo->beginTransaction();
     try {
+        assertSingleActiveOperationsHead($pdo, $roleId, $isActive, $userId);
         $pdo->prepare("
             UPDATE users SET
                 full_name = ?, username = ?, email = ?,
                 role_id   = ?, is_active = ?
             WHERE user_id = ?
         ")->execute([$fullName, $username, $email, $roleId, $isActive, $userId]);
+        $pdo->commit();
 
         auditLog('EDIT_USER', 'users', $userId,
             ['full_name' => $oldData['full_name'], 'role_id' => $oldData['role_id'], 'is_active' => $oldData['is_active']],
@@ -123,8 +175,12 @@ if ($action === 'edit_user') {
 
         jsonOk([], 'User updated successfully.');
     } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('users_handler/edit_user: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
+    } catch (DomainException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        jsonFail($e->getMessage(), 409);
     }
 }
 
@@ -217,6 +273,10 @@ function extractEmpFields(): array {
         'license_expiry' => optionalString('license_expiry'),
         'license_type'   => optionalString('license_type'),
         'date_hired'     => optionalString('date_hired'),
+        'employment_type' => requiredEnum('employment_type', ['Employee', 'Contractor'], 'Employment type'),
+        'contractor_company' => optionalString('contractor_company', null, 150),
+        'date_resigned' => optionalString('date_resigned', null, 10),
+        'resignation_reason' => optionalString('resignation_reason', null, 500),
     ];
 }
 
@@ -250,6 +310,16 @@ function validateEmpFields(array $f, bool $allowPassedDates = false): ?string {
         return 'Invalid date hired.';
     if ($f['date_hired'] && $f['date_hired'] > date('Y-m-d'))
         return 'Hire date cannot be in the future.';
+    if ($f['employment_type'] === 'Contractor' && !$f['contractor_company'])
+        return 'Contractor company is required for contractors.';
+    if ($f['date_resigned'] && !isValidDate($f['date_resigned']))
+        return 'Invalid resignation date.';
+    if ($f['date_resigned'] && $f['date_resigned'] > date('Y-m-d'))
+        return 'Resignation date cannot be in the future.';
+    if ($f['date_resigned'] && $f['date_hired'] && $f['date_resigned'] < $f['date_hired'])
+        return 'Resignation date cannot be before the hire date.';
+    if ($f['date_resigned'] && !$f['resignation_reason'])
+        return 'A resignation reason is required when recording a resignation.';
     if (!$allowPassedDates && $f['license_expiry'] && isPassedDate($f['license_expiry']))
         return 'New employees cannot use a passed license expiry date.';
     return null;
@@ -291,16 +361,19 @@ if ($action === 'add_employee') {
     }
 
     try {
+        $isActive = $f['date_resigned'] === null ? 1 : 0;
         $pdo->prepare("
             INSERT INTO employees
                 (employee_code, full_name, position, contact_number, address,
-                 license_number, license_expiry, license_type, is_active, date_hired)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                 license_number, license_expiry, license_type, is_active, date_hired,
+                 employment_type, contractor_company, date_resigned, resignation_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ")->execute([
             $f['employee_code'], $f['full_name'], $f['position'],
             $f['contact_number'], $f['address'],
             $f['license_number'], $f['license_expiry'], $f['license_type'],
-            $f['date_hired'],
+            $isActive, $f['date_hired'], $f['employment_type'], $f['contractor_company'],
+            $f['date_resigned'], $f['resignation_reason'],
         ]);
         $newId = (int)$pdo->lastInsertId();
 
@@ -323,6 +396,9 @@ if ($action === 'edit_employee') {
     $empId    = requiredInt('employee_id', 'Employee', 1);
     $isActive = isset($_POST['is_active']) && $_POST['is_active'] === '1' ? 1 : 0;
     $f        = extractEmpFields();
+    if ($f['date_resigned'] !== null) {
+        $isActive = 0;
+    }
 
     if ($err = validateEmpFields($f, true)) {
         jsonFail($err);
@@ -343,13 +419,15 @@ if ($action === 'edit_employee') {
                 employee_code  = ?, full_name     = ?, position      = ?,
                 contact_number = ?, address       = ?, license_number = ?,
                 license_expiry = ?, license_type  = ?, date_hired    = ?,
-                is_active      = ?
+                is_active      = ?, employment_type = ?, contractor_company = ?,
+                date_resigned = ?, resignation_reason = ?
             WHERE employee_id  = ?
         ")->execute([
             $f['employee_code'], $f['full_name'], $f['position'],
             $f['contact_number'], $f['address'],
             $f['license_number'], $f['license_expiry'], $f['license_type'],
-            $f['date_hired'], $isActive, $empId,
+            $f['date_hired'], $isActive, $f['employment_type'], $f['contractor_company'],
+            $f['date_resigned'], $f['resignation_reason'], $empId,
         ]);
 
         auditLog('EDIT_EMPLOYEE', 'employees', $empId,

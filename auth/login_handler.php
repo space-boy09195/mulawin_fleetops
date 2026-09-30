@@ -57,6 +57,7 @@ enforceCsrf();
 // ---- Sanitize inputs ---------------------------------------
 $username = trim($_POST['username'] ?? '');
 $password = $_POST['password'] ?? '';
+$returnTo = validatedLocalReturnPath($_POST['return_to'] ?? $_SESSION['return_to'] ?? null);
 
 // Basic presence check
 if ($username === '' || $password === '') {
@@ -123,8 +124,9 @@ $_SESSION['role_name'] = $user['role_name'];
 auditLog('LOGIN', 'users', (int)$user['user_id']);
 
 // ---- Redirect to role-specific dashboard -------------------
-$dashboards = ROLE_DASHBOARDS;
-$destination = $dashboards[$_SESSION['role_id']] ?? '/pages/dashboard_head.php';
+$defaultDashboard = dashboardUrlForRole((string)$user['role_name'], (int)$user['role_id']);
+$destination = $returnTo ?? $defaultDashboard;
+unset($_SESSION['return_to']);
 
 header('Location: ' . $destination);
 exit;

@@ -8,7 +8,7 @@ require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+requirePermission('routes.manage');
 requirePostMethod();
 enforceCsrf();
 

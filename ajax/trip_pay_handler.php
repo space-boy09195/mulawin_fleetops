@@ -16,7 +16,7 @@ require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]);
+requireAnyPermission(['finance.manage', 'payroll.manage']);
 requirePostMethod();
 enforceCsrf();
 

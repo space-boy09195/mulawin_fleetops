@@ -2,17 +2,20 @@
 // ============================================================
 // pages/trip_monitor.php
 // Trip Monitoring — active trips, status updates, late alerts
-// Accessible by: Head Management, Dispatcher
+// Access is controlled by the trips.view permission.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER]);
+requirePermission('trips.view');
+$canUpdateTrips = currentUserHasAnyPermission(['trips.update']);
+$tripColumnCount = $canUpdateTrips ? 9 : 8;
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/trip_monitor.js';
 
 $pdo = getDBConnection();
+$reportClients = $pdo->query('SELECT client_id, client_name FROM clients WHERE is_active = 1 ORDER BY client_name')->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Period filter (scopes historical Completed/Cancelled trips only —
 // active trips always show regardless, since they need eyes on them now) ────
@@ -58,8 +61,10 @@ $tripStmt = $pdo->prepare(
        t.trip_id,
        t.trip_number,
        t.status,
+       t.shift,
        t.cargo_description,
        t.expected_arrival,
+       t.actual_departure_at,
        t.actual_arrival,
        t.is_late,
        t.created_at,
@@ -71,6 +76,16 @@ $tripStmt = $pdo->prepare(
        r.origin,
        r.destination,
        dr.scheduled_at AS etd,
+       dr.client_name,
+       dr.booking_reference,
+       dr.waybill_reference,
+       dr.unit_count,
+       dr.client_rate_amount,
+       dr.client_rate_currency,
+       dr.client_rate_basis,
+       e_sd.full_name AS second_driver_name,
+       origin.location_name AS origin_location_name,
+       destination.location_name AS destination_location_name,
        EXISTS (
          SELECT 1 FROM incidents i
          WHERE i.trip_id = t.trip_id
@@ -79,7 +94,10 @@ $tripStmt = $pdo->prepare(
      JOIN dispatch_requests dr ON t.dispatch_id  = dr.dispatch_id
      JOIN trucks tr             ON dr.truck_id    = tr.truck_id
      JOIN employees e_d         ON dr.driver_id   = e_d.employee_id
+     LEFT JOIN employees e_sd   ON dr.second_driver_id = e_sd.employee_id
      LEFT JOIN employees e_h    ON dr.helper_id   = e_h.employee_id
+     LEFT JOIN client_locations origin ON dr.origin_location_id = origin.location_id
+     LEFT JOIN client_locations destination ON dr.destination_location_id = destination.location_id
      JOIN routes r              ON dr.route_id    = r.route_id
      WHERE t.status NOT IN ('Completed','Cancelled') " .
      ($rangeStartSql ? "OR (t.status IN ('Completed','Cancelled') AND t.created_at >= :rangeStart)" : "OR t.status IN ('Completed','Cancelled')") . "
@@ -101,6 +119,33 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
     <p class="page-subtitle">Track all trips in real time</p>
   </div>
   <div class="d-flex gap-2 align-items-center flex-wrap">
+    <?php if (currentUserHasAnyPermission(['reports.export'])): ?>
+    <form method="get" action="<?= APP_BASE ?>/ajax/trip_operations_export.php"
+          class="d-flex gap-2 align-items-center flex-wrap" target="_blank">
+      <input type="date" name="from" class="form-control form-control-sm" aria-label="Export from date">
+      <input type="date" name="to" class="form-control form-control-sm" aria-label="Export to date">
+      <select name="status" class="form-select form-select-sm" aria-label="Export trip status">
+        <option value="">All trip statuses</option>
+        <?php foreach (['Loading', 'In Transit', 'Unloading', 'Completed', 'Cancelled'] as $statusOption): ?>
+        <option value="<?= htmlspecialchars($statusOption) ?>"><?= htmlspecialchars($statusOption) ?></option>
+        <?php endforeach; ?>
+      </select>
+      <select name="client_id" class="form-select form-select-sm" aria-label="Export client">
+        <option value="">All clients</option>
+        <?php foreach ($reportClients as $client): ?>
+        <option value="<?= (int)$client['client_id'] ?>"><?= htmlspecialchars($client['client_name']) ?></option>
+        <?php endforeach; ?>
+      </select>
+      <select name="shift" class="form-select form-select-sm" aria-label="Export trip shift">
+        <option value="">All shifts</option>
+        <option value="Day">Day Shift</option>
+        <option value="Night">Night Shift</option>
+      </select>
+      <button type="submit" class="btn btn-outline-success btn-sm text-nowrap">
+        <i class="bi bi-download me-1"></i>Export CSV
+      </button>
+    </form>
+    <?php endif; ?>
     <form method="get" class="d-flex">
       <select name="period" class="form-select" style="min-width:160px;font-size:.85rem;" onchange="this.form.submit()">
         <?php foreach ($periods as $key => $label): ?>
@@ -108,7 +153,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
         <?php endforeach; ?>
       </select>
     </form>
-    <?php if (currentRoleId() === ROLE_DISPATCHER): ?>
+    <?php if (currentUserHasAnyPermission(['trips.create'])): ?>
     <a href="<?= APP_BASE ?>/pages/dispatch.php" class="btn btn-primary btn-sm d-flex align-items-center gap-2">
       <i class="bi bi-send"></i> New Dispatch
     </a>
@@ -175,6 +220,8 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
       <button class="filter-btn" data-filter="In Transit">In Transit</button>
       <button class="filter-btn" data-filter="Unloading">Unloading</button>
       <button class="filter-btn" data-filter="Completed">Completed</button>
+      <button class="filter-btn" data-filter="shift:Day">Day Shift</button>
+      <button class="filter-btn" data-filter="shift:Night">Night Shift</button>
       <button class="filter-btn late-filter" data-filter="late">
         <i class="bi bi-alarm"></i> Late Only
       </button>
@@ -199,13 +246,14 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
       <thead>
         <tr>
           <th>Trip No.</th>
+          <th>Shift</th>
           <th>Truck</th>
           <th>Driver</th>
           <th>Route</th>
           <th>Status</th>
           <th>ETA</th>
           <th>ETD</th>
-          <?php if (currentRoleId() === ROLE_DISPATCHER): ?>
+          <?php if ($canUpdateTrips): ?>
           <th>Actions</th>
           <?php endif; ?>
         </tr>
@@ -213,7 +261,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
       <tbody id="tripBody">
         <?php if (empty($trips)): ?>
         <tr>
-          <td colspan="8" class="text-center text-muted py-4">No trips found.</td>
+          <td colspan="<?= $tripColumnCount ?>" class="text-center text-muted py-4">No trips found.</td>
         </tr>
         <?php else: ?>
         <?php foreach ($trips as $trip):
@@ -232,21 +280,31 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
             $trip['trip_number'] . ' ' .
             $trip['plate_number'] . ' ' .
             $trip['driver_name'] . ' ' .
+            ($trip['second_driver_name'] ?? '') . ' ' .
+            ($trip['client_name'] ?? '') . ' ' .
+            ($trip['booking_reference'] ?? '') . ' ' .
+            ($trip['waybill_reference'] ?? '') . ' ' .
             $trip['origin'] . ' ' .
             $trip['destination']
           );
         ?>
         <tr data-status="<?= htmlspecialchars($trip['status']) ?>"
+            data-shift="<?= htmlspecialchars($trip['shift']) ?>"
             data-late="<?= $isLate ? '1' : '0' ?>"
             data-problem="<?= $hasProblem ? '1' : '0' ?>"
             data-search="<?= htmlspecialchars($searchStr) ?>"
             class="<?= $isLate && $isActive ? 'row-late' : '' ?>">
           <td>
-            <span class="trip-number"><?= htmlspecialchars($trip['trip_number']) ?></span>
+            <a class="trip-number text-decoration-none"
+               href="<?= APP_BASE ?>/pages/trip_workflow.php?trip_id=<?= (int)$trip['trip_id'] ?>"
+               title="Open the 13-step trip workflow">
+              <?= htmlspecialchars($trip['trip_number']) ?>
+            </a>
             <?php if ($isLate && $isActive): ?>
             <span class="late-pill">LATE</span>
             <?php endif; ?>
           </td>
+          <td><span class="badge text-bg-<?= $trip['shift'] === 'Day' ? 'info' : 'dark' ?>"><?= htmlspecialchars($trip['shift']) ?></span></td>
           <td>
             <div style="font-weight:600;"><?= htmlspecialchars($trip['plate_number']) ?></div>
             <div class="text-muted" style="font-size:.78rem;">
@@ -260,6 +318,11 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
               Helper: <?= htmlspecialchars($trip['helper_name']) ?>
             </div>
             <?php endif; ?>
+            <?php if ($trip['second_driver_name']): ?>
+            <div class="text-muted" style="font-size:.78rem;">
+              Second driver: <?= htmlspecialchars($trip['second_driver_name']) ?>
+            </div>
+            <?php endif; ?>
           </td>
           <td>
             <div style="font-size:.82rem;">
@@ -267,6 +330,20 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
               <i class="bi bi-arrow-right text-muted"></i>
               <?= htmlspecialchars($trip['destination']) ?>
             </div>
+            <?php if ($trip['origin_location_name'] || $trip['destination_location_name']): ?>
+            <div class="text-muted" style="font-size:.76rem;">
+              <?= htmlspecialchars($trip['origin_location_name'] ?? '—') ?>
+              <i class="bi bi-arrow-right"></i>
+              <?= htmlspecialchars($trip['destination_location_name'] ?? '—') ?>
+            </div>
+            <?php endif; ?>
+            <?php if ($trip['client_name']): ?>
+            <div class="text-muted" style="font-size:.76rem;">
+              <?= htmlspecialchars($trip['client_name']) ?>
+              <?= $trip['unit_count'] ? ' · ' . htmlspecialchars((string)$trip['unit_count']) . ' units' : '' ?>
+              <?= $trip['client_rate_amount'] !== null ? ' · ' . htmlspecialchars($trip['client_rate_currency'] ?? 'PHP') . ' ' . number_format((float)$trip['client_rate_amount'], 2) . ' / ' . htmlspecialchars($trip['client_rate_basis'] ?? 'Per Trip') : '' ?>
+            </div>
+            <?php endif; ?>
           </td>
           <td>
             <span class="status-badge <?= $statusClass ?>">
@@ -288,8 +365,11 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
           </td>
           <td style="font-size:.82rem; color:var(--text-muted);">
             <?= $trip['etd'] ? date('M j, g:i A', strtotime($trip['etd'])) : '—' ?>
+            <?php if ($trip['actual_departure_at']): ?>
+            <div class="text-muted small">Departed <?= date('M j, g:i A', strtotime($trip['actual_departure_at'])) ?></div>
+            <?php endif; ?>
           </td>
-          <?php if (currentRoleId() === ROLE_DISPATCHER): ?>
+          <?php if ($canUpdateTrips): ?>
           <td>
             <div class="d-flex gap-1">
               <?php if ($isActive): ?>
@@ -310,7 +390,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
         <?php endforeach; ?>
         <?php endif; ?>
         <tr id="noTripResults" class="d-none">
-          <td colspan="8">
+          <td colspan="<?= $tripColumnCount ?>">
             <div class="no-results">
               <i class="bi bi-search"></i>
               <span>No trips match your filters.</span>
@@ -323,7 +403,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
 </div>
 
 <!-- ---- Trip Update Modal --------------------------------- -->
-<?php if (currentRoleId() === ROLE_DISPATCHER): ?>
+<?php if ($canUpdateTrips): ?>
 <div class="modal fade" id="updateModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content" style="background:var(--card-bg);color:var(--text-primary);border:1px solid var(--card-border);">
@@ -338,15 +418,20 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
         <div class="mb-3">
           <label class="form-label fw-600">New Status</label>
           <select class="form-select" id="modalStatus">
-            <option value="Loading">Loading</option>
             <option value="In Transit">In Transit</option>
             <option value="Unloading">Unloading</option>
             <option value="Completed">Completed</option>
             <option value="Cancelled">Cancelled</option>
           </select>
         </div>
+        <div class="mb-3">
+          <label class="form-label fw-600">Current Location <span class="text-muted fw-400">(optional)</span></label>
+          <input type="text" class="form-control" id="modalLocation" maxlength="255">
+        </div>
         <div class="mb-1">
-          <label class="form-label fw-600">Notes <span class="text-muted fw-400">(optional)</span></label>
+          <label class="form-label fw-600" id="modalNotesLabel">
+            Notes <span class="text-muted fw-400">(optional)</span>
+          </label>
           <textarea class="form-control" id="modalNotes" rows="2"
                     placeholder="Any remarks for this update…"></textarea>
         </div>

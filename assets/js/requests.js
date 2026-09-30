@@ -12,18 +12,28 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function submit(url, values) {
+    const idempotencyScope = values.dispatch_id
+      ? `dispatch.review:${values.dispatch_id}`
+      : null;
     const body = new URLSearchParams({
       ...values,
       [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN,
     });
     const response = await fetch(url, {
       method: 'POST',
-      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...(idempotencyScope ? window.fleetOpsIdempotencyHeaders(idempotencyScope) : {}),
+      },
       body,
     });
     const text = await response.text();
     try {
-      return JSON.parse(text);
+      const result = JSON.parse(text);
+      if (idempotencyScope && (result.success || response.status === 409)) {
+        window.fleetOpsCompleteIdempotency(idempotencyScope);
+      }
+      return result;
     } catch {
       throw new Error(`Server returned HTTP ${response.status} instead of JSON.`);
     }

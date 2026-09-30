@@ -1,5 +1,3 @@
-USE mulawin_fleetops;
-
 CREATE TABLE IF NOT EXISTS password_reset_requests (
   request_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id INT UNSIGNED NOT NULL,

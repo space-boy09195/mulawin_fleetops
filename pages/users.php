@@ -1,9 +1,10 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
+require_once __DIR__ . '/../includes/app_settings.php';
 require_once __DIR__ . '/../config/database.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+requirePermission('users.manage');
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/users.js';
 
@@ -42,6 +43,10 @@ $empSql = "
         e.license_number,
         e.license_expiry,
         e.license_type,
+        e.employment_type,
+        e.contractor_company,
+        e.date_resigned,
+        e.resignation_reason,
         e.is_active,
         e.date_hired,
         u.username AS linked_username
@@ -68,6 +73,7 @@ $alerts = $pdo->query("
 // ── Unique positions for datalist ─────────────────────────────────────────────
 $positions = array_unique(array_column($employees, 'position'));
 sort($positions);
+$crewLabel = getAppSetting($pdo, 'crew_module_label', 'Drivers & Helpers') ?? 'Drivers & Helpers';
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 $activeUsers = count(array_filter($users, fn($u) => $u['is_active']));
@@ -144,7 +150,7 @@ $alertCount  = count($alerts);
     <li class="nav-item" role="presentation">
       <button class="usr-tab" id="tab-employees" data-bs-toggle="tab"
               data-bs-target="#pane-employees" type="button" role="tab">
-        <i class="bi bi-person-lines-fill me-1"></i> Employees
+      <i class="bi bi-person-lines-fill me-1"></i> <?= htmlspecialchars($crewLabel) ?>
         <span class="usr-tab-count"><?= count($employees) ?></span>
       </button>
     </li>
@@ -298,6 +304,7 @@ $alertCount  = count($alerts);
               <th>Code</th>
               <th>Full Name</th>
               <th>Position</th>
+              <th>Employment</th>
               <th>Contact</th>
               <th>License No.</th>
               <th>License Expiry</th>
@@ -322,6 +329,11 @@ $alertCount  = count($alerts);
               <td><span class="usr-emp-code"><?= htmlspecialchars($emp['employee_code']) ?></span></td>
               <td class="usr-name"><?= htmlspecialchars($emp['full_name']) ?></td>
               <td><span class="usr-position-chip"><?= htmlspecialchars($emp['position']) ?></span></td>
+              <td>
+                <?= htmlspecialchars($emp['employment_type']) ?>
+                <?php if ($emp['contractor_company']): ?><br><span class="usr-username"><?= htmlspecialchars($emp['contractor_company']) ?></span><?php endif; ?>
+                <?php if ($emp['date_resigned']): ?><br><span class="text-danger small">Resigned <?= htmlspecialchars($emp['date_resigned']) ?></span><?php endif; ?>
+              </td>
               <td class="usr-contact">
                 <?= $emp['contact_number'] ? htmlspecialchars($emp['contact_number']) : '<span class="text-muted">—</span>' ?>
               </td>
@@ -374,6 +386,10 @@ $alertCount  = count($alerts);
                         data-license-expiry="<?= htmlspecialchars($emp['license_expiry'] ?? '') ?>"
                         data-license-type="<?= htmlspecialchars($emp['license_type'] ?? '') ?>"
                         data-hired="<?= htmlspecialchars($emp['date_hired'] ?? '') ?>"
+                        data-employment-type="<?= htmlspecialchars($emp['employment_type']) ?>"
+                        data-contractor-company="<?= htmlspecialchars($emp['contractor_company'] ?? '') ?>"
+                        data-date-resigned="<?= htmlspecialchars($emp['date_resigned'] ?? '') ?>"
+                        data-resignation-reason="<?= htmlspecialchars($emp['resignation_reason'] ?? '') ?>"
                         data-active="<?= $emp['is_active'] ?>">
                   <i class="bi bi-pencil"></i>
                 </button>
@@ -427,6 +443,7 @@ $alertCount  = count($alerts);
               <option value="<?= $role['role_id'] ?>"><?= htmlspecialchars($role['role_name']) ?></option>
               <?php endforeach; ?>
             </select>
+            <div class="form-text">Only one active Operations Head account is allowed.</div>
           </div>
           <div class="col-md-6">
             <label class="form-label usr-label" for="auPassword">Password</label>
@@ -601,6 +618,17 @@ $alertCount  = count($alerts);
             <label class="form-label usr-label" for="aeContact">Contact Number</label>
             <input type="text" class="form-control usr-input" id="aeContact" placeholder="Optional">
           </div>
+          <div class="col-md-6">
+            <label class="form-label usr-label" for="aeEmploymentType">Employment Type</label>
+            <select class="form-select usr-input" id="aeEmploymentType">
+              <option value="Employee">Employee</option>
+              <option value="Contractor">Contractor</option>
+            </select>
+          </div>
+          <div class="col-md-6 d-none" id="aeContractorCompanyWrap">
+            <label class="form-label usr-label" for="aeContractorCompany">Contractor Company</label>
+            <input type="text" class="form-control usr-input" id="aeContractorCompany" maxlength="150">
+          </div>
           <div class="col-12">
             <label class="form-label usr-label" for="aeAddress">Address</label>
             <textarea class="form-control usr-input" id="aeAddress" rows="2" placeholder="Optional"></textarea>
@@ -636,6 +664,14 @@ $alertCount  = count($alerts);
               Date Hired <span class="text-danger d-none" id="aeDateHiredReq">*</span>
             </label>
             <input type="date" class="form-control usr-input" id="aeDateHired" max="<?= date('Y-m-d') ?>">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label usr-label" for="aeDateResigned">Date Resigned</label>
+            <input type="date" class="form-control usr-input" id="aeDateResigned" max="<?= date('Y-m-d') ?>">
+          </div>
+          <div class="col-12">
+            <label class="form-label usr-label" for="aeResignationReason">Resignation Reason</label>
+            <textarea class="form-control usr-input" id="aeResignationReason" rows="2" maxlength="500"></textarea>
           </div>
         </div>
       </div>
@@ -680,6 +716,17 @@ $alertCount  = count($alerts);
             <label class="form-label usr-label" for="eeContact">Contact Number</label>
             <input type="text" class="form-control usr-input" id="eeContact">
           </div>
+          <div class="col-md-6">
+            <label class="form-label usr-label" for="eeEmploymentType">Employment Type</label>
+            <select class="form-select usr-input" id="eeEmploymentType">
+              <option value="Employee">Employee</option>
+              <option value="Contractor">Contractor</option>
+            </select>
+          </div>
+          <div class="col-md-6 d-none" id="eeContractorCompanyWrap">
+            <label class="form-label usr-label" for="eeContractorCompany">Contractor Company</label>
+            <input type="text" class="form-control usr-input" id="eeContractorCompany" maxlength="150">
+          </div>
           <div class="col-12">
             <label class="form-label usr-label" for="eeAddress">Address</label>
             <textarea class="form-control usr-input" id="eeAddress" rows="2"></textarea>
@@ -719,6 +766,14 @@ $alertCount  = count($alerts);
             <div class="form-check form-switch usr-active-toggle">
               <input class="form-check-input" type="checkbox" id="eeActive">
               <label class="form-check-label usr-label mb-0" for="eeActive">Active</label>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label usr-label" for="eeDateResigned">Date Resigned</label>
+              <input type="date" class="form-control usr-input" id="eeDateResigned" max="<?= date('Y-m-d') ?>">
+            </div>
+            <div class="col-12">
+              <label class="form-label usr-label" for="eeResignationReason">Resignation Reason</label>
+              <textarea class="form-control usr-input" id="eeResignationReason" rows="2" maxlength="500"></textarea>
             </div>
           </div>
         </div>

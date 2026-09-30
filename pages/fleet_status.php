@@ -2,14 +2,15 @@
 // ============================================================
 // pages/fleet_status.php
 // Fleet Status — view, add, and edit trucks
-// Accessible by: Head Management, Dispatcher
+// Access is controlled by the fleet.view permission.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE]);
+requirePermission('fleet.view');
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/fleet_status.js';
 
@@ -32,8 +33,16 @@ $trucks = $pdo->query("
     SELECT
         t.truck_id,
         t.plate_number,
+        t.unit_number,
+        t.truck_type,
         t.chassis_number,
         t.engine_number,
+        t.mv_file_number,
+        t.registration_expiry,
+        t.insurance_provider,
+        t.insurance_policy_number,
+        t.insurance_expiry,
+        t.warranty_expiry,
         t.brand,
         t.model,
         t.year_model,
@@ -136,7 +145,7 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
 <!-- Filter bar -->
 <div class="card mb-4">
   <div class="card-body-custom">
-    <div class="d-flex flex-wrap gap-2 align-items-center">
+    <div class="d-flex flex-wrap gap-2 align-items-center" data-persist-filter="fleet_status">
       <span class="text-muted" style="font-size:.8rem;">Filter:</span>
       <button class="filter-btn active" data-filter="all">All (<?= $totalTrucks ?>)</button>
       <button class="filter-btn" data-filter="Available">Available (<?= $summary['Available'] ?>)</button>
@@ -144,7 +153,7 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
       <button class="filter-btn" data-filter="Under Maintenance">Maintenance (<?= $summary['Under Maintenance'] ?>)</button>
       <button class="filter-btn" data-filter="Inactive">Inactive (<?= $summary['Inactive'] ?>)</button>
       <div class="ms-auto">
-        <input type="text" id="truckSearch" class="form-control form-control-sm"
+        <input type="text" id="truckSearch" class="form-control form-control-sm" data-persist-state
                placeholder="Search plate, brand, model…" style="width:220px;">
       </div>
     </div>
@@ -184,6 +193,9 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
         </tr>
         <?php else: ?>
         <?php foreach ($trucks as $truck):
+          $warrantyDaysRemaining = $truck['warranty_expiry']
+            ? (int)(new DateTimeImmutable('today'))->diff(new DateTimeImmutable($truck['warranty_expiry']))->format('%r%a')
+            : null;
           $badgeClass = match($truck['status']) {
             'Available'         => 'available',
             'Deployed'          => 'deployed',
@@ -203,6 +215,10 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
             <span class="fw-600" style="font-family:monospace;letter-spacing:.03em;">
               <?= htmlspecialchars($truck['plate_number']) ?>
             </span>
+            <?php if ($truck['unit_number']): ?><br><span class="text-muted small">Unit <?= htmlspecialchars($truck['unit_number']) ?></span><?php endif; ?>
+            <?php if ($truck['registration_expiry']): ?><br><span class="text-muted small">OR/CR due <?= htmlspecialchars($truck['registration_expiry']) ?></span><?php endif; ?>
+            <?php if ($truck['insurance_expiry']): ?><br><span class="text-muted small">Insurance due <?= htmlspecialchars($truck['insurance_expiry']) ?></span><?php endif; ?>
+            <?php if ($warrantyDaysRemaining !== null): ?><br><span class="small <?= $warrantyDaysRemaining < 0 ? 'text-danger fw-semibold' : ($warrantyDaysRemaining <= 30 ? 'text-warning fw-semibold' : 'text-muted') ?>">Warranty <?= $warrantyDaysRemaining < 0 ? 'expired' : ($warrantyDaysRemaining <= 30 ? 'due soon' : 'expires') ?> <?= htmlspecialchars($truck['warranty_expiry']) ?></span><?php endif; ?>
           </td>
           <td>
             <img
@@ -210,6 +226,7 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
               alt="<?= !empty($truck['image_path']) ? 'Photo of ' : 'Sample illustration of ' ?><?= htmlspecialchars($truck['brand'] . ' ' . $truck['model']) ?>"
               loading="lazy" decoding="async" class="fleet-truck-thumb me-2">
             <div style="font-weight:600;"><?= htmlspecialchars($truck['brand'] . ' ' . $truck['model']) ?></div>
+            <?php if ($truck['truck_type']): ?><div class="text-muted small"><?= htmlspecialchars($truck['truck_type']) ?></div><?php endif; ?>
             <div class="text-muted" style="font-size:.78rem;"><?= htmlspecialchars($truck['year_model']) ?></div>
           </td>
           <td><?= htmlspecialchars($truck['body_type'] ?? '—') ?></td>
@@ -243,14 +260,28 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
                       title="Update status">
                 <i class="bi bi-arrow-repeat"></i>
               </button>
+              <button class="btn btn-sm btn-outline-info truck-history-btn"
+                      data-truck-id="<?= (int)$truck['truck_id'] ?>"
+                      data-truck-plate="<?= htmlspecialchars($truck['plate_number'], ENT_QUOTES) ?>"
+                      title="View availability history">
+                <i class="bi bi-clock-history"></i>
+              </button>
               <!-- Edit (Head Management only) -->
               <?php if ($isHead): ?>
               <button class="btn btn-sm btn-outline-primary btn-edit-truck"
                       title="Edit truck"
                       data-id="<?= $truck['truck_id'] ?>"
                       data-plate="<?= htmlspecialchars($truck['plate_number'], ENT_QUOTES) ?>"
+                      data-unit-number="<?= htmlspecialchars($truck['unit_number'] ?? '', ENT_QUOTES) ?>"
+                      data-truck-type="<?= htmlspecialchars($truck['truck_type'] ?? '', ENT_QUOTES) ?>"
                       data-chassis="<?= htmlspecialchars($truck['chassis_number'] ?? '', ENT_QUOTES) ?>"
                       data-engine="<?= htmlspecialchars($truck['engine_number'] ?? '', ENT_QUOTES) ?>"
+                      data-mv-file="<?= htmlspecialchars($truck['mv_file_number'] ?? '', ENT_QUOTES) ?>"
+                      data-registration-expiry="<?= htmlspecialchars($truck['registration_expiry'] ?? '', ENT_QUOTES) ?>"
+                      data-insurance-provider="<?= htmlspecialchars($truck['insurance_provider'] ?? '', ENT_QUOTES) ?>"
+                      data-insurance-policy="<?= htmlspecialchars($truck['insurance_policy_number'] ?? '', ENT_QUOTES) ?>"
+                      data-insurance-expiry="<?= htmlspecialchars($truck['insurance_expiry'] ?? '', ENT_QUOTES) ?>"
+                      data-warranty-expiry="<?= htmlspecialchars($truck['warranty_expiry'] ?? '', ENT_QUOTES) ?>"
                       data-brand="<?= htmlspecialchars($truck['brand'], ENT_QUOTES) ?>"
                       data-model="<?= htmlspecialchars($truck['model'], ENT_QUOTES) ?>"
                       data-year="<?= htmlspecialchars($truck['year_model'], ENT_QUOTES) ?>"
@@ -356,6 +387,43 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
             <input type="text" class="form-control fleet-input" id="at_engine"
                    placeholder="Optional">
           </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Internal Unit Number</label>
+            <input type="text" class="form-control fleet-input" id="at_unit_number" maxlength="30">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Truck Type</label>
+            <select class="form-select fleet-input" id="at_truck_type" required>
+              <option value="">Select truck category</option>
+              <?php foreach (TRUCK_CATEGORIES as $truckCategory): ?>
+              <option value="<?= htmlspecialchars($truckCategory) ?>"><?= htmlspecialchars($truckCategory) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">MV File Number</label>
+            <input type="text" class="form-control fleet-input" id="at_mv_file" maxlength="50">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Registration Expiry</label>
+            <input type="date" class="form-control fleet-input" id="at_registration_expiry">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Insurance Provider</label>
+            <input type="text" class="form-control fleet-input" id="at_insurance_provider" maxlength="150">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Insurance Policy Number</label>
+            <input type="text" class="form-control fleet-input" id="at_insurance_policy" maxlength="80">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Insurance Expiry</label>
+            <input type="date" class="form-control fleet-input" id="at_insurance_expiry">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Warranty Expiry</label>
+            <input type="date" class="form-control fleet-input" id="at_warranty_expiry">
+          </div>
           <div class="col-12">
              <label class="fleet-label">Inspection View Photos (JPG, PNG, or WebP; max 10 MB each)</label>
              <p class="small text-muted mb-2">Sample illustrations are shown until you choose your truck photos.</p>
@@ -443,6 +511,43 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
             <label class="fleet-label">Engine Number</label>
             <input type="text" class="form-control fleet-input" id="et_engine">
           </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Internal Unit Number</label>
+            <input type="text" class="form-control fleet-input" id="et_unit_number" maxlength="30">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Truck Type</label>
+            <select class="form-select fleet-input" id="et_truck_type" required>
+              <option value="">Select truck category</option>
+              <?php foreach (TRUCK_CATEGORIES as $truckCategory): ?>
+              <option value="<?= htmlspecialchars($truckCategory) ?>"><?= htmlspecialchars($truckCategory) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">MV File Number</label>
+            <input type="text" class="form-control fleet-input" id="et_mv_file" maxlength="50">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Registration Expiry</label>
+            <input type="date" class="form-control fleet-input" id="et_registration_expiry">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Insurance Provider</label>
+            <input type="text" class="form-control fleet-input" id="et_insurance_provider" maxlength="150">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Insurance Policy Number</label>
+            <input type="text" class="form-control fleet-input" id="et_insurance_policy" maxlength="80">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Insurance Expiry</label>
+            <input type="date" class="form-control fleet-input" id="et_insurance_expiry">
+          </div>
+          <div class="col-md-4">
+            <label class="fleet-label">Warranty Expiry</label>
+            <input type="date" class="form-control fleet-input" id="et_warranty_expiry">
+          </div>
           <div class="col-12">
             <label class="fleet-label">Replace Inspection View Photos (optional)</label>
             <p class="small text-muted mb-2">Current photos or sample illustrations are shown below.</p>
@@ -466,6 +571,11 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
               <option value="Under Maintenance">Under Maintenance</option>
               <option value="Inactive">Inactive</option>
             </select>
+          </div>
+          <div class="col-12">
+            <label class="fleet-label" for="et_status_reason">Reason for status change (required if status changes)</label>
+            <textarea class="form-control fleet-input" id="et_status_reason" rows="2" maxlength="500"
+                      placeholder="Briefly explain the status change"></textarea>
           </div>
         </div>
       </div>
@@ -505,6 +615,9 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
           <option value="Under Maintenance">Under Maintenance</option>
           <option value="Inactive">Inactive</option>
         </select>
+        <label class="fleet-label mt-3" for="modalStatusReason">Reason for change</label>
+        <textarea class="form-control fleet-input" id="modalStatusReason" rows="2" maxlength="500"
+                  placeholder="Briefly explain the status change" required></textarea>
       </div>
       <div class="modal-footer fleet-modal-footer">
         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
@@ -514,6 +627,28 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
             <span class="spinner-border spinner-border-sm"></span> Saving…
           </span>
         </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="truckHistoryModal" tabindex="-1" aria-labelledby="truckHistoryModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content fleet-modal">
+      <div class="modal-header fleet-modal-header-status">
+        <h5 class="modal-title" id="truckHistoryModalLabel">
+          <i class="bi bi-clock-history me-2"></i>Availability History — <span id="truckHistoryPlate"></span>
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body fleet-modal-body">
+        <div id="truckHistoryAlert" class="alert d-none" role="alert"></div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead><tr><th>Date and Time</th><th>Change</th><th>Reason</th><th>Changed By</th></tr></thead>
+            <tbody id="truckHistoryBody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>

@@ -9,7 +9,7 @@ require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
-requireRole([ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]);
+requirePermission('parts.manage');
 requirePostMethod();
 enforceCsrf();
 
@@ -32,6 +32,10 @@ if ($action === 'add_part') {
     $unitCost      = optionalFloat('unit_cost');
     $rawInitialQty = $_POST['initial_qty'] ?? '';
     $supplier      = optionalString('supplier');
+    $warrantyExpiry = optionalString('warranty_expiry');
+    if ($warrantyExpiry !== null && !isValidDate($warrantyExpiry)) {
+        jsonFail('Warranty expiry must be a valid date.');
+    }
 
     if ($rawInitialQty === '') {
         jsonFail('Initial quantity is required.');
@@ -56,10 +60,10 @@ if ($action === 'add_part') {
 
         $stmt = $pdo->prepare("
             INSERT INTO parts_inventory
-                (part_number, part_name, category, unit, quantity, reorder_level, unit_cost, supplier)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (part_number, part_name, category, unit, quantity, reorder_level, unit_cost, warranty_expiry, supplier)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ");
-        $stmt->execute([$partNumber, $name, $category, $unit, $initialQty, $reorderLevel, $unitCost, $supplier]);
+        $stmt->execute([$partNumber, $name, $category, $unit, $initialQty, $reorderLevel, $unitCost, $warrantyExpiry, $supplier]);
         $newId = (int)$pdo->lastInsertId();
 
         // Record initial stock-in movement if qty > 0
@@ -92,7 +96,6 @@ if ($action === 'record_movement') {
 
     $partId        = requiredInt('part_id', 'Part', 1);
     $movType       = requiredEnum('movement_type', PARTS_MOVEMENT_TYPES, 'Movement type');
-    $qty           = requiredInt('quantity', 'Quantity', 1);
     $unitCost      = optionalFloat('unit_cost');
     $maintenanceId = filter_input(INPUT_POST, 'maintenance_id', FILTER_VALIDATE_INT) ?: null;
     $reference     = optionalString('reference_number');
@@ -106,24 +109,43 @@ if ($action === 'record_movement') {
         }
     }
 
-    // Fetch current stock
-    $part = findOrFail($pdo, 'parts_inventory', 'part_id', $partId, 'Part not found.');
-
-    // For Stock Out, ensure enough stock
-    if ($movType === 'Stock Out' && $part['quantity'] < $qty) {
-        jsonFail("Insufficient stock. Current stock: {$part['quantity']} {$part['unit']}.");
-    }
-
-    // Signed quantity: negative for Stock Out
-    $signedQty  = ($movType === 'Stock Out') ? -$qty : $qty;
-    $newQty     = $part['quantity'] + $signedQty;
-
-    if ($newQty < 0) {
-        jsonFail('Movement would result in negative stock.');
-    }
-
     try {
         $pdo->beginTransaction();
+        $partQuery = $pdo->prepare('SELECT * FROM parts_inventory WHERE part_id = ? FOR UPDATE');
+        $partQuery->execute([$partId]);
+        $part = $partQuery->fetch(PDO::FETCH_ASSOC);
+        if (!$part) {
+            $pdo->rollBack();
+            jsonFail('Part not found.', 404);
+        }
+
+        if ($movType === 'Adjustment') {
+            $rawCount = $_POST['quantity'] ?? '';
+            if (!is_string($rawCount) || !preg_match('/^\d{1,10}$/', $rawCount)) {
+                $pdo->rollBack();
+                jsonFail('Enter the physical stock count as a whole number from 0 to 4,294,967,295.');
+            }
+            $actualCount = (int)$rawCount;
+            if ($actualCount > 4294967295) {
+                $pdo->rollBack();
+                jsonFail('Physical stock count cannot exceed 4,294,967,295.');
+            }
+            $signedQty = $actualCount - (int)$part['quantity'];
+            if ($signedQty === 0) {
+                $pdo->rollBack();
+                jsonFail('The counted stock matches the recorded quantity; no adjustment is needed.', 409);
+            }
+            $notes = 'Physical count ' . $actualCount . '. ' . ($notes ?? '');
+            $newQty = $actualCount;
+        } else {
+            $qty = requiredInt('quantity', 'Quantity', 1);
+            if ($movType === 'Stock Out' && (int)$part['quantity'] < $qty) {
+                $pdo->rollBack();
+                jsonFail("Insufficient stock. Current stock: {$part['quantity']} {$part['unit']}.");
+            }
+            $signedQty = $movType === 'Stock Out' ? -$qty : $qty;
+            $newQty = (int)$part['quantity'] + $signedQty;
+        }
 
         $pdo->prepare("
             INSERT INTO parts_movements
@@ -153,8 +175,11 @@ if ($action === 'record_movement') {
             ['new_stock' => $newQty],
             "Movement recorded. New stock: <strong>$newQty {$part['unit']}</strong>."
         );
-    } catch (PDOException $e) {
-        $pdo->rollBack();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        if ($e instanceof InvalidArgumentException) {
+            jsonFail($e->getMessage());
+        }
         error_log('parts_handler/record_movement: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
     }

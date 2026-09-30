@@ -4,7 +4,7 @@ require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/recommendations.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+requirePermission('company.dashboard.view');
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard_head.js';
 layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_head.css');

@@ -708,6 +708,7 @@ textarea {
   border: 1px solid var(--card-border);
   border-radius: 7px;
   color: var(--text-secondary);
+  background-color: white;
   font-size: 0.825rem;
   text-decoration: none;
   cursor: pointer;

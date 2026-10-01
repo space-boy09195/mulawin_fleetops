@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Phase 14
+- Ran a comprehensive direct-file authorization sweep across `pages/` and `ajax/`: every page and handler has a permission or login check except `pages/403.php` (error page) and `pages/announcements.php` (intentionally open to all logged-in users). Every AJAX handler enforces CSRF + `requirePostMethod()` except the four read-only CSV/file-download endpoints (matching the pre-existing `attendance_export.php`/`trip_operations_export.php` pattern).
+- Found and fixed a real migration-chain gap: `payroll_records` and `announcements` tables were referenced by Phase 7 migrations and app code (`pages/payroll.php`, `pages/announcements.php`, `ajax/payroll_handler.php`) but were never created by any migration file. `announcements` schema only existed as inline documentation in `db/announcement.md`; `payroll_records` had no CREATE statement anywhere. Created `db/phase7_payroll_announcements_base_migration.sql` with both base table definitions, to be applied before the Phase 7 component/deduction migrations and announcement duration/audience migrations. Pages already degrade gracefully when `payroll_records` is missing, which is how this gap remained invisible.
+- Created `docs/DEPLOYMENT.md` documenting the complete migration sequence (35 files in order) with notes on guard clauses, re-applicability, and verifi cation. The sequence was derived from each migration's table/column targets and foreign-key dependencies. A full end-to-end chain test was begun against a disposable schema but not completed within the remaining token budget; the documented sequence is a strong starting point and should be rehearsed against a copy of production data in staging before applying to a live database.
+- No changes were applied to the configured FleetOps database.
+
 ### Phase 13
 - Normalized the billing party: `billings` now has a `client_id` FK to `clients` (alongside the existing free-text `client_name`, kept for one-off bill-to overrides), backfilled from existing rows by name match.
 - Added optional `invoice_number` (unique when set) and `invoice_date` columns so Accounting can record a client's own invoice reference separately from the internal `billing_number`.

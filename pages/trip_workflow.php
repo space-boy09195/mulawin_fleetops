@@ -14,7 +14,8 @@ if (!$tripId) {
 $pdo = getDBConnection();
 $tripQuery = $pdo->prepare(
     'SELECT t.trip_id, t.dispatch_id, t.trip_number, t.status,
-            dr.requested_by, dr.truck_id, dr.driver_id, dr.scheduled_at,
+            dr.requested_by, dr.truck_id, dr.driver_id, dr.second_driver_id, dr.helper_id,
+            dr.scheduled_at, dr.expected_arrival,
             dr.client_name, dr.unit_count, dr.waybill_reference,
             tr.plate_number, driver.full_name AS driver_name,
             route.origin, route.destination
@@ -121,6 +122,35 @@ $canUpdateWorkflow = $isDispatcher && currentUserHasAnyPermission(['trips.update
 $canClear = currentUserHasAnyPermission(['dispatch.clear']);
 $currentStep = $workflow ? (int)$workflow['current_step'] : 0;
 
+$canReassign = $canDispatchWorkflow && $currentStep === 4 && $trip['status'] === 'Loading'
+    && $workflow && $workflow['assignment_confirmed_at'] === null;
+$reassignTrucks = [];
+$reassignDrivers = [];
+$reassignHelpers = [];
+if ($canReassign) {
+    // Include the currently assigned truck even though it's "Deployed" for this
+    // trip, so the current selection still shows up in the dropdown.
+    $reassignTrucks = $pdo->prepare(
+        "SELECT truck_id, plate_number, brand, model
+         FROM trucks
+         WHERE status = 'Available' OR truck_id = ?
+         ORDER BY plate_number"
+    );
+    $reassignTrucks->execute([(int)$trip['truck_id']]);
+    $reassignTrucks = $reassignTrucks->fetchAll(PDO::FETCH_ASSOC);
+
+    $reassignDrivers = $pdo->query(
+        "SELECT employee_id, full_name FROM employees
+         WHERE is_active = 1 AND license_number IS NOT NULL
+         ORDER BY full_name"
+    )->fetchAll(PDO::FETCH_ASSOC);
+
+    $reassignHelpers = $pdo->query(
+        "SELECT employee_id, full_name FROM employees
+         WHERE is_active = 1 ORDER BY full_name"
+    )->fetchAll(PDO::FETCH_ASSOC);
+}
+
 $steps = [
     1 => 'Dispatcher receives or prepares a trip request.',
     2 => 'Dispatcher checks whether a truck and driver are available.',
@@ -148,9 +178,14 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
       <?= htmlspecialchars($trip['trip_number']) ?> · <?= htmlspecialchars($trip['client_name'] ?? 'Client not recorded') ?>
     </p>
   </div>
-  <a class="btn btn-outline-secondary" href="<?= APP_BASE ?>/pages/trip_monitor.php">
-    <i class="bi bi-arrow-left me-1"></i>Trip Monitoring
-  </a>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-primary" href="<?= APP_BASE ?>/pages/trip_pre_advice.php?trip_id=<?= $tripId ?>" target="_blank" rel="noopener">
+      <i class="bi bi-printer me-1"></i>Print Pre-Advice
+    </a>
+    <a class="btn btn-outline-secondary" href="<?= APP_BASE ?>/pages/trip_monitor.php">
+      <i class="bi bi-arrow-left me-1"></i>Trip Monitoring
+    </a>
+  </div>
 </div>
 
 <div class="card p-3 mb-4">
@@ -217,6 +252,75 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
   </div>
 
   <div class="col-xl-5">
+    <?php if ($canReassign): ?>
+    <div class="card p-3 mb-4">
+      <h2 class="h5">Correction · Reassign truck, crew, or schedule</h2>
+      <p class="text-muted">Use this before confirming the assignment if the truck, driver, or schedule needs to change. The new selections are re-checked for availability and conflicts.</p>
+      <form class="trip-workflow-form" id="reassignForm">
+        <input type="hidden" name="action" value="reassign_resources">
+        <input type="hidden" name="trip_id" value="<?= $tripId ?>">
+        <div class="mb-3">
+          <label class="form-label" for="reassignTruck">Truck</label>
+          <select class="form-select" id="reassignTruck" name="truck_id" required>
+            <?php foreach ($reassignTrucks as $t): ?>
+            <option value="<?= $t['truck_id'] ?>" <?= (int)$t['truck_id'] === (int)$trip['truck_id'] ? 'selected' : '' ?>>
+              <?= htmlspecialchars($t['plate_number']) ?> — <?= htmlspecialchars($t['brand'] . ' ' . $t['model']) ?>
+            </option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="reassignDriver">Driver</label>
+          <select class="form-select" id="reassignDriver" name="driver_id" required>
+            <?php foreach ($reassignDrivers as $d): ?>
+            <option value="<?= $d['employee_id'] ?>" <?= (int)$d['employee_id'] === (int)$trip['driver_id'] ? 'selected' : '' ?>>
+              <?= htmlspecialchars($d['full_name']) ?>
+            </option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="reassignSecondDriver">Second driver <span class="text-muted">(optional)</span></label>
+          <select class="form-select" id="reassignSecondDriver" name="second_driver_id">
+            <option value="">— None —</option>
+            <?php foreach ($reassignDrivers as $d): ?>
+            <option value="<?= $d['employee_id'] ?>" <?= (int)$d['employee_id'] === (int)($trip['second_driver_id'] ?? 0) ? 'selected' : '' ?>>
+              <?= htmlspecialchars($d['full_name']) ?>
+            </option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="reassignHelper">Helper <span class="text-muted">(optional)</span></label>
+          <select class="form-select" id="reassignHelper" name="helper_id">
+            <option value="">— None —</option>
+            <?php foreach ($reassignHelpers as $h): ?>
+            <option value="<?= $h['employee_id'] ?>" <?= (int)$h['employee_id'] === (int)($trip['helper_id'] ?? 0) ? 'selected' : '' ?>>
+              <?= htmlspecialchars($h['full_name']) ?>
+            </option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="reassignScheduledAt">Scheduled departure</label>
+          <input type="datetime-local" class="form-control" id="reassignScheduledAt" name="scheduled_at"
+                 value="<?= $trip['scheduled_at'] ? date('Y-m-d\TH:i', strtotime($trip['scheduled_at'])) : '' ?>" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="reassignExpectedArrival">Expected arrival <span class="text-muted">(optional)</span></label>
+          <input type="datetime-local" class="form-control" id="reassignExpectedArrival" name="expected_arrival"
+                 value="<?= $trip['expected_arrival'] ? date('Y-m-d\TH:i', strtotime($trip['expected_arrival'])) : '' ?>">
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="reassignReason">Reason for this change</label>
+          <textarea class="form-control" id="reassignReason" name="reassign_reason" rows="2" required
+                    placeholder="e.g. Original truck went unavailable for maintenance"></textarea>
+        </div>
+        <button class="btn btn-outline-primary" type="submit">Save changes</button>
+      </form>
+    </div>
+    <?php endif; ?>
+
     <?php if ($canDispatchWorkflow && $currentStep === 4 && $trip['status'] === 'Loading'): ?>
     <div class="card p-3 mb-4">
       <h2 class="h5">Step 5 · Confirm assignment</h2>

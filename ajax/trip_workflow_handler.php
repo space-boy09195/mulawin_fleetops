@@ -7,6 +7,7 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 require_once __DIR__ . '/../includes/trip_workflow.php';
+require_once __DIR__ . '/../includes/dispatch_assignment.php';
 
 header('Content-Type: application/json');
 
@@ -15,7 +16,7 @@ enforceCsrf();
 
 $action = requiredEnum(
     'action',
-    ['confirm_assignment', 'prepare_departure', 'departure_clearance', 'record_progress', 'save_delivery_return'],
+    ['confirm_assignment', 'prepare_departure', 'departure_clearance', 'record_progress', 'save_delivery_return', 'reassign_resources'],
     'Workflow action'
 );
 $permissionByAction = [
@@ -24,6 +25,7 @@ $permissionByAction = [
     'departure_clearance' => 'dispatch.clear',
     'record_progress' => 'trips.update',
     'save_delivery_return' => 'trips.update',
+    'reassign_resources' => 'trips.assign',
 ];
 requirePermission($permissionByAction[$action]);
 
@@ -43,7 +45,8 @@ try {
 
     $tripQuery = $pdo->prepare(
         'SELECT t.trip_id, t.dispatch_id, t.trip_number, t.status,
-                dr.requested_by, dr.truck_id
+                dr.requested_by, dr.truck_id, dr.driver_id, dr.second_driver_id,
+                dr.helper_id, dr.scheduled_at, dr.expected_arrival
          FROM trips t
          JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
          WHERE t.trip_id = ?
@@ -71,12 +74,114 @@ try {
         $pdo->rollBack();
         jsonFail('Only the dispatcher who submitted this trip can complete this workflow action.', 403);
     }
-    if ($trip['status'] !== 'Loading' && in_array($action, ['confirm_assignment', 'prepare_departure', 'departure_clearance'], true)) {
+    if ($trip['status'] !== 'Loading' && in_array($action, ['confirm_assignment', 'prepare_departure', 'departure_clearance', 'reassign_resources'], true)) {
         $pdo->rollBack();
         jsonFail('This trip is no longer awaiting departure preparation.', 409);
     }
+    if ($action === 'reassign_resources' && $state['assignment_confirmed_at'] !== null) {
+        $pdo->rollBack();
+        jsonFail('The assignment is already confirmed and can no longer be changed here.', 409);
+    }
 
-    if ($action === 'confirm_assignment') {
+    if ($action === 'reassign_resources') {
+        $newTruckId = requiredInt('truck_id', 'Truck', 1);
+        $newDriverId = requiredInt('driver_id', 'Driver', 1);
+        $newSecondDriverId = filter_input(INPUT_POST, 'second_driver_id', FILTER_VALIDATE_INT) ?: null;
+        $newHelperId = filter_input(INPUT_POST, 'helper_id', FILTER_VALIDATE_INT) ?: null;
+        $scheduledAtRaw = requiredString('scheduled_at', 'Scheduled date/time');
+        $expectedArrivalRaw = trim($_POST['expected_arrival'] ?? '');
+        $reassignReason = requiredString('reassign_reason', 'Reason for the change', 500);
+
+        $scheduledDate = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i', $scheduledAtRaw);
+        $dateErrors = DateTimeImmutable::getLastErrors();
+        if (!$scheduledDate || ($dateErrors !== false && ($dateErrors['warning_count'] || $dateErrors['error_count']))) {
+            $pdo->rollBack();
+            jsonFail('Invalid scheduled date.');
+        }
+        $expectedArrival = null;
+        if ($expectedArrivalRaw !== '') {
+            $expectedArrivalDate = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i', $expectedArrivalRaw);
+            $arrivalErrors = DateTimeImmutable::getLastErrors();
+            if (!$expectedArrivalDate || ($arrivalErrors !== false && ($arrivalErrors['warning_count'] || $arrivalErrors['error_count']))) {
+                $pdo->rollBack();
+                jsonFail('Expected arrival must be a valid date and time.');
+            }
+            if ($expectedArrivalDate <= $scheduledDate) {
+                $pdo->rollBack();
+                jsonFail('Expected arrival must be later than scheduled departure.');
+            }
+            $expectedArrival = $expectedArrivalDate->format('Y-m-d H:i:s');
+        }
+
+        $oldTruckId = (int)$trip['truck_id'];
+        $truckChanged = $newTruckId !== $oldTruckId;
+        $crewIds = array_filter([$newDriverId, $newSecondDriverId, $newHelperId]);
+
+        if ($truckChanged) {
+            lockDispatchResources($pdo, $newTruckId, $crewIds);
+        } else {
+            // Re-validate crew even when the truck is unchanged.
+            $employeeCheck = $pdo->prepare(
+                'SELECT employee_id, is_active FROM employees WHERE employee_id = ? FOR UPDATE'
+            );
+            foreach (array_unique(array_map('intval', $crewIds)) as $employeeId) {
+                $employeeCheck->execute([$employeeId]);
+                $row = $employeeCheck->fetch(PDO::FETCH_ASSOC);
+                if (!$row || !(int)$row['is_active']) {
+                    $pdo->rollBack();
+                    jsonFail('A selected crew member is no longer active.', 409);
+                }
+            }
+        }
+
+        assertDispatchResourcesAvailable(
+            $pdo,
+            $newTruckId,
+            $crewIds,
+            $scheduledDate->format('Y-m-d H:i:s'),
+            (int)$trip['dispatch_id']
+        );
+
+        $pdo->prepare(
+            'UPDATE dispatch_requests
+             SET truck_id = ?, driver_id = ?, second_driver_id = ?, helper_id = ?,
+                 scheduled_at = ?, expected_arrival = ?
+             WHERE dispatch_id = ?'
+        )->execute([
+            $newTruckId,
+            $newDriverId,
+            $newSecondDriverId,
+            $newHelperId,
+            $scheduledDate->format('Y-m-d H:i:s'),
+            $expectedArrival,
+            (int)$trip['dispatch_id'],
+        ]);
+
+        $pdo->prepare('UPDATE trips SET expected_arrival = ? WHERE trip_id = ?')
+            ->execute([$expectedArrival, $tripId]);
+
+        if ($truckChanged) {
+            $pdo->prepare("UPDATE trucks SET status = 'Available' WHERE truck_id = ? AND status = 'Deployed'")
+                ->execute([$oldTruckId]);
+            $pdo->prepare("UPDATE trucks SET status = 'Deployed' WHERE truck_id = ?")
+                ->execute([$newTruckId]);
+        }
+
+        $changeSummary = [];
+        if ($truckChanged) $changeSummary[] = "truck #$oldTruckId → #$newTruckId";
+        if ((int)$trip['driver_id'] !== $newDriverId) $changeSummary[] = 'driver changed';
+        if ((int)($trip['second_driver_id'] ?? 0) !== (int)($newSecondDriverId ?? 0)) $changeSummary[] = 'second driver changed';
+        if ((int)($trip['helper_id'] ?? 0) !== (int)($newHelperId ?? 0)) $changeSummary[] = 'helper changed';
+        if ($trip['scheduled_at'] !== $scheduledDate->format('Y-m-d H:i:s')) $changeSummary[] = 'schedule changed';
+
+        $message = 'Assignment and schedule updated.';
+        $auditAction = 'REASSIGN_TRIP_RESOURCES';
+        $auditDetails = [
+            'dispatch_id' => (int)$trip['dispatch_id'],
+            'changes' => $changeSummary,
+            'reason' => $reassignReason,
+        ];
+    } elseif ($action === 'confirm_assignment') {
         if ((int)$state['current_step'] !== 4 || $state['assignment_confirmed_at'] !== null) {
             $pdo->rollBack();
             jsonFail('The assignment can only be confirmed once after Operations Head approval.', 409);
@@ -336,6 +441,9 @@ try {
 } catch (InvalidArgumentException $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     jsonFail($e->getMessage());
+} catch (DomainException $e) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
+    jsonFail($e->getMessage(), 409);
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     error_log('trip_workflow_handler: ' . $e->getMessage());

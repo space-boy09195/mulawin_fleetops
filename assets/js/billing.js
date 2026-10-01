@@ -112,28 +112,40 @@
   const bilAmount          = document.getElementById('bilAmount');
   const bilDueDate         = document.getElementById('bilDueDate');
   const bilBillingNumber   = document.getElementById('bilBillingNumber');
+  const bilInvoiceNumber   = document.getElementById('bilInvoiceNumber');
+  const bilInvoiceDate     = document.getElementById('bilInvoiceDate');
   const bilNotes           = document.getElementById('bilNotes');
   const submitBillingBtn   = document.getElementById('submitBillingBtn');
   const bilBtnSpinner      = document.getElementById('bilBtnSpinner');
   const billingFormAlert   = document.getElementById('billingFormAlert');
 
   createBillingModal?.addEventListener('hidden.bs.modal', () => {
-    [bilTripId, bilClientName, bilAmount, bilDueDate, bilBillingNumber, bilNotes].forEach(el => {
+    [bilTripId, bilClientName, bilAmount, bilDueDate, bilBillingNumber, bilInvoiceNumber, bilInvoiceDate, bilNotes].forEach(el => {
       if (el) el.value = '';
     });
     hideAlert(billingFormAlert);
     setBusy(submitBillingBtn, bilBtnSpinner, false);
   });
 
+  // "Create Billing" buttons on the Unbilled Trips tab pre-select a trip
+  // before opening the same modal used for the header's generic button.
+  document.querySelectorAll('.bil-unbilled-create-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (bilTripId) bilTripId.value = btn.dataset.tripId ?? '';
+    });
+  });
+
   submitBillingBtn?.addEventListener('click', () => {
     hideAlert(billingFormAlert);
 
-    const tripId        = bilTripId?.value          ?? '';
-    const clientName    = bilClientName?.value.trim() ?? '';
-    const amount        = bilAmount?.value          ?? '';
-    const dueDate       = bilDueDate?.value         ?? '';
-    const billingNumber = bilBillingNumber?.value.trim() ?? '';
-    const notes         = bilNotes?.value.trim()    ?? '';
+    const tripId         = bilTripId?.value          ?? '';
+    const clientName     = bilClientName?.value.trim() ?? '';
+    const amount         = bilAmount?.value          ?? '';
+    const dueDate        = bilDueDate?.value         ?? '';
+    const billingNumber  = bilBillingNumber?.value.trim() ?? '';
+    const invoiceNumber  = bilInvoiceNumber?.value.trim() ?? '';
+    const invoiceDate    = bilInvoiceDate?.value     ?? '';
+    const notes          = bilNotes?.value.trim()    ?? '';
 
     if (!tripId || !amount || !dueDate || !billingNumber) {
       showAlert(billingFormAlert, 'Please fill in all required fields.');
@@ -159,6 +171,8 @@
       amount,
       due_date:        dueDate,
       billing_number:  billingNumber,
+      invoice_number:  invoiceNumber,
+      invoice_date:    invoiceDate,
       notes,
     })
       .then(res => {

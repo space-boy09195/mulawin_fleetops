@@ -137,12 +137,13 @@
   const apUnitCost      = document.getElementById('apUnitCost');
   const apInitialQty    = document.getElementById('apInitialQty');
   const apSupplier      = document.getElementById('apSupplier');
+  const apWarrantyExpiry = document.getElementById('apWarrantyExpiry');
   const submitAddPartBtn = document.getElementById('submitAddPartBtn');
   const apBtnSpinner    = document.getElementById('apBtnSpinner');
   const addPartAlert    = document.getElementById('addPartAlert');
 
   addPartModal?.addEventListener('hidden.bs.modal', () => {
-    [apName, apPartNumber, apCategory, apUnit, apUnitCost, apSupplier].forEach(el => {
+    [apName, apPartNumber, apCategory, apUnit, apUnitCost, apSupplier, apWarrantyExpiry].forEach(el => {
       if (el) el.value = el.id === 'apUnit' ? 'pcs' : '';
     });
     if (apReorderLevel) apReorderLevel.value = '5';
@@ -162,6 +163,7 @@
     const unitCost    = apUnitCost?.value           ?? '';
     const initialQty  = apInitialQty?.value         ?? '';
     const supplier    = apSupplier?.value.trim()    ?? '';
+    const warrantyExpiry = apWarrantyExpiry?.value  ?? '';
 
     if (!name || !category || !unit) {
       showAlert(addPartAlert, 'Part name, category, and unit are required.');
@@ -191,6 +193,7 @@
       unit_cost:     unitCost,
       initial_qty:   initialQty,
       supplier,
+      warranty_expiry: warrantyExpiry,
     })
       .then(res => {
         setBusy(submitAddPartBtn, apBtnSpinner, false);
@@ -220,6 +223,8 @@
   const movReference     = document.getElementById('movReference');
   const movNotes         = document.getElementById('movNotes');
   const movUnitLabel     = document.getElementById('movUnitLabel');
+  const movQtyLabel      = document.getElementById('movQtyLabel');
+  const movQtyHint       = document.getElementById('movQtyHint');
   const submitMovementBtn = document.getElementById('submitMovementBtn');
   const movBtnSpinner    = document.getElementById('movBtnSpinner');
   const movementAlert    = document.getElementById('movementAlert');
@@ -234,21 +239,44 @@
     if (movUnitCost && opt?.dataset.unitCost) {
       movUnitCost.value = opt.dataset.unitCost;
     }
+    updateAdjustmentHint();
   });
 
-  // Hide unit cost field for non-Stock In
+  // Hide unit cost field for non-Stock In. For Adjustment, the quantity field
+  // becomes a "physical count" (the actual counted total, not a +/- delta) so
+  // relabel it and allow 0, since a stock count can legitimately be zero.
   movType?.addEventListener('change', () => {
     const costField = movUnitCost?.closest('.col-6');
     if (costField) {
       costField.style.opacity = movType.value === 'Stock In' ? '1' : '0.4';
     }
+    const isAdjustment = movType.value === 'Adjustment';
+    if (movQtyLabel) movQtyLabel.textContent = isAdjustment ? 'Physical Count' : 'Quantity';
+    if (movQty) movQty.min = isAdjustment ? '0' : '1';
+    updateAdjustmentHint();
   });
+
+  function updateAdjustmentHint() {
+    if (!movQtyHint) return;
+    const opt = movPartId?.selectedOptions[0];
+    if (movType?.value === 'Adjustment' && opt) {
+      movQtyHint.textContent =
+        `Current recorded stock: ${opt.dataset.stock ?? '0'} ${opt.dataset.unit ?? ''}. ` +
+        'Enter the actual counted total — the system will compute the adjustment.';
+      movQtyHint.classList.remove('d-none');
+    } else {
+      movQtyHint.classList.add('d-none');
+    }
+  }
 
   movementModal?.addEventListener('hidden.bs.modal', () => {
     [movPartId, movType, movJobId, movQty, movUnitCost, movReference, movNotes].forEach(el => {
       if (el) el.value = '';
     });
     if (movUnitLabel) movUnitLabel.textContent = '';
+    if (movQtyLabel) movQtyLabel.textContent = 'Quantity';
+    if (movQtyHint) movQtyHint.classList.add('d-none');
+    if (movQty) movQty.min = '1';
     hideAlert(movementAlert);
     setBusy(submitMovementBtn, movBtnSpinner, false);
   });
@@ -262,9 +290,20 @@
     const unitCost  = movUnitCost?.value ?? '';
     const reference = movReference?.value.trim() ?? '';
     const notes     = movNotes?.value.trim()     ?? '';
+    const isAdjustment = type === 'Adjustment';
 
-    if (!partId || !type || !qty || parseInt(qty) <= 0) {
-      showAlert(movementAlert, 'Please select a part, type, and enter a positive quantity.');
+    if (!partId || !type || qty === '') {
+      showAlert(movementAlert, 'Please select a part, type, and enter a quantity.');
+      return;
+    }
+
+    if (isAdjustment ? parseInt(qty, 10) < 0 : parseInt(qty, 10) <= 0) {
+      showAlert(
+        movementAlert,
+        isAdjustment
+          ? 'Physical count cannot be negative.'
+          : 'Please enter a positive quantity.'
+      );
       return;
     }
 

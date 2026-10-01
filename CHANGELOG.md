@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Phase 14
+- Ran a comprehensive direct-file authorization sweep across `pages/` and `ajax/`: every page and handler has a permission or login check except `pages/403.php` (error page) and `pages/announcements.php` (intentionally open to all logged-in users). Every AJAX handler enforces CSRF + `requirePostMethod()` except the four read-only CSV/file-download endpoints (matching the pre-existing `attendance_export.php`/`trip_operations_export.php` pattern).
+- Found and fixed a real migration-chain gap: `payroll_records` and `announcements` tables were referenced by Phase 7 migrations and app code (`pages/payroll.php`, `pages/announcements.php`, `ajax/payroll_handler.php`) but were never created by any migration file. `announcements` schema only existed as inline documentation in `db/announcement.md`; `payroll_records` had no CREATE statement anywhere. Created `db/phase7_payroll_announcements_base_migration.sql` with both base table definitions, to be applied before the Phase 7 component/deduction migrations and announcement duration/audience migrations. Pages already degrade gracefully when `payroll_records` is missing, which is how this gap remained invisible.
+- Created `docs/DEPLOYMENT.md` documenting the complete migration sequence (35 files in order) with notes on guard clauses, re-applicability, and verifi cation. The sequence was derived from each migration's table/column targets and foreign-key dependencies. A full end-to-end chain test was begun against a disposable schema but not completed within the remaining token budget; the documented sequence is a strong starting point and should be rehearsed against a copy of production data in staging before applying to a live database.
+- No changes were applied to the configured FleetOps database.
+
+### Phase 13
+- Normalized the billing party: `billings` now has a `client_id` FK to `clients` (alongside the existing free-text `client_name`, kept for one-off bill-to overrides), backfilled from existing rows by name match.
+- Added optional `invoice_number` (unique when set) and `invoice_date` columns so Accounting can record a client's own invoice reference separately from the internal `billing_number`.
+- Added an "Unbilled Trips" dashboard tab on the Billing page listing completed trips with no billing record yet, with a one-click "Create Billing" action that pre-selects the trip.
+- Added a filtered, downloadable AR CSV export (`ajax/billing_export.php`) that respects the same period filter as the Billing page.
+- Validated against a disposable schema: client_id backfill from `client_name` match, invoice_number uniqueness (including that multiple `NULL` invoice numbers don't conflict), and the Unbilled Trips query correctly excluding already-billed trips. PHP lint, `node --check` on the JS, and `git diff --check` all passed. No changes were applied to the configured FleetOps database.
+- Client-rate override auditing at billing time (i.e., a dispatcher/accounting override of the effective-dated `client_rates` lookup, with a reason) was intentionally not built — it's policy-dependent (who can override, and is an approval required?) and is flagged for confirmation rather than invented.
+
+### Phase 12
+- Added a pre-confirmation trip reassignment action (`reassign_resources`): lets the submitting dispatcher (or Admin) change the assigned truck, driver, second driver, helper, and schedule on a trip that is still `Loading` and has not yet had its assignment confirmed. Reuses the existing `lockDispatchResources()`/`assertDispatchResourcesAvailable()` checks from dispatch creation, so a truck/crew conflict or an inactive crew member is rejected the same way as at initial dispatch. Releases the previous truck back to `Available` and marks the new one `Deployed` when the truck changes; requires a reason for audit purposes.
+- Added a printable/exportable trip pre-advice notice (`pages/trip_pre_advice.php`) summarizing route, client, truck/crew, schedule, and cargo/reference details, linked from the trip workflow page.
+- Validated the reassignment logic (truck swap, releasing/redeploying trucks, same-date truck/crew conflict rejection, inactive-crew rejection) against a minimal disposable schema exercising the real `includes/dispatch_assignment.php` helpers. PHP lint and `git diff --check` passed; no migration or schema change was needed, and no changes were applied to the configured FleetOps database.
+- Batch assignment/execution and custom client-specific trip fields remain open pending confirmation of the desired fields/policy.
+
+### Phase 11
+- Added `parts_inventory.warranty_expiry` and a part-warranty expiry reminder alongside the existing document/employee-license reminders, notifying employees/fleet managers via the existing reminder threshold configuration.
+- Fixed a read-then-write race condition in `record_movement`: the part row is now locked with `SELECT ... FOR UPDATE` inside the transaction before computing the new stock quantity.
+- Added an "Adjustment" physical-count reconciliation flow: the submitted quantity is the counted total (can be 0), and the system computes and logs the signed delta; a counted total equal to the current recorded stock is rejected as a no-op.
+- Added a warranty-expiry date field to Add Part, a "Warranty Expiring" tab and column on the Parts page, and an estimated stock-value summary card (based on last recorded unit cost, not a costed valuation method).
+- Fixed a legacy reminder-dedup fingerprint collision risk: `part_warranty` reminders now use a distinct fingerprint prefix so they cannot collide with `employee_license` reminders sharing the same numeric ID and due date; `document`/`employee_license` fingerprint formats are unchanged for backward compatibility.
+- Added `db/phase11_inventory_controls_migration.sql`; validated against a disposable MariaDB schema (add part with warranty date, Stock In, Stock Out insufficient-stock rejection, Adjustment no-op rejection, Adjustment delta computation including a 0 count). PHP lint, JavaScript syntax checks, and `git diff --check` passed; no migration was applied to the configured FleetOps database.
+
 ### Phase 10
 - Added the ordered 13-step trip workflow for new dispatches, recording the initial request, availability check, trip details, and approval submission; post-approval Dispatcher assignment confirmation; trip-document and allowance readiness; passed pre-departure checks; Operations Head dispatch clearance; truck dispatch; progress updates; delivery/return details; arrival inspection; and final completed-trip submission.
 - Trip allowance preparation now requires either an explicit “Not Required” reason or a linked Trip Allowance fund request in Approved/Disbursed status. Document preparation reuses trip-linked uploads without imposing document categories; “Not Required” is explicitly recorded.

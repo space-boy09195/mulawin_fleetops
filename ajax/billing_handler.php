@@ -20,16 +20,27 @@ $action = $_POST['action'] ?? '';
 // ── Create billing ────────────────────────────────────────────────────────────
 if ($action === 'create_billing') {
 
-    $tripId        = requiredInt('trip_id', 'Trip', 1);
-    $clientName    = requiredString('client_name', 'Client', 150);
-    $amount        = requiredPositiveFloat('amount', 'Amount');
-    $dueDate       = requiredDate('due_date', 'Due date', true);
-    $billingNumber = requiredString('billing_number', 'Billing number', 100);
-    $notes         = optionalString('notes');
+    $tripId         = requiredInt('trip_id', 'Trip', 1);
+    $clientName     = requiredString('client_name', 'Client', 150);
+    $amount         = requiredPositiveFloat('amount', 'Amount');
+    $dueDate        = requiredDate('due_date', 'Due date', true);
+    $billingNumber  = requiredString('billing_number', 'Billing number', 100);
+    $invoiceNumber  = optionalString('invoice_number', null, 50);
+    $invoiceDateRaw = trim($_POST['invoice_date'] ?? '');
+    $notes          = optionalString('notes');
+
+    $invoiceDate = null;
+    if ($invoiceDateRaw !== '') {
+        if (!isValidDate($invoiceDateRaw)) {
+            jsonFail('Invoice date must be a valid date.');
+        }
+        $invoiceDate = $invoiceDateRaw;
+    }
 
     $clientStmt = $pdo->prepare('SELECT client_id FROM clients WHERE client_name = ? AND is_active = 1');
     $clientStmt->execute([$clientName]);
-    if (!$clientStmt->fetchColumn()) {
+    $clientId = $clientStmt->fetchColumn();
+    if (!$clientId) {
         jsonFail('Select a registered active client.');
     }
 
@@ -45,18 +56,29 @@ if ($action === 'create_billing') {
         jsonFail('Billing number already exists.');
     }
 
+    // Unique invoice number (client-facing reference), when supplied
+    if ($invoiceNumber !== null && existsWhere($pdo, 'billings', 'invoice_number', $invoiceNumber)) {
+        jsonFail('Invoice number already exists.');
+    }
+
     try {
         $stmt = $pdo->prepare("
             INSERT INTO billings
-                (trip_id, created_by, billing_number, client_name, amount, due_date, status, notes)
-            VALUES (?, ?, ?, ?, ?, ?, 'Unpaid', ?)
+                (trip_id, client_id, created_by, billing_number, invoice_number, invoice_date,
+                 client_name, amount, due_date, status, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Unpaid', ?)
         ");
-        $stmt->execute([$tripId, currentUserId(), $billingNumber, $clientName, $amount, $dueDate, $notes]);
+        $stmt->execute([
+            $tripId, $clientId, currentUserId(), $billingNumber, $invoiceNumber, $invoiceDate,
+            $clientName, $amount, $dueDate, $notes,
+        ]);
         $newId = (int)$pdo->lastInsertId();
 
         auditLog('CREATE_BILLING', 'billings', $newId, null, [
             'billing_number' => $billingNumber,
+            'invoice_number' => $invoiceNumber,
             'trip_id'        => $tripId,
+            'client_id'      => $clientId,
             'amount'         => $amount,
             'due_date'       => $dueDate,
         ]);

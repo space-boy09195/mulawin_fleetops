@@ -767,14 +767,14 @@ $alertCount  = count($alerts);
               <input class="form-check-input" type="checkbox" id="eeActive">
               <label class="form-check-label usr-label mb-0" for="eeActive">Active</label>
             </div>
-            <div class="col-md-4">
-              <label class="form-label usr-label" for="eeDateResigned">Date Resigned</label>
-              <input type="date" class="form-control usr-input" id="eeDateResigned" max="<?= date('Y-m-d') ?>">
-            </div>
-            <div class="col-12">
-              <label class="form-label usr-label" for="eeResignationReason">Resignation Reason</label>
-              <textarea class="form-control usr-input" id="eeResignationReason" rows="2" maxlength="500"></textarea>
-            </div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label usr-label" for="eeDateResigned">Date Resigned</label>
+            <input type="date" class="form-control usr-input" id="eeDateResigned" max="<?= date('Y-m-d') ?>">
+          </div>
+          <div class="col-12">
+            <label class="form-label usr-label" for="eeResignationReason">Resignation Reason</label>
+            <textarea class="form-control usr-input" id="eeResignationReason" rows="2" maxlength="500"></textarea>
           </div>
         </div>
       </div>

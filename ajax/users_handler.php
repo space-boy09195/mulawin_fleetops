@@ -163,9 +163,15 @@ if ($action === 'edit_user') {
         $pdo->prepare("
             UPDATE users SET
                 full_name = ?, username = ?, email = ?,
+                auth_version = auth_version + CASE
+                    WHEN role_id <> ? OR is_active <> ? THEN 1 ELSE 0
+                END,
                 role_id   = ?, is_active = ?
             WHERE user_id = ?
-        ")->execute([$fullName, $username, $email, $roleId, $isActive, $userId]);
+        ")->execute([
+            $fullName, $username, $email,
+            $roleId, $isActive, $roleId, $isActive, $userId,
+        ]);
         $pdo->commit();
 
         auditLog('EDIT_USER', 'users', $userId,
@@ -204,7 +210,11 @@ if ($action === 'review_password_reset') {
         }
 
         if ($status === 'Approved') {
-            $update = $pdo->prepare('UPDATE users SET password_hash = ? WHERE user_id = ? AND is_active = 1');
+            $update = $pdo->prepare(
+                'UPDATE users
+                 SET password_hash = ?, auth_version = auth_version + 1
+                 WHERE user_id = ? AND is_active = 1'
+            );
             $update->execute([$request['password_hash'], $request['user_id']]);
             if ($update->rowCount() !== 1) {
                 $pdo->rollBack();
@@ -246,7 +256,9 @@ if ($action === 'reset_password') {
 
     try {
         $hash = password_hash($password, PASSWORD_BCRYPT);
-        $pdo->prepare("UPDATE users SET password_hash = ? WHERE user_id = ?")
+        $pdo->prepare(
+            'UPDATE users SET password_hash = ?, auth_version = auth_version + 1 WHERE user_id = ?'
+        )
             ->execute([$hash, $userId]);
 
         auditLog('RESET_PASSWORD', 'users', $userId, null, ['note' => 'Password reset by admin']);

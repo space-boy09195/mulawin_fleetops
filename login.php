@@ -26,11 +26,15 @@ $messages = [
         'empty'   => 'Please enter both username and password.',
         'invalid' => 'Incorrect username or password.',
         'disabled'=> 'Your account has been disabled. Contact the administrator.',
-        'rate_limited' => 'Too many failed attempts. Please wait 15 minutes and try again.',
+        'warning_attempts' => 'Warning: You are approaching the maximum number of login attempts. Please make sure your credentials are correct.',
+        'warning_last_attempt' => 'Warning: One more failed login attempt may temporarily limit further attempts. Please check your credentials before trying again.',
+        'rate_limited' => 'Too many login attempts. Please wait and try again.',
+        'rate_limit_unavailable' => 'Login is temporarily unavailable. Please wait a moment and try again.',
     ],
     'reason' => [
         'logout'  => 'You have been successfully logged out.',
         'timeout' => 'Your session expired. Please log in again.',
+        'revoked' => 'Your account or access changed. Please log in again.',
     ],
 ];
 $resetMessages = [
@@ -159,7 +163,7 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
     </div>
 
     <?php if ($errorMsg): ?>
-      <div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
+      <div class="alert <?= in_array($_GET['error'] ?? '', ['warning_attempts', 'warning_last_attempt'], true) ? 'alert-warning' : 'alert-danger' ?> d-flex align-items-center gap-2" role="alert">
         <i class="bi bi-exclamation-triangle-fill"></i>
         <span><?= htmlspecialchars($errorMsg) ?></span>
       </div>

@@ -54,6 +54,7 @@ CREATE TABLE users (
   email         VARCHAR(100)  NOT NULL UNIQUE,
   password_hash VARCHAR(255)  NOT NULL COMMENT 'bcrypt hash via password_hash()',
   is_active     TINYINT(1)    NOT NULL DEFAULT 1,
+  auth_version  INT UNSIGNED  NOT NULL DEFAULT 1,
   created_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at    TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id),
@@ -2213,6 +2214,19 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
   CONSTRAINT fk_password_reset_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(user_id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- ===== END SOURCE: password_reset_requests_migration.sql =====
+
+-- ===== BEGIN SOURCE: auth_session_version_migration.sql =====
+SET @add_auth_version = IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+      AND COLUMN_NAME = 'auth_version') = 0,
+  'ALTER TABLE users ADD COLUMN auth_version INT UNSIGNED NOT NULL DEFAULT 1',
+  'SELECT 1'
+);
+PREPARE add_auth_version_stmt FROM @add_auth_version;
+EXECUTE add_auth_version_stmt;
+DEALLOCATE PREPARE add_auth_version_stmt;
+-- ===== END SOURCE: auth_session_version_migration.sql =====
 
 -- ===== BEGIN SOURCE: system_hardening_migration.sql =====
 CREATE TABLE IF NOT EXISTS trip_number_counters (

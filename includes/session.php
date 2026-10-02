@@ -77,6 +77,38 @@ function requireLogin(): void {
         header('Location: ' . $loginUrl);
         exit;
     }
+
+    static $validatedUserId = null;
+    $userId = currentUserId();
+    if ($validatedUserId === $userId) {
+        return;
+    }
+
+    require_once __DIR__ . '/../config/database.php';
+    try {
+        $stmt = getDBConnection()->prepare(
+            'SELECT role_id, is_active, auth_version FROM users WHERE user_id = ?'
+        );
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log('Session account validation failed: ' . $e->getMessage());
+        http_response_code(503);
+        exit('Account status is temporarily unavailable. Please try again later.');
+    }
+
+    if (!$user
+        || !(int)$user['is_active']
+        || (int)$user['role_id'] !== currentRoleId()
+        || !isset($_SESSION['auth_version'])
+        || (int)$user['auth_version'] !== (int)$_SESSION['auth_version']) {
+        session_unset();
+        session_destroy();
+        header('Location: ' . APP_BASE . '/login.php?reason=revoked');
+        exit;
+    }
+
+    $validatedUserId = $userId;
 }
 
 // ============================================================

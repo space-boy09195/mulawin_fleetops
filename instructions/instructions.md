@@ -31,6 +31,10 @@ Bootstrap Icons, and Chart.js are already included under `assets/vendor/`.
    Do not import it over an existing installation. Back up an existing
    database before any schema change; do not treat this fresh-install file as
    an upgrade script.
+
+   For an existing installation, back up the database and apply the targeted
+   [`../db/auth_session_version_migration.sql`](../db/auth_session_version_migration.sql)
+   to the selected application database before deploying the updated PHP code.
 5. Copy `.env.example` to `.env` in the project root and set the database
    credentials and application path. For the default XAMPP setup, the relevant
    values are:

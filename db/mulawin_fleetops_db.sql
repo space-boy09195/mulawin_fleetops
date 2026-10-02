@@ -2471,3 +2471,26 @@ CREATE TABLE IF NOT EXISTS deleted_records (
 
 -- Restore FK checks, disabled by the original base schema during setup.
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- CREATES the budgets table on the database.
+CREATE TABLE budgets (
+  budget_id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  category ENUM(
+    'Revenue',
+    'Maintenance',
+    'Fuel',
+    'Toll',
+    'Driver Allowance',
+    'Other',
+    'Payroll'
+  ) NOT NULL,
+  period_month DATE NOT NULL,
+  amount DECIMAL(14,2) NOT NULL,
+  set_by INT UNSIGNED NOT NULL,
+  PRIMARY KEY (budget_id),
+  UNIQUE KEY uq_budgets_category_period_month (category, period_month),
+  KEY idx_budgets_period_month (period_month),
+  KEY idx_budgets_set_by (set_by),
+  CONSTRAINT fk_budgets_set_by
+    FOREIGN KEY (set_by) REFERENCES users (user_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

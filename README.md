@@ -34,7 +34,7 @@ ajax/           AJAX endpoint handlers (one per feature area)
 assets/         CSS, JS, images
 auth/           Login handling, user seeding
 config/         App constants, DB connection
-db/             Schema and migration files
+db/             Fresh-install database schema and bundled additions
 includes/       Shared helpers: session, CSRF, layout, audit, alerts
 instructions/   Setup and deployment instructions
 pages/          Page controllers/views, one per feature
@@ -43,16 +43,31 @@ login.php       Login entry point
 
 ## Getting started
 
-See [`instructions/instructions.md`](instructions/instructions.md) for full
-local setup and Hostinger deployment steps. Quick version:
+See [`instructions/instructions.md`](instructions/instructions.md) for detailed
+requirements, local setup, configuration, system workflows, scheduled jobs,
+and troubleshooting.
 
-1. Clone the repo and copy `.env.example` to `.env`, filling in your DB
-   credentials.
-2. Import the schema in `db/Mulawin_DB-Phase 1` into MySQL, then run any
-   `*_migration.sql` files in `db/`.
-3. Serve the project root with PHP 8+ (e.g. XAMPP/Laragon locally, or
-   Hostinger for production).
-4. Visit `login.php`. Seed accounts can be created via `auth/seed_users.php`.
+Quick local setup with XAMPP:
+
+1. Install PHP 8.2+ with PDO MySQL enabled, MySQL or MariaDB, and Apache. Start
+   Apache and MySQL, then place the project under `C:\xampp\htdocs\mulawin_fleetops`.
+2. Create an empty `mulawin_fleetops` database in phpMyAdmin and import
+   [`db/mulawin_fleetops_db.sql`](db/mulawin_fleetops_db.sql).
+   **This SQL file is for a fresh, empty database only. Do not import it over
+   an existing installation.**
+3. Copy `.env.example` to `.env` in the project root. Set the database
+   credentials and confirm `APP_BASE=/mulawin_fleetops` matches the URL path.
+   Keep `.env` private; it is excluded from Git.
+4. For disposable local development only, run `php auth/seed_users.php` from
+   the project root to create the initial admin account. The temporary
+   credentials are `admin` / `Admin@1234`; change the password after signing in
+   and remove the seed script before exposing the app to a network. Never use
+   this seeded account in production.
+5. Visit `http://localhost/mulawin_fleetops/login.php` and sign in with an
+   account in the database.
+
+The project is a work in progress. Use a dedicated database account and HTTPS
+for production; see the setup guide for storage and deployment considerations.
 
 ## Security notes
 

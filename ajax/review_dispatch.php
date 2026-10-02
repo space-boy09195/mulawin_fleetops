@@ -242,6 +242,17 @@ try {
                 APP_BASE . '/pages/dispatch.php'
             );
         }
+    if ($requestStatusChanged) {
+        auditLog('UPDATE', 'dispatch_requests', $dispatchId, ['status' => 'Pending'], ['status' => $status]);
+    }
+    auditLog('APPROVAL_DECISION', 'approval_requests', (int)$approvalId, ['status' => 'Pending'], [
+        'status' => $workflowStatus,
+        'decision' => $status,
+        'entity_id' => $dispatchId,
+    ]);
+    if ($tripId !== null) {
+        auditLog('CREATE', 'trips', $tripId, null, ['trip_number' => $tripNumber]);
+    }
     $pdo->commit();
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
@@ -250,18 +261,6 @@ try {
     }
     error_log('review_dispatch: ' . $e->getMessage());
     jsonFail('Could not review the dispatch request.', 500);
-}
-
-if ($requestStatusChanged) {
-    auditLog('UPDATE', 'dispatch_requests', $dispatchId, ['status' => 'Pending'], ['status' => $status]);
-}
-auditLog('APPROVAL_DECISION', 'approval_requests', (int)$approvalId, ['status' => 'Pending'], [
-    'status' => $workflowStatus,
-    'decision' => $status,
-    'entity_id' => $dispatchId,
-]);
-if ($tripId !== null) {
-    auditLog('CREATE', 'trips', $tripId, null, ['trip_number' => $tripNumber]);
 }
 
 if (!$requestStatusChanged) {

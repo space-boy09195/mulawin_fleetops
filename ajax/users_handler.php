@@ -98,13 +98,12 @@ if ($action === 'add_user') {
         ");
         $stmt->execute([$roleId, $username, $fullName, $email, $hash]);
         $newId = (int)$pdo->lastInsertId();
-        $pdo->commit();
-
         auditLog('ADD_USER', 'users', $newId, null, [
             'username'  => $username,
             'full_name' => $fullName,
             'role_id'   => $roleId,
         ]);
+        $pdo->commit();
 
         jsonOk(['id' => $newId], 'User created successfully.');
     } catch (PDOException $e) {

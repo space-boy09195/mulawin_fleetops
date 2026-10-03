@@ -76,13 +76,13 @@ if ($action === 'create_pm_schedule') {
              VALUES (?, ?, ?, ?, ?, ?)'
         )->execute([$truckId, currentUserId(), $serviceName, $description, $intervalDays, $nextDueDate]);
         $scheduleId = (int)$pdo->lastInsertId();
-        $pdo->commit();
         auditLog('CREATE_PM_SCHEDULE', 'preventive_maintenance_schedules', $scheduleId, null, [
             'truck_id' => $truckId,
             'service_name' => $serviceName,
             'interval_days' => $intervalDays,
             'next_due_date' => $nextDueDate,
         ]);
+        $pdo->commit();
         jsonOk(['schedule_id' => $scheduleId], 'Preventive maintenance schedule created.');
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
@@ -116,12 +116,12 @@ if ($action === 'update_pm_schedule') {
         $pdo->prepare(
             'UPDATE preventive_maintenance_schedules SET status = ? WHERE schedule_id = ?'
         )->execute([$nextStatus, $scheduleId]);
-        $pdo->commit();
         auditLog('UPDATE_PM_SCHEDULE', 'preventive_maintenance_schedules', $scheduleId, [
             'status' => $currentStatus,
         ], [
             'status' => $nextStatus,
         ]);
+        $pdo->commit();
         jsonOk([], "Preventive maintenance schedule {$nextStatus}.");
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();

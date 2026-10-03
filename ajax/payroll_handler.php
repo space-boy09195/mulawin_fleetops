@@ -152,20 +152,19 @@ if ($action === 'create') {
                 $insertDeduction->execute([$newId, $deduction['name'], $deduction['amount']]);
             }
         }
+        auditLog('CREATE', 'payroll_records', $newId, null, [
+            'employee' => $emp['full_name'],
+            'base_amount' => $baseAmount,
+            'allowance_amount' => $allowanceAmount,
+            'deduction_amount' => $deductionAmount,
+            'net_amount' => $amount,
+        ]);
         $pdo->commit();
     } catch (PDOException $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('payroll_handler/create: ' . $e->getMessage());
         jsonFail('Could not record payroll payment.', 500);
     }
-
-    auditLog('CREATE', 'payroll_records', $newId, null, [
-        'employee' => $emp['full_name'],
-        'base_amount' => $baseAmount,
-        'allowance_amount' => $allowanceAmount,
-        'deduction_amount' => $deductionAmount,
-        'net_amount' => $amount,
-    ]);
 
     jsonOk(['payroll_id' => $newId]);
 }

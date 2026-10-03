@@ -54,6 +54,26 @@ layoutHead('Purchasing');
   const list = document.getElementById('purchaseItems');
   const feedback = document.getElementById('purchasingFeedback');
   const show = (message, ok) => { feedback.textContent = message; feedback.className = `alert alert-${ok ? 'success' : 'danger'}`; };
+  const renderItems = () => {
+    const rows = items.map((item, index) => {
+      const row = document.createElement('li');
+      row.className = 'list-group-item d-flex justify-content-between';
+      const label = document.createElement('span');
+      label.textContent = `${item.label} — ${item.quantity} × ₱${item.unit_cost.toFixed(2)}`;
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'btn btn-sm btn-outline-danger';
+      removeButton.setAttribute('data-remove', index);
+      removeButton.textContent = 'Remove';
+      removeButton.addEventListener('click', () => {
+        items.splice(index, 1);
+        renderItems();
+      });
+      row.append(label, removeButton);
+      return row;
+    });
+    list.replaceChildren(...rows);
+  };
   document.getElementById('supplierForm').addEventListener('submit', async event => {
     event.preventDefault();
     const body = new URLSearchParams({
@@ -75,8 +95,7 @@ layoutHead('Purchasing');
     const unitCost = Number(document.getElementById('purchaseUnitCost').value);
     if (!part.value || quantity <= 0 || unitCost < 0) { show('Choose a part and valid quantity/cost.', false); return; }
     items.push({part_id: Number(part.value), label: part.options[part.selectedIndex].text, quantity, unit_cost: unitCost});
-    list.innerHTML = items.map((item, index) => `<li class="list-group-item d-flex justify-content-between"><span>${item.label} — ${item.quantity} × ₱${item.unit_cost.toFixed(2)}</span><button type="button" class="btn btn-sm btn-outline-danger" data-remove="${index}">Remove</button></li>`).join('');
-    list.querySelectorAll('[data-remove]').forEach(button => button.addEventListener('click', () => { items.splice(Number(button.dataset.remove), 1); button.closest('li').remove(); }));
+    renderItems();
   });
   document.getElementById('purchaseOrderForm').addEventListener('submit', async event => {
     event.preventDefault();

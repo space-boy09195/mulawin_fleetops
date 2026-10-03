@@ -108,7 +108,7 @@ function expectedFuel(array $row): float {
   <div class="bil-header d-flex align-items-center justify-content-between mb-4">
     <div>
       <h1 class="bil-title mb-0">Trip Costs &amp; Fuel Analysis</h1>
-      <p class="bil-subtitle mb-0">Record operating expenses and identify fuel usage above the 15% variance threshold.</p>
+      <p class="bil-subtitle mb-0">Record operating expenses and review fuel variance. Driver Allowance is a trip expense reimbursement; Trip Pay is the assigned crew's per-trip wage. They are separate payments and may both be recorded for the same trip and crew member.</p>
     </div>
     <button class="btn btn-bil-primary" data-bs-toggle="modal" data-bs-target="#expenseModal">
       <i class="bi bi-plus-lg me-1"></i> Record Expense
@@ -116,7 +116,7 @@ function expectedFuel(array $row): float {
   </div>
   <div class="bil-table-wrap">
     <table class="table bil-table">
-      <thead><tr><th>Trip</th><th>Truck</th><th>Crew</th><th>Revenue</th><th>Expenses</th><th>Crew Pay</th><th>Net Profit</th><th>CPK</th><th>Fuel Analysis</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Trip</th><th>Truck</th><th>Crew</th><th>Revenue</th><th>Trip Expenses</th><th>Trip Pay</th><th>Net Profit</th><th>CPK</th><th>Fuel Analysis</th><th>Actions</th></tr></thead>
       <tbody>
       <?php foreach ($rows as $row):
         $expected = expectedFuel($row);
@@ -174,7 +174,7 @@ function expectedFuel(array $row): float {
                   data-helper-id="<?= $row['helper_id'] !== null ? (int)$row['helper_id'] : '' ?>"
                   data-helper-name="<?= htmlspecialchars($row['helper_name'] ?? '') ?>"
                   data-existing="<?= htmlspecialchars(json_encode($tripPayEntries), ENT_QUOTES, 'UTF-8') ?>">
-            <i class="bi bi-pencil me-1"></i>Manage Pay
+            <i class="bi bi-pencil me-1"></i>Manage Trip Pay
           </button>
           <?php endif; ?>
         </td>
@@ -201,11 +201,12 @@ function expectedFuel(array $row): float {
   <div class="modal fade" id="crewPayModal" tabindex="-1" aria-labelledby="crewPayTitle">
     <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="crewPayTitle">Log Crew Pay</h5>
+        <h5 class="modal-title" id="crewPayTitle">Log Trip Pay</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
         <div id="crewPayMessage"></div>
+        <p class="text-muted small">Trip Pay is per-trip Driver/Helper compensation, not Driver Allowance. A separate Driver Allowance expense may also be recorded for this trip and crew member.</p>
         <input type="hidden" id="crewPayTripId">
         <div class="mb-3">
           <label class="form-label">Paid Date</label>
@@ -219,7 +220,7 @@ function expectedFuel(array $row): float {
         <div id="crewPayExisting"></div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-bil-primary" id="crewPaySubmit">Save Crew Pay</button>
+        <button type="button" class="btn btn-bil-primary" id="crewPaySubmit">Save Trip Pay</button>
       </div>
     </div></div>
   </div>
@@ -240,6 +241,7 @@ function expectedFuel(array $row): float {
             <label class="form-label mb-0">Expense entries</label>
             <button type="button" id="addExpenseRow" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus-lg me-1"></i>Add item</button>
           </div>
+          <p class="text-muted small">Driver Allowance is a trip-related allowance or reimbursement expense, not the crew's per-trip wage. It may coexist with Trip Pay for the same trip and crew member.</p>
           <div id="expenseRows" class="d-grid gap-3"></div>
           <div id="expenseMessage" class="mt-3"></div>
         </div>
@@ -480,7 +482,7 @@ document.querySelectorAll('.crew-pay-btn').forEach((button) => {
     crewPayRows.innerHTML = '';
     crewPayMessage.innerHTML = '';
     document.getElementById('crewPayTripId').value = button.dataset.tripId;
-    document.getElementById('crewPayTitle').textContent = `Log Crew Pay — ${button.dataset.trip}`;
+    document.getElementById('crewPayTitle').textContent = `Log Trip Pay — ${button.dataset.trip}`;
 
     if (button.dataset.driverId) {
       const existingPay = existingByEmployee[button.dataset.driverId];

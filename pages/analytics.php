@@ -379,8 +379,8 @@ $costTrend   = array_map(fn($k) => round((float)($costByBucket[$k] ?? 0), 2), $b
 // ── Net Profit trend (Head Management only) — Revenue minus Total Expenses,
 //    bucketed the same way. Total Expenses here is the SAME definition used
 //    on the Billing page's Expenses & Profit tab (maintenance cost + all
-//    trip_expenses categories + logged payroll disbursements), so the two
-//    never disagree with each other. ──
+//    trip_expenses categories + periodic payroll + separate trip_pay wages),
+//    so the two never disagree with each other. ──
 $profitTrend = null;
 if ($isHead) {
     $tripExpBucketExpr = bucketExpr('expense_date', $granularity);

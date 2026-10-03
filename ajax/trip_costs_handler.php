@@ -14,6 +14,8 @@ enforceCsrf();
 
 $action = $_POST['action'] ?? '';
 
+// Driver Allowance is recorded in trip_expenses as a reimbursement expense,
+// separate from trip_pay wages; both may exist for the same trip and crew member.
 if (!in_array($action, ['create_expense', 'update_expense'], true)) {
     jsonFail('Unknown action.');
 }

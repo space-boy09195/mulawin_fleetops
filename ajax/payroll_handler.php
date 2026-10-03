@@ -116,11 +116,10 @@ if ($action === 'create') {
 
     $emp = findOrFail($pdo, 'employees', 'employee_id', $employeeId, 'Employee not found.');
 
-    // Drivers and Helpers are on-call and already compensated per trip via
-    // Driver Allowance in trip_expenses — a payroll entry on top of that
-    // would double-pay them. Blocked here too, not just hidden in the UI.
+    // Drivers and Helpers are managed through per-trip wages in trip_pay, not
+    // this periodic payroll flow. Driver Allowance remains a separate expense.
     if (in_array(strtolower(trim($emp['position'])), ['driver', 'helper'], true)) {
-        jsonFail('Drivers and Helpers are paid per trip via Driver Allowance, not through payroll. Log their pay on the Trip Costs page instead.');
+        jsonFail('Drivers and Helpers are paid per trip through Trip Pay, not through periodic payroll. Log their wages on the Trip Costs page instead.');
     }
 
     $stmt = $pdo->prepare("

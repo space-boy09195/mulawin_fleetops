@@ -122,11 +122,9 @@ $unbilledSql = "
 $unbilledTrips = $pdo->query($unbilledSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Active employees (for the Log Payroll Payment form) ───────────────────────
-// Drivers and Helpers are on-call, not fixed-salary — they're already paid
-// per trip via the "Driver Allowance" line in trip_expenses (logged on the
-// Trip Costs page). Excluding them here prevents accidentally double-paying
-// the same person: once per trip through Driver Allowance, and again here
-// through a periodic payroll entry.
+// Drivers and Helpers are on-call and receive per-trip wages through trip_pay.
+// Keep them out of this periodic fixed-salary payroll form; Driver Allowance
+// remains a separate trip expense and may coexist with Trip Pay.
 $activeEmployees = $pdo->query("
     SELECT employee_id, full_name, position
     FROM employees
@@ -440,7 +438,7 @@ arsort($overdueClients);
     <li class="nav-item" role="presentation">
       <button class="bil-tab" id="tab-payroll" data-bs-toggle="tab"
               data-bs-target="#pane-payroll" type="button" role="tab">
-        <i class="bi bi-people me-1"></i> Payroll Report
+        <i class="bi bi-people me-1"></i> Payroll &amp; Trip Pay
         <span class="bil-tab-count"><?= count($payrollRecords) + count($tripPayRecords) ?></span>
       </button>
     </li>
@@ -697,7 +695,7 @@ arsort($overdueClients);
           <div class="bil-expense-value">₱<?= number_format($payrollTotal, 2) ?></div>
         </div>
         <div class="bil-expense-card">
-          <div class="bil-expense-label"><i class="bi bi-person-workspace me-1"></i>Crew Pay</div>
+          <div class="bil-expense-label"><i class="bi bi-person-workspace me-1"></i>Trip Pay</div>
           <div class="bil-expense-value">₱<?= number_format($tripPayTotal, 2) ?></div>
         </div>
         <div class="bil-expense-card">
@@ -735,8 +733,8 @@ arsort($overdueClients);
     <div class="tab-pane fade" id="pane-payroll" role="tabpanel">
 
       <?php
-      // ── Merge payroll_records (salaried staff) + trip_pay (Drivers/Helpers)
-      //    into one consolidated Payroll Report, sorted by paid date. ──
+      // ── Show periodic payroll_records and per-trip trip_pay together in a
+      //    date-sorted disbursement report while keeping their types distinct. ──
       $payrollReportRows = [];
       foreach ($payrollRecords as $pr) {
           $payrollReportRows[] = [
@@ -767,19 +765,21 @@ arsort($overdueClients);
           ];
       }
       usort($payrollReportRows, fn($a, $b) => strcmp($b['paid_date'], $a['paid_date']));
-      $payrollReportTotal = $payrollTotal + $tripPayTotal;
       ?>
 
       <div class="bil-payroll-note">
         <i class="bi bi-info-circle me-1"></i>
-        This report combines fixed-salary payments (Salary) with per-trip Driver/Helper wages (Trip Pay).
-        It does not include <strong>Driver Allowance</strong>, which is trip expense reimbursement, not wages —
-        that's tracked separately on the Trip Costs page.
+        This disbursement report lists periodic payroll (Salary) and per-trip Driver/Helper wages (Trip Pay) as separate types.
+        It does not include <strong>Driver Allowance</strong>, a trip expense/reimbursement rather than wages; allowance expenses
+        are tracked separately on the Trip Costs page and may coexist with Trip Pay.
       </div>
 
       <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
         <div class="bil-payroll-total">
-          Total logged <?= htmlspecialchars($periods[$period]) ?>: <strong>₱<?= number_format($payrollReportTotal, 2) ?></strong>
+          <?= htmlspecialchars($periods[$period]) ?> totals —
+          Payroll: <strong>₱<?= number_format($payrollTotal, 2) ?></strong>
+          <span class="mx-2">|</span>
+          Trip Pay: <strong>₱<?= number_format($tripPayTotal, 2) ?></strong>
         </div>
         <div class="d-flex gap-2 flex-wrap">
           <button class="btn btn-outline-secondary btn-sm" id="printPayrollReportBtn">
@@ -800,7 +800,7 @@ arsort($overdueClients);
         <?php if (empty($payrollReportRows)): ?>
         <div class="no-results">
           <i class="bi bi-cash-coin"></i>
-          <span>No payroll or crew pay logged for this period yet.</span>
+          <span>No payroll or Trip Pay logged for this period yet.</span>
         </div>
         <?php else: ?>
         <table class="table bil-table">
@@ -847,11 +847,11 @@ arsort($overdueClients);
       <div class="bil-print-only">
         <div class="bil-print-header">
           <h2>RP Mulawin Trucking Services</h2>
-          <h3>Payroll Report</h3>
+          <h3>Payroll &amp; Trip Pay Disbursements</h3>
           <p>Period: <?= htmlspecialchars($periods[$period]) ?> &middot; Generated: <?= date('F d, Y g:i A') ?></p>
         </div>
         <?php if (empty($payrollReportRows)): ?>
-        <p>No payroll or crew pay logged for this period.</p>
+        <p>No payroll or Trip Pay logged for this period.</p>
         <?php else: ?>
         <table class="bil-print-table">
           <thead>
@@ -880,8 +880,13 @@ arsort($overdueClients);
           </tbody>
           <tfoot>
             <tr>
-              <td colspan="4"><strong>Total</strong></td>
-              <td><strong>₱<?= number_format($payrollReportTotal, 2) ?></strong></td>
+              <td colspan="4"><strong>Payroll subtotal</strong></td>
+              <td><strong>₱<?= number_format($payrollTotal, 2) ?></strong></td>
+              <td colspan="2"></td>
+            </tr>
+            <tr>
+              <td colspan="4"><strong>Trip Pay subtotal</strong></td>
+              <td><strong>₱<?= number_format($tripPayTotal, 2) ?></strong></td>
               <td colspan="2"></td>
             </tr>
           </tfoot>
@@ -1092,7 +1097,7 @@ arsort($overdueClients);
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="sendPayrollReportLabel"><i class="bi bi-send me-2"></i>Send Payroll Report to Head</h5>
+        <h5 class="modal-title" id="sendPayrollReportLabel"><i class="bi bi-send me-2"></i>Send Payroll &amp; Trip Pay Report to Head</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
@@ -1102,13 +1107,13 @@ arsort($overdueClients);
           It'll appear on the Documents page, which Head Management already has access to.
         </p>
         <div class="mb-3">
-          <label class="form-label bil-label" for="reportFile">Payroll Report File (PDF)</label>
+          <label class="form-label bil-label" for="reportFile">Payroll &amp; Trip Pay Report File (PDF)</label>
           <input type="file" class="form-control bil-input" id="reportFile" accept="application/pdf">
         </div>
         <div class="mb-3">
           <label class="form-label bil-label" for="reportDescription">Description</label>
           <input type="text" class="form-control bil-input" id="reportDescription"
-                 value="Payroll Report — <?= htmlspecialchars($periods[$period]) ?> (generated <?= date('M d, Y') ?>)">
+                 value="Payroll & Trip Pay Report — <?= htmlspecialchars($periods[$period]) ?> (generated <?= date('M d, Y') ?>)">
         </div>
       </div>
       <div class="modal-footer bil-modal-footer">

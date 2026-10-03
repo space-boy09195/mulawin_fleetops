@@ -488,7 +488,9 @@ CREATE TABLE billings (
 
 -- ============================================================
 -- TABLE 16: trip_expenses
--- Operating expenses recorded against a completed or active trip.
+-- Operating expenses recorded against a completed or active trip. Driver
+-- Allowance is a reimbursement expense, separate from Trip Pay wages, and
+-- may coexist with Trip Pay for the same trip and crew member.
 -- Fuel rows use quantity as liters for anomaly detection.
 -- ============================================================
 CREATE TABLE trip_expenses (
@@ -1843,6 +1845,8 @@ PREPARE add_cargo_weight_stmt FROM @add_cargo_weight;
 EXECUTE add_cargo_weight_stmt;
 DEALLOCATE PREPARE add_cargo_weight_stmt;
 
+-- Driver Allowance is a trip reimbursement expense, separate from Trip Pay
+-- wages; both may be recorded for the same trip and crew member.
 CREATE TABLE IF NOT EXISTS trip_expenses (
   expense_id    INT UNSIGNED NOT NULL AUTO_INCREMENT,
   trip_id       INT UNSIGNED NOT NULL,
@@ -2435,8 +2439,8 @@ WHERE b.client_id IS NULL AND b.client_name IS NOT NULL;
 
 -- ===== BEGIN SOURCE: trip_pay_migration.sql =====
 -- Per-trip wages for the Driver and Helper assigned to a trip.
--- Separate from trip_expenses (allowance/reimbursements) and
--- payroll_records (period payroll for fixed-salary staff).
+-- Separate from trip_expenses (including Driver Allowance) and
+-- payroll_records (period payroll); allowance and Trip Pay may coexist.
 
 CREATE TABLE IF NOT EXISTS trip_pay (
   trip_pay_id INT UNSIGNED NOT NULL AUTO_INCREMENT,

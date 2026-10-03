@@ -32,7 +32,7 @@ layoutHead('Payroll');
 <div class="page-header d-flex justify-content-between align-items-start flex-wrap gap-3">
   <div>
     <h1 class="page-title">Payroll</h1>
-    <p class="page-subtitle">Maintain payroll disbursements separately from billing and collections.</p>
+    <p class="page-subtitle">Record periodic salary/payroll separately from per-trip Driver/Helper wages (Trip Pay) and trip-related Driver Allowance expenses.</p>
   </div>
 </div>
 
@@ -80,7 +80,7 @@ layoutHead('Payroll');
         <div id="payrollDeductions" class="vstack gap-2"></div>
         <button class="btn btn-sm btn-outline-secondary mt-2" type="button" id="addPayrollDeduction">Add deduction</button>
         <input type="hidden" id="payrollDeduction" value="0.00">
-        <div class="form-text">Enter each deduction and amount manually. This system does not calculate statutory contribution rates.</div>
+        <div class="form-text">Payroll allowances are periodic payroll components, not Driver Allowance trip expenses. Enter each deduction and amount manually; this system does not calculate statutory contribution rates.</div>
       </div>
       <div class="col-md-4">
         <label class="form-label" for="payrollDeductionTotal">Total deductions</label>

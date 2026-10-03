@@ -252,7 +252,10 @@ if ($action === 'reset_password') {
         jsonFail('Passwords do not match.');
     }
 
-    findOrFail($pdo, 'users', 'user_id', $userId, 'User not found.');
+    $targetUser = findOrFail($pdo, 'users', 'user_id', $userId, 'User not found.');
+    if ((int)$targetUser['role_id'] === ROLE_ADMIN && currentRoleId() !== ROLE_ADMIN) {
+        jsonFail('Only an Admin can reset an Admin account password.', 403);
+    }
 
     try {
         $hash = password_hash($password, PASSWORD_BCRYPT);

@@ -103,8 +103,8 @@ if ($action === 'create_order') {
         $approvalId = createApprovalRequest($pdo, 'purchase_request', 'purchase_order', $orderId, currentUserId());
         $pdo->prepare('UPDATE purchase_order_headers SET approval_id = ? WHERE purchase_order_id = ?')
             ->execute([$approvalId, $orderId]);
-        $pdo->commit();
         auditLog('CREATE', 'purchase_order_headers', $orderId, null, ['po_number' => $poNumber, 'total_amount' => $total]);
+        $pdo->commit();
         jsonOk(['purchase_order_id' => $orderId, 'po_number' => $poNumber], 'Purchase order submitted for approval.');
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
@@ -168,8 +168,8 @@ if ($action === 'receive_order') {
         $status = (int)$remaining->fetchColumn() === 0 ? 'Received' : 'Partially Received';
         $pdo->prepare('UPDATE purchase_order_headers SET status = ? WHERE purchase_order_id = ?')
             ->execute([$status, $orderId]);
-        $pdo->commit();
         auditLog('RECEIVE', 'purchase_order_headers', $orderId, null, ['status' => $status]);
+        $pdo->commit();
         jsonOk([], 'Purchase receipt recorded.');
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();

@@ -141,8 +141,6 @@ if ($action === 'record_payment') {
         $pdo->prepare("UPDATE billings SET status = ? WHERE billing_id = ?")
             ->execute([$newStatus, $billingId]);
 
-        $pdo->commit();
-
         auditLog('RECORD_PAYMENT', 'collections', $collectionId, null, [
             'billing_id'  => $billingId,
             'amount_paid' => $amountPaid,
@@ -150,12 +148,16 @@ if ($action === 'record_payment') {
             'new_status'  => $newStatus,
         ]);
 
+        $pdo->commit();
+
         jsonOk([
             'new_status'  => $newStatus,
             'new_balance' => $newBalance,
         ], 'Payment recorded. Billing status: <strong>' . $newStatus . '</strong>.');
     } catch (PDOException $e) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         error_log('billing_handler/record_payment: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
     }

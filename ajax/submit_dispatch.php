@@ -320,6 +320,12 @@ try {
         $newId,
         currentUserId()
     );
+    auditLog('CREATE', 'dispatch_requests', $newId, null, ['status' => 'Pending']);
+    auditLog('CREATE', 'approval_requests', $approvalId, null, [
+        'request_type' => 'dispatch',
+        'entity_type' => 'dispatch_request',
+        'entity_id' => $newId,
+    ]);
     $pdo->commit();
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
@@ -330,10 +336,4 @@ try {
     jsonFail('Could not confirm the dispatch.', 500);
 }
 
-auditLog('CREATE', 'dispatch_requests', $newId, null, ['status' => 'Pending']);
-auditLog('CREATE', 'approval_requests', $approvalId, null, [
-    'request_type' => 'dispatch',
-    'entity_type' => 'dispatch_request',
-    'entity_id' => $newId,
-]);
 jsonOk(['dispatch_id' => $newId], 'Dispatch encoded and submitted to the Operations Head for approval.');

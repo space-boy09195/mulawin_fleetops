@@ -64,10 +64,6 @@ if ($action === 'add_user') {
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         jsonFail('Invalid email address.');
     }
-    $emailDomain = getAppSetting($pdo, 'company_email_domain', COMPANY_EMAIL_DOMAIN) ?? COMPANY_EMAIL_DOMAIN;
-    if (!isCompanyEmail($email, $emailDomain)) {
-        jsonFail('Use an email address ending in @' . $emailDomain . '.');
-    }
 
     if (strlen($password) < 8) {
         jsonFail('Password must be at least 8 characters.');
@@ -132,11 +128,6 @@ if ($action === 'edit_user') {
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         jsonFail('Invalid email address.');
     }
-    $emailDomain = getAppSetting($pdo, 'company_email_domain', COMPANY_EMAIL_DOMAIN) ?? COMPANY_EMAIL_DOMAIN;
-    if (!isCompanyEmail($email, $emailDomain)) {
-        jsonFail('Use an email address ending in @' . $emailDomain . '.');
-    }
-
     // Prevent deactivating own account
     if ($userId === currentUserId() && !$isActive) {
         jsonFail('You cannot deactivate your own account.');

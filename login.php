@@ -13,8 +13,7 @@ if ($returnTo !== null) {
 
 // Already logged in? Send to dashboard
 if (isLoggedIn()) {
-    $dashboards = ROLE_DASHBOARDS;
-    $destination = $returnTo ?? ($dashboards[currentRoleId()] ?? APP_BASE . '/pages/dashboard_head.php');
+    $destination = $returnTo ?? dashboardUrlForRole((string)($_SESSION['role_name'] ?? ''), currentRoleId());
     unset($_SESSION['return_to']);
     header('Location: ' . $destination);
     exit;

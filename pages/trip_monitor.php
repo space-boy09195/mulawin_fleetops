@@ -229,7 +229,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
       <button class="filter-btn" data-filter="okay">No Problems</button>
       <div class="ms-auto">
         <input type="text" id="tripSearch" class="form-control form-control-sm"
-               placeholder="Search trip, plate, driver…" style="width:220px;">
+               placeholder="Search trip, plate, driver…">
       </div>
     </div>
   </div>

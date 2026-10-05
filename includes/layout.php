@@ -22,7 +22,6 @@ function roleDashboardUrl(): string {
 function getNavItems(): array {
     return [
         ['section' => 'Insights'],
-        ['label' => 'Operations Dashboard', 'href' => '/pages/dashboard_operations_head.php', 'icon' => 'bi-speedometer2', 'permission' => 'operations.dashboard.view'],
         ['label' => 'Operations Performance', 'href' => '/pages/operations_performance.php', 'icon' => 'bi-bar-chart-line', 'permission' => 'operations.reports.view'],
         ['label' => 'Analytics',           'href' => '/pages/analytics.php',    'icon' => 'bi-graph-up-arrow',      'permission' => 'reports.view'],
         ['section' => 'Operations'],
@@ -60,6 +59,18 @@ function getNavItems(): array {
     ];
 }
 
+function currentUserHasActiveEmployee(): bool {
+    static $linked = null;
+    if ($linked !== null) {
+        return $linked;
+    }
+    $stmt = getDBConnection()->prepare(
+        'SELECT 1 FROM employees WHERE user_id = ? AND is_active = 1 LIMIT 1'
+    );
+    $stmt->execute([currentUserId()]);
+    return $linked = (bool)$stmt->fetchColumn();
+}
+
 // ---- User initials for avatar ----------------------------
 function userInitials(): string {
     $name  = $_SESSION['full_name'] ?? 'U';
@@ -67,19 +78,17 @@ function userInitials(): string {
     if (count($parts) >= 2) {
         return strtoupper(substr($parts[0], 0, 1) . substr(end($parts), 0, 1));
     }
-
-    function currentUserHasActiveEmployee(): bool {
-        static $linked = null;
-        if ($linked !== null) {
-            return $linked;
-        }
-        $stmt = getDBConnection()->prepare(
-            'SELECT 1 FROM employees WHERE user_id = ? AND is_active = 1 LIMIT 1'
-        );
-        $stmt->execute([currentUserId()]);
-        return $linked = (bool)$stmt->fetchColumn();
-    }
     return strtoupper(substr($name, 0, 2));
+}
+
+// ---- Whether the current user may see a nav item ---------
+function navItemVisible(array $item): bool {
+    if (isset($item['permission'])) {
+        return currentUserHasAnyPermission([$item['permission']])
+            || (($item['also_linked_employee'] ?? false) && currentUserHasActiveEmployee());
+    }
+    // Transitional role-based links remain available for legacy pages.
+    return empty($item['roles']) || in_array(currentRoleId(), $item['roles'], true);
 }
 
 // ---- Build sidebar nav HTML (sections hidden if no visible children)
@@ -104,13 +113,9 @@ function buildSidebarNav(): string {
             continue;
         }
 
-        if (isset($item['permission']) && !currentUserHasAnyPermission([$item['permission']])
-            && !(($item['also_linked_employee'] ?? false) && currentUserHasActiveEmployee())) {
+        if (!navItemVisible($item)) {
             continue;
         }
-
-        // Transitional role-based links remain available for legacy pages.
-        if (!isset($item['permission']) && !empty($item['roles']) && !in_array(currentRoleId(), $item['roles'], true)) continue;
 
         // Flush buffered section label now that we have a visible item
         if ($pendingSection !== '') {
@@ -515,6 +520,10 @@ HTML;
 function layoutFoot(): void {
     $base        = APP_BASE;
     $extraScript = '';
+    // Chart.js is only loaded by pages that opt in via $GLOBALS['page_needs_chart'].
+    $chartScript = !empty($GLOBALS['page_needs_chart'])
+        ? '<script src="' . $base . '/assets/vendor/chartjs/chart.umd.min.js"></script>'
+        : '';
     $layoutScriptPath = __DIR__ . '/../assets/js/layout.js';
     $layoutScriptVersion = is_file($layoutScriptPath) ? (string)filemtime($layoutScriptPath) : (string)time();
     $stateScriptPath = __DIR__ . '/../assets/js/state_persistence.js';
@@ -536,7 +545,7 @@ function layoutFoot(): void {
 </div>
 
 <script src="{$base}/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-<script src="{$base}/assets/vendor/chartjs/chart.umd.min.js"></script>
+{$chartScript}
 <script src="{$base}/assets/js/filter_inputs.js?v={$filterInputScriptVersion}"></script>
 <script src="{$base}/assets/js/state_persistence.js?v={$stateScriptVersion}"></script>
 <script src="{$base}/assets/js/layout.js?v={$layoutScriptVersion}"></script>

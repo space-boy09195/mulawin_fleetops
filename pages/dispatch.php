@@ -567,13 +567,13 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             </datalist>
           </div>
           <div class="col-md-6">
-            <label class="disp-label">Second Driver <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <label class="disp-label">Second Driver <span class="text-muted">(optional)</span></label>
             <input type="hidden" id="d_second_driver_id">
             <input class="form-control disp-input" id="d_second_driver" list="activeDriversList"
                    placeholder="Type to search second driver" autocomplete="off">
           </div>
           <div class="col-md-6">
-            <label class="disp-label">Helper <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <label class="disp-label">Helper <span class="text-muted">(optional)</span></label>
             <input type="hidden" id="d_helper_id">
             <input class="form-control disp-input" id="d_helper" list="activeHelpersList"
                    placeholder="Type to search helper (optional)" autocomplete="off">
@@ -598,7 +598,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             </select>
           </div>
           <div class="col-md-6">
-            <label class="disp-label">Billing Client <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <label class="disp-label">Billing Client <span class="text-muted">(optional)</span></label>
             <select class="form-select disp-input" id="d_billing_client">
               <option value="">— Use client’s parent, or the selected client —</option>
               <?php foreach ($clients as $client): ?>
@@ -645,7 +645,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             </select>
           </div>
           <div class="col-md-6">
-            <label class="disp-label">Expected Arrival <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <label class="disp-label">Expected Arrival <span class="text-muted">(optional)</span></label>
             <input type="datetime-local" class="form-control disp-input" id="d_expected_arrival">
           </div>
           <div class="col-md-4">
@@ -662,7 +662,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                    value="<?= $instruction && $instruction['unit_count'] !== null ? htmlspecialchars((string)$instruction['unit_count']) : '' ?>">
           </div>
           <div class="col-12">
-            <label class="disp-label">Remarks <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <label class="disp-label">Remarks <span class="text-muted">(optional)</span></label>
             <textarea class="form-control disp-input" id="d_remarks" rows="2"
                       placeholder="Any notes for this dispatch…"><?= $instruction ? htmlspecialchars($instruction['instruction_notes'] ?? '') : '' ?></textarea>
           </div>
@@ -696,7 +696,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
         <input class="form-control disp-input mb-2" id="rr_origin" placeholder="Origin" required>
         <input class="form-control disp-input mb-2" id="rr_destination" placeholder="Destination" required>
         <input type="number" min="0" step="0.1" class="form-control disp-input" id="rr_distance" placeholder="Distance (km, optional)">
-        <label class="disp-label mt-2" for="rr_notes">Side note <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+        <label class="disp-label mt-2" for="rr_notes">Side note <span class="text-muted">(optional)</span></label>
         <textarea class="form-control disp-input" id="rr_notes" rows="2" maxlength="500"
                   placeholder="Add context or special instructions for the Operations Head…"></textarea>
         <div class="row g-2 mt-2">
@@ -790,7 +790,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                    placeholder="e.g. Davao City">
           </div>
           <div class="col-md-6">
-            <label class="disp-label">Distance (km) <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <label class="disp-label">Distance (km) <span class="text-muted">(optional)</span></label>
             <input type="number" class="form-control disp-input" id="ar_distance"
                    min="0" step="0.1" placeholder="e.g. 1180.5">
           </div>
@@ -868,7 +868,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             <input type="text" class="form-control disp-input" id="er_destination">
           </div>
           <div class="col-md-6">
-            <label class="disp-label">Distance (km) <span class="text-muted" style="font-weight:400;">(optional)</span></label>
+            <label class="disp-label">Distance (km) <span class="text-muted">(optional)</span></label>
             <input type="number" class="form-control disp-input" id="er_distance"
                    min="0" step="0.1">
           </div>

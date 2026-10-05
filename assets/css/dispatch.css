@@ -2,47 +2,8 @@
    assets/css/dispatch.css
    ============================================================ */
 
-/* ── Filter buttons ─────────────────────────────────────────── */
-.filter-btn {
-  padding: 5px 14px;
-  border-radius: 20px;
-  border: 1px solid var(--card-border);
-  background: var(--card-bg);
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-.filter-btn:hover  { 
-  border-color: var(--accent); 
-  color: var(--accent-text); 
-}
-
-.filter-btn.active { 
-  background: var(--accent); 
-  border-color: var(--accent); 
-  color: #fff; 
-  font-weight: 600; 
-}
-
 /* ── Hidden rows ─────────────────────────────────────────────── */
 tr.hidden-row { display: none; }
-
-/* ── No results ──────────────────────────────────────────────── */
-.disp-no-results {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 3rem 1rem;
-  color: var(--text-muted);
-  font-size: 0.875rem;
-  text-align: center;
-}
-.disp-no-results i { font-size: 2rem; opacity: 0.3; }
 
 /* ── Tabs ────────────────────────────────────────────────────── */
 .disp-tabs {
@@ -142,6 +103,10 @@ tr.hidden-row { display: none; }
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 4px;
+}
+
+.disp-label .text-muted {
+  font-weight: 400;
 }
 
 .disp-input {

@@ -7,6 +7,7 @@ require_once __DIR__ . '/../includes/recommendations.php';
 requirePermission('company.dashboard.view');
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard_head.js';
+$GLOBALS['page_needs_chart'] = true;
 layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_head.css');
 
 $pdo = getDBConnection();
@@ -136,7 +137,9 @@ $GLOBALS['dash_data'] = json_encode([
     <div class="dh-rec-header">
       <i class="bi bi-lightbulb"></i> Recommended Actions
       <span class="dh-rec-count"><?= count($topRecommendations) ?></span>
+      <?php if (currentUserHasAnyPermission(['reports.view'])): ?>
       <a href="<?= APP_BASE ?>/pages/analytics.php" class="dh-rec-viewall">Full Analytics</a>
+      <?php endif; ?>
     </div>
     <div class="dh-rec-list">
       <?php foreach ($topRecommendations as $rec):

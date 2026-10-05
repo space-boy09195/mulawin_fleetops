@@ -855,6 +855,53 @@ textarea {
 .status-badge.on-time     { background: var(--badge-available);   color: var(--badge-available-t); }
 
 /* ============================================================
+   SHARED FILTERS AND EMPTY STATES
+   ============================================================ */
+.filter-btn {
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.filter-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.filter-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.no-results,
+.disp-no-results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 3rem 1rem;
+  color: var(--bs-secondary-color);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.no-results i,
+.disp-no-results i {
+  font-size: 2rem;
+  opacity: 0.35;
+}
+
+/* ============================================================
    TABLES
    ============================================================ */
 .table-custom {
@@ -889,6 +936,29 @@ textarea {
 .table-custom tbody tr:hover td {
   background-color: var(--content-bg);
 }
+
+/* Shared recommendation severity treatment used by Analytics and the
+   Admin dashboard. The card layout itself remains dashboard-specific. */
+.dh-rec-high {
+  background: rgba(220, 53, 69, 0.04);
+}
+
+.dh-rec-medium {
+  background: rgba(230, 126, 0, 0.04);
+}
+
+.dh-rec-priority-high {
+  background: rgba(220, 53, 69, 0.15);
+  color: #b02a37;
+}
+
+.dh-rec-priority-medium {
+  background: rgba(230, 126, 0, 0.18);
+  color: #9a5500;
+}
+
+[data-theme="dark"] .dh-rec-priority-high { color: #f87171; }
+[data-theme="dark"] .dh-rec-priority-medium { color: #fbbf24; }
 
 /* ============================================================
    TRON ACCENT TREATMENT — authenticated pages

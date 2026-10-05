@@ -41,7 +41,7 @@ define('ROLE_LABELS', [
 // ---- Redirect targets per role after login ----------------
 define('ROLE_DASHBOARDS', [
     ROLE_ADMIN           => APP_BASE . '/pages/dashboard_head.php',
-    ROLE_DISPATCHER      => APP_BASE . '/pages/dashboard_dispatcher.php',
-    ROLE_MAINTENANCE     => APP_BASE . '/pages/dashboard_maintenance.php',
-    ROLE_ACCOUNTING      => APP_BASE . '/pages/dashboard_accounting.php',
+    ROLE_DISPATCHER      => APP_BASE . '/pages/dashboard.php',
+    ROLE_MAINTENANCE     => APP_BASE . '/pages/dashboard.php',
+    ROLE_ACCOUNTING      => APP_BASE . '/pages/dashboard.php',
 ]);

@@ -7,6 +7,7 @@ require_once __DIR__ . '/../includes/recommendations.php';
 requireRole([ROLE_ACCOUNTING]);
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard_accounting.js';
+$GLOBALS['page_needs_chart'] = true;
 layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_accounting.css');
 
 $pdo = getDBConnection();

@@ -7,6 +7,7 @@ require_once __DIR__ . '/../includes/recommendations.php';
 requirePermission('trips.view');
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/dashboard_dispatcher.js';
+$GLOBALS['page_needs_chart'] = true;
 layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_dispatcher.css');
 
 $pdo = getDBConnection();

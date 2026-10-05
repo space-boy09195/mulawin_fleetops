@@ -35,11 +35,20 @@ if ($visibilityScopes !== null) {
     if (currentUserHasAnyPermission(['legacy.role.3'])) $visibilityScopes[] = 'maintenance';
     if (currentUserHasAnyPermission(['legacy.role.4'])) $visibilityScopes[] = 'accounting';
 }
-$visibilityFilter = $visibilityScopes === null
-    ? ''
-    : "AND (d.visibility_scope = 'all' OR d.visibility_scope IN ("
-      . implode(',', array_fill(0, count($visibilityScopes), '?'))
-      . '))';
+$visibilityFilter = '';
+
+if ($visibilityScopes !== null) {
+    if ($visibilityScopes === []) {
+        $visibilityFilter = "AND d.visibility_scope = 'all'";
+    } else {
+        $placeholders = implode(',', array_fill(0, count($visibilityScopes), '?'));
+
+        $visibilityFilter = "AND (
+            d.visibility_scope = 'all'
+            OR d.visibility_scope IN ($placeholders)
+        )";
+    }
+}
 
 // ── All documents ─────────────────────────────────────────────────────────────
 $docsSql = "

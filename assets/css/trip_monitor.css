@@ -68,6 +68,8 @@ tr.row-late td {
 /* ---- Hidden rows (filter) -------------------------------- */
 tr.hidden-row { display: none; }
 
+#tripSearch { width: 220px; }
+
 /* ---- Dark mode form fixes -------------------------------- */
 [data-theme="dark"] .form-select,
 [data-theme="dark"] .form-control {
@@ -77,42 +79,3 @@ tr.hidden-row { display: none; }
 }
 
 [data-theme="dark"] .btn-close { filter: invert(1); }
-
-/* ---- Filter buttons (shared with fleet_status) ----------- */
-.filter-btn {
-  padding: 5px 14px;
-  border-radius: 20px;
-  border: 1px solid var(--card-border);
-  background: var(--card-bg);
-  color: var(--text-secondary);
-  font-size: 0.8rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-}
-
-.filter-btn:hover  { 
-  border-color: var(--accent); 
-  color: var(--accent-text); 
-}
-
-.filter-btn.active { 
-  background: var(--accent); 
-  border-color: var(--accent); 
-  color: #fff; font-weight: 600;
-}
-
-/* ── No filtered results ──────────────────────── */
-.no-results {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 3rem 1rem;
-  color: var(--text-muted);
-  font-size: 0.875rem;
-  text-align: center;
-}
-.no-results i { font-size: 2rem; opacity: 0.3; }

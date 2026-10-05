@@ -147,30 +147,34 @@ function requireAnyPermission(array $permissionKeys): void {
 }
 
 function currentUserHasAnyPermission(array $permissionKeys): bool {
-    static $requestCache = [];
+    // One query per request loads the role's full permission set, instead of
+    // one query per checked permission (the sidebar alone checks ~30).
+    static $roleKeysCache = [];
     $roleId = currentRoleId();
-    $cacheKey = $roleId . ':' . implode(',', $permissionKeys);
-    if (array_key_exists($cacheKey, $requestCache)) {
-        return $requestCache[$cacheKey];
+    if (!isset($roleKeysCache[$roleId])) {
+        require_once __DIR__ . '/../config/database.php';
+        try {
+            $stmt = getDBConnection()->prepare(
+                'SELECT p.permission_key
+                 FROM role_permissions rp
+                 JOIN permissions p ON p.permission_id = rp.permission_id
+                 WHERE rp.role_id = ?'
+            );
+            $stmt->execute([$roleId]);
+            $roleKeysCache[$roleId] = array_fill_keys($stmt->fetchAll(PDO::FETCH_COLUMN), true);
+        } catch (PDOException $e) {
+            error_log('Permission check failed: ' . $e->getMessage());
+            http_response_code(503);
+            exit('Access permissions are temporarily unavailable. Please try again later.');
+        }
     }
 
-    require_once __DIR__ . '/../config/database.php';
-    $placeholders = implode(',', array_fill(0, count($permissionKeys), '?'));
-    try {
-        $stmt = getDBConnection()->prepare(
-            "SELECT 1
-             FROM role_permissions rp
-             JOIN permissions p ON p.permission_id = rp.permission_id
-             WHERE rp.role_id = ? AND p.permission_key IN ($placeholders)
-             LIMIT 1"
-        );
-        $stmt->execute(array_merge([$roleId], $permissionKeys));
-        return $requestCache[$cacheKey] = (bool)$stmt->fetchColumn();
-    } catch (PDOException $e) {
-        error_log('Permission check failed: ' . $e->getMessage());
-        http_response_code(503);
-        exit('Access permissions are temporarily unavailable. Please try again later.');
+    foreach ($permissionKeys as $permissionKey) {
+        if (isset($roleKeysCache[$roleId][$permissionKey])) {
+            return true;
+        }
     }
+    return false;
 }
 
 function validatedLocalReturnPath(?string $candidate): ?string {
@@ -207,31 +211,11 @@ function currentRoleId(): int {
     return (int)($_SESSION['role_id'] ?? 0);
 }
 
+// Admin keeps the Admin dashboard; every other role (existing or created
+// later) shares the common, permission-driven dashboard.
 function dashboardUrlForRole(string $roleName, int $roleId): string {
-    $target = match ($roleName) {
-        'Admin', 'Head Management', 'Management / Head' => '/pages/dashboard_head.php',
-        'Operations Head' => '/pages/dashboard_operations_head.php',
-        'Dispatcher' => '/pages/dashboard_dispatcher.php',
-        'Car Carrier Dispatcher - Day',
-        'Car Carrier Dispatcher - Night',
-        'Container & Wing Van Dispatcher - Day',
-        'Container & Wing Van Dispatcher - Night' => '/pages/dispatch_inbox.php',
-        'Maintenance' => '/pages/dashboard_maintenance.php',
-        'Purchasing Officer' => '/pages/parts.php',
-        'Accounting' => '/pages/dashboard_accounting.php',
-        'Finance' => '/pages/trip_costs.php',
-        'Billing and Collection' => '/pages/billing.php',
-        'Payroll' => '/pages/payroll.php',
-        'Admin Officer' => '/pages/documents.php',
-        default => match ($roleId) {
-            ROLE_ADMIN => '/pages/dashboard_head.php',
-            ROLE_DISPATCHER => '/pages/dashboard_dispatcher.php',
-            ROLE_MAINTENANCE => '/pages/dashboard_maintenance.php',
-            ROLE_ACCOUNTING => '/pages/dashboard_accounting.php',
-            default => '/pages/403.php',
-        },
-    };
-    return APP_BASE . $target;
+    $isAdmin = $roleId === ROLE_ADMIN;
+    return APP_BASE . ($isAdmin ? '/pages/dashboard_head.php' : '/pages/dashboard.php');
 }
 
 // ============================================================

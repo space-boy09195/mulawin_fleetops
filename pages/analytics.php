@@ -16,6 +16,7 @@ $role   = currentRoleId();
 $isHead = $role === ROLE_HEAD_MANAGEMENT;
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/analytics.js';
+$GLOBALS['page_needs_chart'] = true;
 layoutHead('Analytics', APP_BASE . '/assets/css/analytics.css');
 
 $pdo = getDBConnection();

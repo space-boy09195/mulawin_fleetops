@@ -52,5 +52,15 @@ function getAnalyticsAlerts(PDO $pdo, array $metrics, string $periodLabel): arra
         return ($prio[$a['severity']] ?? 3) <=> ($prio[$b['severity']] ?? 3);
     });
 
+    // Never point a user at the Analytics page unless they may open it.
+    if (!currentUserHasAnyPermission(['reports.view'])) {
+        foreach ($alerts as &$alert) {
+            if (($alert['action_url'] ?? '') === '/pages/analytics.php') {
+                unset($alert['action_url']);
+            }
+        }
+        unset($alert);
+    }
+
     return $alerts;
 }

@@ -2,16 +2,7 @@
    assets/css/announcements.css
    ============================================================ */
 
-.ann-pin {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--accent-text);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
+.ann-full-item .ann-pin { font-size: 0.72rem; }
 
 /* ── Severity badge ──────────────────────────── */
 .ann-severity {
@@ -101,23 +92,17 @@
   white-space: pre-wrap;
 }
 
-.ann-meta {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
+.ann-full-item .ann-meta { font-size: 0.78rem; }
 
-.ann-delete-btn {
-  background: none;
+.ann-full-item .ann-delete-btn {
   border: 1px solid var(--card-border);
-  color: var(--text-muted);
-  cursor: pointer;
   padding: 6px 10px;
   border-radius: 6px;
   font-size: 0.9rem;
   transition: color 0.15s, background-color 0.15s, border-color 0.15s;
 }
 
-.ann-delete-btn:hover {
+.ann-full-item .ann-delete-btn:hover {
   color: #c62828;
   background: rgba(220,38,38,0.08);
   border-color: #fca5a5;
@@ -182,4 +167,4 @@
 .ann-severity-option-medium.ann-severity-option-selected { color: #fbbf24; }
 [data-theme="dark"] .ann-severity-option-low:has(input:checked),
 .ann-severity-option-low.ann-severity-option-selected { color: #4ade80; }
-[data-theme="dark"] .ann-delete-btn:hover { color: #f87171; }
+[data-theme="dark"] .ann-full-item .ann-delete-btn:hover { color: #f87171; }

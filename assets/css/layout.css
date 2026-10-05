@@ -978,8 +978,8 @@ textarea {
   box-shadow: var(--card-shadow);
 }
 
-.page-content .btn:not(.btn-close),
-.page-content button:not(.btn-close),
+.page-content .btn:not(.btn-close):not(.fleetops-search-select-option):not(.fleetops-search-select-toggle):not(.fleetops-search-select-clear),
+.page-content button:not(.btn-close):not(.fleetops-search-select-option):not(.fleetops-search-select-toggle):not(.fleetops-search-select-clear),
 .topnav .logout-btn,
 .theme-toggle-btn {
   text-shadow: 0 0 7px rgba(255, 239, 170, 0.42);
@@ -987,8 +987,8 @@ textarea {
               box-shadow var(--transition), color var(--transition), transform var(--transition);
 }
 
-.page-content .btn:hover:not(.btn-close),
-.page-content button:hover:not(.btn-close),
+.page-content .btn:hover:not(.btn-close):not(.fleetops-search-select-option):not(.fleetops-search-select-toggle):not(.fleetops-search-select-clear),
+.page-content button:hover:not(.btn-close):not(.fleetops-search-select-option):not(.fleetops-search-select-toggle):not(.fleetops-search-select-clear),
 .topnav .logout-btn:hover,
 .theme-toggle-btn:hover {
   box-shadow: var(--accent-hover-glow);
@@ -1029,37 +1029,31 @@ textarea {
 
 :root:not([data-theme="dark"]) .page-content .card,
 :root:not([data-theme="dark"]) .page-content .stat-card,
-:root:not([data-theme="dark"]) .page-content [class$="-card"],
-:root:not([data-theme="dark"]) .page-content [class$="-widget"],
-:root:not([data-theme="dark"]) .page-content [class$="-table-wrap"],
+:root:not([data-theme="dark"]) .page-content [class$="-card"]:not(button):not(a):not(input),
+:root:not([data-theme="dark"]) .page-content [class$="-widget"]:not(button):not(a):not(input),
+:root:not([data-theme="dark"]) .page-content [class$="-table-wrap"]:not(button):not(a):not(input),
 :root:not([data-theme="dark"]) .page-content .modal-content {
   outline: 1px solid rgba(23, 35, 27, 0.06);
 }
 
 :root:not([data-theme="dark"]) .page-content .card,
-:root:not([data-theme="dark"]) .page-content [class$="-widget"],
-:root:not([data-theme="dark"]) .page-content [class$="-table-wrap"] {
+:root:not([data-theme="dark"]) .page-content [class$="-widget"]:not(button):not(a):not(input),
+:root:not([data-theme="dark"]) .page-content [class$="-table-wrap"]:not(button):not(a):not(input) {
   background-image: linear-gradient(145deg, rgba(255,255,255,0.98), rgba(242,246,243,0.82));
 }
 
-:root:not([data-theme="dark"]) .page-content .card:hover,
-:root:not([data-theme="dark"]) .page-content [class$="-card"]:hover,
-:root:not([data-theme="dark"]) .page-content [class$="-widget"]:hover {
-  transform: translateY(-2px);
-}
-
 :root:not([data-theme="dark"]) .page-content .card-header-custom,
-:root:not([data-theme="dark"]) .page-content [class$="-widget-header"] {
+:root:not([data-theme="dark"]) .page-content [class$="-widget-header"]:not(button):not(a):not(input) {
   background: linear-gradient(90deg, rgba(14, 74, 38, 0.07), rgba(199, 140, 0, 0.08)) !important;
 }
 
-:root:not([data-theme="dark"]) .page-content .btn:not(.btn-close),
-:root:not([data-theme="dark"]) .page-content button:not(.btn-close) {
+:root:not([data-theme="dark"]) .page-content .btn:not(.btn-close):not(.fleetops-search-select-option):not(.fleetops-search-select-toggle):not(.fleetops-search-select-clear),
+:root:not([data-theme="dark"]) .page-content button:not(.btn-close):not(.fleetops-search-select-option):not(.fleetops-search-select-toggle):not(.fleetops-search-select-clear) {
   box-shadow: 0 4px 12px rgba(14, 74, 38, 0.12);
 }
 
-:root:not([data-theme="dark"]) .page-content .btn:hover:not(.btn-close),
-:root:not([data-theme="dark"]) .page-content button:hover:not(.btn-close) {
+:root:not([data-theme="dark"]) .page-content .btn:hover:not(.btn-close):not(.fleetops-search-select-option):not(.fleetops-search-select-toggle):not(.fleetops-search-select-clear),
+:root:not([data-theme="dark"]) .page-content button:hover:not(.btn-close):not(.fleetops-search-select-option):not(.fleetops-search-select-toggle):not(.fleetops-search-select-clear) {
   box-shadow: 0 6px 16px rgba(14, 74, 38, 0.18), 0 0 10px rgba(199, 140, 0, 0.14);
 }
 
@@ -1072,11 +1066,11 @@ textarea {
 }
 
 /* Page-specific legacy surfaces inherit the shared palette. */
-[class$="-page"] [class$="-header"],
-[class$="-page"] [class$="-table-wrap"],
-[class$="-page"] [class$="-card"],
-[class$="-page"] [class$="-widget"],
-[class$="-page"] [class$="-doc-card"] {
+[class$="-page"] [class$="-header"]:not(button):not(a):not(input),
+[class$="-page"] [class$="-table-wrap"]:not(button):not(a):not(input),
+[class$="-page"] [class$="-card"]:not(button):not(a):not(input),
+[class$="-page"] [class$="-widget"]:not(button):not(a):not(input),
+[class$="-page"] [class$="-doc-card"]:not(button):not(a):not(input) {
   background: var(--card-bg) !important;
   border-color: var(--card-border) !important;
   box-shadow: var(--card-shadow) !important;
@@ -1106,23 +1100,23 @@ textarea {
   box-shadow: none !important;
 }
 
-[class$="-page"] [class$="-title"],
-[class$="-page"] [class$="-widget-title"],
-[class$="-page"] [class$="-card-value"],
-[class$="-page"] [class$="-kpi-value"] {
+[class$="-page"] [class$="-title"]:not(button):not(a):not(input),
+[class$="-page"] [class$="-widget-title"]:not(button):not(a):not(input),
+[class$="-page"] [class$="-card-value"]:not(button):not(a):not(input),
+[class$="-page"] [class$="-kpi-value"]:not(button):not(a):not(input) {
   color: var(--text-primary) !important;
   text-shadow: var(--accent-text-glow);
 }
 
-[class$="-page"] [class$="-subtitle"],
-[class$="-page"] [class$="-card-label"],
-[class$="-page"] [class$="-kpi-label"],
-[class$="-page"] [class$="-kpi-sub"] {
+[class$="-page"] [class$="-subtitle"]:not(button):not(a):not(input),
+[class$="-page"] [class$="-card-label"]:not(button):not(a):not(input),
+[class$="-page"] [class$="-kpi-label"]:not(button):not(a):not(input),
+[class$="-page"] [class$="-kpi-sub"]:not(button):not(a):not(input) {
   color: var(--text-secondary) !important;
 }
 
-[class$="-page"] [class$="-primary"],
-[class$="-page"] [class*="-primary"] {
+[class$="-page"] :is(button, a, input)[class$="-primary"],
+[class$="-page"] :is(button, a, input)[class*="-primary"] {
   background: var(--accent) !important;
   border-color: var(--accent-dark) !important;
   color: #fff !important;
@@ -1130,29 +1124,29 @@ textarea {
   text-shadow: 0 0 8px rgba(255, 239, 170, 0.55);
 }
 
-[class$="-page"] [class$="-primary"]:hover,
-[class$="-page"] [class*="-primary"]:hover {
+[class$="-page"] :is(button, a, input)[class$="-primary"]:hover,
+[class$="-page"] :is(button, a, input)[class*="-primary"]:hover {
   background: var(--accent-dark) !important;
   box-shadow: var(--accent-hover-glow) !important;
 }
 
-[class$="-page"] [class$="-tab"].active,
-[class$="-page"] [class$="-tab"][aria-selected="true"] {
+[class$="-page"] [class$="-tab"]:not(button):not(a):not(input).active,
+[class$="-page"] [class$="-tab"]:not(button):not(a):not(input)[aria-selected="true"] {
   color: var(--accent-text) !important;
   border-bottom-color: var(--accent) !important;
   text-shadow: var(--accent-text-glow);
 }
 
-[class$="-page"] [class$="-filter-select"],
-[class$="-page"] [class$="-filter-search"],
-[class$="-page"] [class$="-period-select"] {
+[class$="-page"] [class$="-filter-select"]:not(button):not(a),
+[class$="-page"] [class$="-filter-search"]:not(button):not(a),
+[class$="-page"] [class$="-period-select"]:not(button):not(a) {
   background-color: var(--input-bg) !important;
   border-color: var(--input-border) !important;
   color: var(--text-primary) !important;
 }
 
 [class$="-page"] [class$="-table"] thead th,
-[class$="-page"] [class$="-widget-header"] {
+[class$="-page"] [class$="-widget-header"]:not(button):not(a):not(input) {
   background: rgba(180, 122, 0, 0.09) !important;
   color: var(--text-secondary) !important;
   border-color: var(--card-border) !important;
@@ -1164,9 +1158,9 @@ textarea {
 }
 
 [class$="-page"] [class$="-table"] tbody tr:hover,
-[class$="-page"] [class$="-card"]:hover,
-[class$="-page"] [class$="-doc-card"]:hover,
-[class$="-page"] [class$="-widget"]:hover {
+[class$="-page"] [class$="-card"]:not(button):not(a):not(input):hover,
+[class$="-page"] [class$="-doc-card"]:not(button):not(a):not(input):hover,
+[class$="-page"] [class$="-widget"]:not(button):not(a):not(input):hover {
   border-color: var(--accent) !important;
   box-shadow: var(--accent-hover-glow) !important;
 }
@@ -1174,23 +1168,23 @@ textarea {
 /* Consistent soft corners across authenticated page surfaces. */
 .page-content .card,
 .page-content .stat-card,
-.page-content [class$="-card"],
-.page-content [class$="-widget"],
-.page-content [class$="-table-wrap"],
-.page-content [class$="-modal-content"],
+.page-content [class$="-card"]:not(button):not(a):not(input),
+.page-content [class$="-widget"]:not(button):not(a):not(input),
+.page-content [class$="-table-wrap"]:not(button):not(a):not(input),
+.page-content [class$="-modal-content"]:not(button):not(a):not(input),
 .page-content .table-responsive,
 .page-content .form-control,
 .page-content .form-select,
 .page-content .input-group-text,
-.page-content .btn:not(.btn-close),
-.page-content button:not(.btn-close),
+.page-content .btn:not(.btn-close):not(.fleetops-search-select-option):not(.fleetops-search-select-toggle):not(.fleetops-search-select-clear),
+.page-content button:not(.btn-close):not(.fleetops-search-select-option):not(.fleetops-search-select-toggle):not(.fleetops-search-select-clear),
 .page-content .alert,
 .page-content .modal-content {
   border-radius: var(--radius);
 }
 
-.page-content [class$="-header"],
-.page-content [class$="-widget-header"] {
+.page-content [class$="-header"]:not(button):not(a):not(input),
+.page-content [class$="-widget-header"]:not(button):not(a):not(input) {
   border-radius: var(--radius) var(--radius) 0 0;
 }
 
@@ -1200,12 +1194,6 @@ textarea {
   .topnav .logout-btn,
   .theme-toggle-btn {
     transition: none;
-  }
-
-  :root:not([data-theme="dark"]) .page-content .card:hover,
-  :root:not([data-theme="dark"]) .page-content [class$="-card"]:hover,
-  :root:not([data-theme="dark"]) .page-content [class$="-widget"]:hover {
-    transform: none;
   }
 }
 
@@ -1377,6 +1365,215 @@ textarea {
   align-items: center;
   justify-content: center;
   line-height: 1;
+}
+
+/* Searchable filter selects keep the native select as the form value source. */
+.page-content .fleetops-search-select {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.page-content .fleetops-search-select:focus-within {
+  z-index: 1090;
+}
+
+.fleetops-search-select-control {
+  display: flex;
+  min-width: 0;
+}
+
+.page-content .fleetops-search-select-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.fleetops-search-select-control:not(.has-clear) .fleetops-search-select-input {
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.fleetops-search-select-toggle,
+.fleetops-search-select-clear {
+  flex: 0 0 auto;
+  min-width: 2.75rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.fleetops-search-select-toggle {
+  border-left: 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.fleetops-search-select-control.has-clear .fleetops-search-select-toggle {
+  border-radius: 0;
+}
+
+.fleetops-search-select-clear {
+  min-width: 3.75rem;
+  border-left: 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.fleetops-search-select-toggle:hover,
+.fleetops-search-select-clear:hover {
+  background: var(--content-bg);
+  color: var(--text-primary);
+}
+
+.fleetops-search-select-toggle:focus-visible,
+.fleetops-search-select-clear:focus-visible,
+.fleetops-search-select-option:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.fleetops-search-select-options {
+  position: absolute;
+  inset: calc(100% + 0.25rem) 0 auto;
+  z-index: 1090;
+  max-height: min(18rem, 45vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--card-border);
+  border-radius: 0.625rem;
+  background: var(--card-bg);
+  box-shadow: var(--card-shadow);
+}
+
+.fleetops-search-select-options[hidden] {
+  display: none;
+}
+
+.fleetops-search-select-option {
+  display: block;
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.55rem 0.75rem;
+  border: 0;
+  border-bottom: 1px solid var(--card-border);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.fleetops-search-select-option:last-child {
+  border-bottom: 0;
+}
+
+.fleetops-search-select-option:hover,
+.fleetops-search-select-option.active {
+  background: var(--content-bg);
+  color: var(--text-primary);
+}
+
+.fleetops-search-select-option:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.fleetops-search-select-empty {
+  padding: 0.75rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.fleetops-search-select-native[hidden] {
+  display: none !important;
+}
+
+/* Reusable containment hooks for notes, previews, and future attachment lists. */
+.content-scroll,
+.attachment-zone,
+.attachment-list {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.content-scroll,
+.attachment-list {
+  max-height: min(20rem, 50vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.attachment-list {
+  overflow-wrap: anywhere;
+}
+
+.attachment-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.attachment-item > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.attachment-zone img,
+.attachment-item img {
+  display: block;
+  max-width: 100%;
+  max-height: min(20rem, 50vh);
+  object-fit: contain;
+}
+
+.text-truncate-safe {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-content {
+  min-width: 0;
+}
+
+.page-content .app-table-scroll th,
+.page-content .app-table-scroll td {
+  padding: 0.7rem 1rem;
+  line-height: 1.45;
+}
+
+.page-content .app-table-scroll td:not(.table-actions-column) {
+  overflow-wrap: anywhere;
+}
+
+.page-content .app-table-scroll .table-actions-column {
+  min-width: 7rem;
+}
+
+@media (max-width: 576px) {
+  .fleetops-search-select-options {
+    max-height: min(14rem, 40vh);
+  }
+
+  .page-content .app-table-scroll th,
+  .page-content .app-table-scroll td {
+    padding: 0.6rem 0.75rem;
+  }
+
+  .attachment-item {
+    flex-wrap: wrap;
+  }
 }
 
 /* ============================================================

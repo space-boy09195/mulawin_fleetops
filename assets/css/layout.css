@@ -1494,6 +1494,21 @@ textarea {
   display: none !important;
 }
 
+input[type="search"].fleetops-search-select-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+input[type="search"].fleetops-search-select-input::-ms-clear {
+  display: none;
+}
+
+.usr-pw-wrap input[type="password"]::-ms-reveal,
+input[type="password"]#password::-ms-reveal {
+  display: none;
+}
+
 /* Reusable containment hooks for notes, previews, and future attachment lists. */
 .content-scroll,
 .attachment-zone,
@@ -1573,6 +1588,107 @@ textarea {
 
   .attachment-item {
     flex-wrap: wrap;
+  }
+}
+
+/* Accounting summary and zero states use the same compact card rhythm. */
+.bil-page .bil-cards {
+  align-items: stretch;
+}
+
+.bil-page .bil-card {
+  display: flex;
+  min-height: 6.25rem;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 1.1rem 1.25rem;
+}
+
+.bil-page .bil-card-value {
+  margin-bottom: 0;
+  line-height: 1.15;
+}
+
+.bil-page .bil-card-label {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.bil-page > .row.g-3.mb-4 {
+  align-items: stretch;
+}
+
+.bil-page > .row.g-3.mb-4 > [class*="col-"] {
+  display: flex;
+}
+
+.bil-page > .row.g-3.mb-4 .bil-table-wrap {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}
+
+.bil-page > .row.g-3.mb-4 .bil-table-wrap > .d-flex {
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem !important;
+  padding: 1rem 1.1rem 0.75rem;
+  margin-bottom: 0 !important;
+}
+
+.bil-page > .row.g-3.mb-4 .bil-table-wrap > .d-flex h2 {
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.bil-page > .row.g-3.mb-4 .bil-table-wrap > .d-flex .text-muted {
+  font-size: 0.82rem;
+}
+
+.bil-page > .row.g-3.mb-4 .bil-table-wrap > .table-responsive {
+  border-top: 1px solid var(--bs-border-color);
+}
+
+.bil-page > .row.g-3.mb-4 .bil-table thead th {
+  padding: 0.8rem 1.1rem;
+  line-height: 1.4;
+}
+
+.bil-page > .row.g-3.mb-4 .bil-table tbody td {
+  padding: 0.85rem 1.1rem;
+  line-height: 1.45;
+}
+
+.bil-page > .row.g-3.mb-4 .bil-table-wrap > p.text-muted {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 8rem;
+  place-content: center;
+  margin: 0.75rem 1.1rem 1.1rem;
+  padding: 1.25rem;
+  border: 1px dashed var(--bs-border-color);
+  border-radius: 0.75rem;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+@media (max-width: 576px) {
+  .bil-page > .row.g-3.mb-4 .bil-table-wrap > .d-flex {
+    padding: 0.9rem 0.85rem 0.7rem;
+  }
+
+  .bil-page > .row.g-3.mb-4 .bil-table thead th,
+  .bil-page > .row.g-3.mb-4 .bil-table tbody td {
+    padding-right: 0.85rem;
+    padding-left: 0.85rem;
+  }
+
+  .bil-page > .row.g-3.mb-4 .bil-table-wrap > p.text-muted {
+    margin-right: 0.85rem;
+    margin-left: 0.85rem;
   }
 }
 

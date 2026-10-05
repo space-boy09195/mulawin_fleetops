@@ -52,12 +52,13 @@
 /* Stat cards */
 .dh-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 205px), 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
 
 .dh-stat-card {
+  display: block;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: 12px;
@@ -115,15 +116,43 @@
   color: #d95757;
 }
 
+.dh-stat-link {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.dh-stat-link:hover {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.dh-stat-icon {
+  color: var(--accent-text);
+  font-size: 1.15rem;
+  margin-bottom: 0.5rem;
+}
+
+.dh-stat-icon.green { color: #27834b; }
+.dh-stat-icon.blue { color: #3e72a9; }
+.dh-stat-icon.amber { color: #a56d00; }
+.dh-stat-icon.red { color: #bb4545; }
+
 /* Grid */
 .dh-grid {
   display: grid;
-  grid-template-columns: 1fr 340px;
-  grid-template-rows: auto auto;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
   gap: 1.1rem;
 }
 
+.dh-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 1.1rem;
+  margin-top: 1.1rem;
+}
+
 .dh-widget {
+  min-width: 0;
   background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: 12px;
@@ -132,10 +161,115 @@
   transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
 }
 
+.dh-eyebrow {
+  margin: 0 0 0.3rem;
+  color: var(--accent-text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .dh-widget-alerts {
   grid-column: 1;
   grid-row: 1 / 3;
 }
+
+.dh-alert-list,
+.dh-audit-list {
+  margin: 0;
+  padding: 0.2rem 1rem;
+  list-style: none;
+}
+
+.dh-alert-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.dh-alert-list li:last-child,
+.dh-audit-list li:last-child {
+  border-bottom: 0;
+}
+
+.dh-alert-list li > span:last-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.dh-alert-list strong,
+.dh-audit-list strong {
+  color: var(--text-primary);
+  font-size: 0.83rem;
+}
+
+.dh-alert-list small,
+.dh-audit-list span,
+.dh-audit-list time {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.dh-alert-dot {
+  flex: 0 0 auto;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-top: 0.3rem;
+  border-radius: 50%;
+  background: #4b88bd;
+}
+
+.dh-alert-warning { background: #d7a62a; }
+.dh-alert-danger { background: #d95757; }
+.dh-alert-info { background: #4b88bd; }
+
+.dh-audit-list li {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.dh-audit-list time {
+  font-size: 0.7rem;
+}
+
+.dh-attendance-body {
+  padding: 0.2rem 1rem 1rem;
+}
+
+.dh-attendance-body p {
+  color: var(--text-primary);
+}
+
+.dh-attendance-body .dh-muted,
+.dh-attendance-days {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.dh-attendance-days {
+  margin: 0.8rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--card-border);
+}
+
+.dh-attendance-feedback {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+}
+
+.dh-attendance-feedback:empty { display: none; }
+.dh-attendance-feedback.is-success { color: #27834b; }
+.dh-attendance-feedback.is-error { color: #bb4545; }
+
+.dh-legend-dot-0 { background: #d7a62a; }
+.dh-legend-dot-1 { background: #2f9e5b; }
+.dh-legend-dot-2 { background: #d95757; }
+.dh-legend-dot-3 { background: #8fa596; }
 
 .dh-widget-chart {
   grid-column: 2;
@@ -532,9 +666,7 @@
 }
 
 @media (max-width: 1100px) {
-  .dh-grid {
-    grid-template-columns: 1fr;
-  }
+  .dh-grid { grid-template-columns: minmax(0, 1fr); }
   .dh-widget-alerts,
   .dh-widget-chart,
   .dh-widget-donut {
@@ -548,8 +680,15 @@
     padding: 1.25rem 1rem;
   }
   .dh-stats {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
   }
+}
+
+@media (max-width: 600px) {
+  .dh-header { align-items: flex-start; flex-direction: column; }
+  .dh-rec-card { align-items: flex-start; }
+  .dh-rec-action { margin-left: auto; }
+  .dh-table { min-width: 560px; }
 }
 
 

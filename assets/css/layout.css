@@ -1147,9 +1147,13 @@ textarea {
 
 [class$="-page"] [class$="-table"] thead th,
 [class$="-page"] [class$="-widget-header"]:not(button):not(a):not(input) {
-  background: rgba(180, 122, 0, 0.09) !important;
+  background: var(--card-bg) !important;
   color: var(--text-secondary) !important;
   border-color: var(--card-border) !important;
+}
+
+[class$="-page"] [class$="-table"] thead th {
+  box-shadow: inset 0 -1px 0 var(--card-border);
 }
 
 [class$="-page"] [class$="-table"] tbody td {
@@ -1240,12 +1244,17 @@ textarea {
   width: max-content;
   min-width: 100%;
   margin-bottom: 0;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .page-content .app-table-scroll thead th {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 5;
+  background: var(--card-bg);
+  background-clip: padding-box;
+  box-shadow: inset 0 -1px 0 var(--card-border);
 }
 
 .page-content .app-table-scroll .table-actions-column {
@@ -1380,13 +1389,16 @@ textarea {
 
 .fleetops-search-select-control {
   display: flex;
+  align-items: stretch;
   min-width: 0;
+  min-height: 2.5rem;
 }
 
 .page-content .fleetops-search-select-input {
   flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
+  min-height: 2.5rem;
   border-radius: var(--radius) 0 0 var(--radius);
 }
 
@@ -1397,13 +1409,17 @@ textarea {
 .fleetops-search-select-toggle,
 .fleetops-search-select-clear {
   flex: 0 0 auto;
-  min-width: 2.75rem;
-  padding: 0 0.75rem;
+  min-width: 4.5rem;
+  min-height: 2.5rem;
+  padding: 0 0.85rem;
   border: 1px solid var(--input-border);
   background: var(--input-bg);
   color: var(--text-secondary);
   font: inherit;
   font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .fleetops-search-select-toggle {
@@ -1416,7 +1432,7 @@ textarea {
 }
 
 .fleetops-search-select-clear {
-  min-width: 3.75rem;
+  min-width: 4rem;
   border-left: 0;
   border-radius: 0 var(--radius) var(--radius) 0;
 }
@@ -1433,7 +1449,7 @@ textarea {
   position: relative;
   z-index: 1;
   outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  outline-offset: -3px;
 }
 
 .fleetops-search-select-options {

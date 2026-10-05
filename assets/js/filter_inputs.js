@@ -121,7 +121,7 @@
       toggle.setAttribute('aria-label', `Show ${accessibleName.toLowerCase()} options`);
       toggle.setAttribute('aria-controls', listId);
       toggle.setAttribute('aria-expanded', 'false');
-      toggle.textContent = '▾';
+      toggle.textContent = 'Options';
 
       control.append(input, toggle);
 
@@ -186,6 +186,10 @@
         list.hidden = !expanded;
         input.setAttribute('aria-expanded', String(expanded));
         toggle.setAttribute('aria-expanded', String(expanded));
+        toggle.setAttribute(
+          'aria-label',
+          `${expanded ? 'Hide' : 'Show'} ${accessibleName.toLowerCase()} options`
+        );
       }
 
       function selectEntry(entry) {

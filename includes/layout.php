@@ -65,10 +65,10 @@ function currentUserHasActiveEmployee(): bool {
         return $linked;
     }
     $stmt = getDBConnection()->prepare(
-        'SELECT 1 FROM employees WHERE user_id = ? AND is_active = 1 LIMIT 1'
+        'SELECT COUNT(*) FROM employees WHERE user_id = ? AND is_active = 1'
     );
     $stmt->execute([currentUserId()]);
-    return $linked = (bool)$stmt->fetchColumn();
+    return $linked = (int)$stmt->fetchColumn() === 1;
 }
 
 // ---- User initials for avatar ----------------------------

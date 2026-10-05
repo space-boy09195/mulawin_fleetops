@@ -4,29 +4,53 @@ require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/reporting.php';
 
+requireLogin();
+
 $pdo = getDBConnection();
 $canViewAll = currentUserHasAnyPermission(['hr.attendance.view']);
 $canManage = currentUserHasAnyPermission(['hr.attendance.manage']);
 $canReport = currentUserHasAnyPermission(['hr.attendance.report']);
-$linkedEmployee = $pdo->prepare('SELECT employee_id, full_name FROM employees WHERE user_id = ? AND is_active = 1');
+$linkedEmployee = $pdo->prepare(
+    'SELECT employee_id, full_name
+     FROM employees
+     WHERE user_id = ? AND is_active = 1
+     ORDER BY employee_id'
+);
 $linkedEmployee->execute([currentUserId()]);
-$linkedEmployee = $linkedEmployee->fetch(PDO::FETCH_ASSOC) ?: null;
+$linkedEmployees = $linkedEmployee->fetchAll(PDO::FETCH_ASSOC);
+$linkedEmployee = count($linkedEmployees) === 1 ? $linkedEmployees[0] : null;
+if (count($linkedEmployees) > 1) {
+    error_log('Multiple active employee profiles are linked to user_id ' . currentUserId() . '.');
+}
 if (!$canViewAll && !$linkedEmployee) {
-    requirePermission('hr.attendance.view');
+    http_response_code(409);
+    exit(
+        'Attendance requires exactly one active employee record linked to your account. '
+        . 'Ask HR or an administrator to correct the employee link.'
+    );
 }
 $clock = null;
+$clockStale = false;
 if ($linkedEmployee) {
     $clockStmt = $pdo->prepare(
-        'SELECT time_in, time_out, overtime_minutes, overtime_reason
+        'SELECT attendance_date, time_in, time_out, overtime_minutes, overtime_reason
          FROM employee_attendance
-         WHERE employee_id = ? AND attendance_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND CURDATE()
-         ORDER BY (time_out IS NULL) DESC, attendance_date DESC LIMIT 1'
+         WHERE employee_id = ? AND (
+             attendance_date = ? OR
+             (time_in IS NOT NULL AND time_out IS NULL)
+         )
+         ORDER BY (time_in IS NOT NULL AND time_out IS NULL) DESC, attendance_date DESC LIMIT 1'
     );
-    $clockStmt->execute([(int)$linkedEmployee['employee_id']]);
+    $clockStmt->execute([
+        (int)$linkedEmployee['employee_id'],
+        date('Y-m-d'),
+    ]);
     $clock = $clockStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    $clockStale = $clock && $clock['time_in'] && !$clock['time_out']
+        && (time() - strtotime($clock['attendance_date'] . ' ' . $clock['time_in'])) > 16 * 3600;
 }
 $date = $_GET['date'] ?? date('Y-m-d');
-if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+if (!is_string($date) || !isValidDate($date)) {
     $date = date('Y-m-d');
 }
 $employees = $canViewAll
@@ -41,10 +65,13 @@ $employees = $canViewAll
         'position' => '',
     ]] : []);
 $attendance = $pdo->prepare(
-    'SELECT ea.employee_id, ea.status, ea.time_in, ea.time_out, ea.notes
-     FROM employee_attendance ea WHERE ea.attendance_date = ?'
+    'SELECT ea.employee_id, ea.status, ea.time_in, ea.time_out, ea.notes, ea.overtime_reason
+     FROM employee_attendance ea
+     WHERE ea.attendance_date = ?' . (!$canViewAll ? ' AND ea.employee_id = ?' : '')
 );
-$attendance->execute([$date]);
+$attendance->execute($canViewAll
+    ? [$date]
+    : [$date, (int)$linkedEmployee['employee_id']]);
 $attendanceByEmployee = [];
 foreach ($attendance->fetchAll(PDO::FETCH_ASSOC) as $row) {
     $attendanceByEmployee[(int)$row['employee_id']] = $row;
@@ -89,10 +116,17 @@ layoutHead('Attendance');
   <form method="get" class="d-flex gap-2"><input class="form-control" type="date" name="date" value="<?= htmlspecialchars($date) ?>"><button class="btn btn-outline-secondary">View date</button></form>
 </div>
 <div id="attendanceFeedback" class="alert d-none" role="alert"></div>
+<?php if (!$linkedEmployee && $canViewAll): ?>
+<div class="alert alert-warning" role="status">
+  No unique active employee profile is linked to system account #<?= currentUserId() ?>.
+  Link its existing employee record before using personal timekeeping.
+</div>
+<?php endif; ?>
 <?php if ($linkedEmployee): ?>
 <div class="card mb-4"><div class="card-header-custom"><h2 class="card-title-custom">My time clock</h2></div><div class="card-body-custom d-flex align-items-center gap-3 flex-wrap">
 <span><?= htmlspecialchars($linkedEmployee['full_name']) ?></span>
-<?php if (!$clock || !$clock['time_in']): ?><button type="button" class="btn btn-primary" id="clockInButton">Clock in</button>
+<?php if ($clockStale): ?><span class="text-danger">Earlier attendance record (<?= htmlspecialchars($clock['attendance_date']) ?>, Time In <?= htmlspecialchars(substr($clock['time_in'], 0, 5)) ?>) is still open and past the 16-hour limit. Clock in is blocked until HR or an administrator adds its Time Out.</span>
+<?php elseif (!$clock || !$clock['time_in']): ?><button type="button" class="btn btn-primary" id="clockInButton">Clock in</button>
 <?php elseif (!$clock['time_out']): ?><button type="button" class="btn btn-outline-primary" id="clockOutButton">Clock out</button>
 <?php else: ?><span class="text-muted">Clocked in <?= htmlspecialchars(substr($clock['time_in'], 0, 5)) ?> and out <?= htmlspecialchars(substr($clock['time_out'], 0, 5)) ?>.</span><?php endif; ?>
 <span class="small text-muted">Regular shift: 8 hours. Maximum recorded shift: 16 hours. Overtime requires a reason.</span>
@@ -139,12 +173,24 @@ layoutHead('Attendance');
 <?php endif; ?>
 <?php if ($canManage || $linkedEmployee): ?><script>
 const sendAttendance = async (data) => {
-  const response = await fetch('<?= APP_BASE ?>/ajax/attendance_handler.php', {method:'POST', body:data});
-  const result = await response.json();
   const feedback = document.getElementById('attendanceFeedback');
-  feedback.textContent = result.message || 'Request completed.';
-  feedback.className = `alert alert-${result.success ? 'success' : 'danger'}`;
-  if (result.success) setTimeout(() => window.location.reload(), 500);
+  try {
+    const response = await fetch('<?= APP_BASE ?>/ajax/attendance_handler.php', {
+      method: 'POST',
+      body: data,
+      headers: { Accept: 'application/json' }
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || 'Attendance could not be updated.');
+    }
+    feedback.textContent = result.message || 'Attendance updated.';
+    feedback.className = 'alert alert-success';
+    setTimeout(() => window.location.reload(), 500);
+  } catch (error) {
+    feedback.textContent = error.message || 'Attendance could not be updated. Please try again.';
+    feedback.className = 'alert alert-danger';
+  }
 };
 document.getElementById('clockInButton')?.addEventListener('click', () => sendAttendance(new URLSearchParams({action:'clock_in', [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN})));
 document.getElementById('clockOutButton')?.addEventListener('click', () => {

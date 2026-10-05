@@ -187,6 +187,37 @@ try {
           WHERE trip_id = :id"
     )->execute([':status' => $status, ':status2' => $status, ':id' => $tripId]);
 
+    if ($status === 'Completed') {
+        $completionReports = $pdo->prepare(
+            "SELECT report_id
+             FROM trip_completion_reports
+             WHERE trip_id = ? AND status = 'Pending'
+             FOR UPDATE"
+        );
+        $completionReports->execute([$tripId]);
+        $pendingReports = $completionReports->fetchAll(PDO::FETCH_COLUMN);
+        if ($pendingReports) {
+            $acknowledge = $pdo->prepare(
+                "UPDATE trip_completion_reports
+                 SET status = 'Acknowledged', reviewed_by = ?, reviewed_at = NOW(),
+                     reviewer_note = 'Official trip completion recorded.'
+                 WHERE report_id = ? AND status = 'Pending'"
+            );
+            foreach ($pendingReports as $reportId) {
+                $acknowledge->execute([currentUserId(), (int)$reportId]);
+                if ($acknowledge->rowCount() === 1) {
+                    auditLog(
+                        'ACKNOWLEDGE_TRIP_COMPLETION_REPORT',
+                        'trip_completion_reports',
+                        (int)$reportId,
+                        ['status' => 'Pending'],
+                        ['status' => 'Acknowledged', 'reviewed_by' => currentUserId()]
+                    );
+                }
+            }
+        }
+    }
+
     if (in_array($status, ['Completed', 'Cancelled'], true)) {
         $truckLock = $pdo->prepare('SELECT status FROM trucks WHERE truck_id = ? FOR UPDATE');
         $truckLock->execute([(int)$tripRow['truck_id']]);

@@ -25,6 +25,11 @@
   color: var(--text-secondary);
 }
 
+.fleet-dash-header .fleet-dash-employee-meta {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
 .fleet-dash-header .fleet-dash-eyebrow {
   margin: 0 0 0.25rem;
   color: var(--accent-text);
@@ -345,4 +350,142 @@
 @media (prefers-reduced-motion: reduce) {
   .fleet-dash-kpi { transition: none; }
   .fleet-dash-kpi:hover { transform: none; }
+}
+
+
+/* Driver assignment / completion */
+.fleet-dash-assignment-panel {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--card-border));
+}
+.fleet-dash-live {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  color: #27834b;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.fleet-dash-live i { font-size: .42rem; }
+.fleet-dash-assignment {
+  display: grid;
+  gap: .9rem;
+}
+.fleet-dash-assignment-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+}
+.fleet-dash-kicker {
+  display: block;
+  color: var(--text-muted);
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 700;
+}
+.fleet-dash-assignment-main strong {
+  display: block;
+  margin-top: .12rem;
+  color: var(--text-primary);
+  font-size: 1.18rem;
+}
+.fleet-dash-assignment-route {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto minmax(0,1fr);
+  align-items: center;
+  gap: .65rem;
+  padding: .85rem;
+  border: 1px solid var(--card-border);
+  border-radius: .8rem;
+  background: var(--content-bg);
+}
+.fleet-dash-assignment-route span {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: .82rem;
+  font-weight: 650;
+}
+.fleet-dash-assignment-route span i {
+  color: var(--accent-text);
+  flex-shrink: 0;
+}
+.fleet-dash-assignment-route > i { color: var(--text-muted); }
+.fleet-dash-assignment-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .65rem 1rem;
+  color: var(--text-secondary);
+  font-size: .76rem;
+}
+.fleet-dash-assignment-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+}
+.fleet-dash-assignment-meta i { color: var(--accent-text); }
+.fleet-dash-complete-btn {
+  justify-self: start;
+  min-width: 13rem;
+}
+.fleet-dash-action-note {
+  margin: -.45rem 0 0;
+  color: var(--text-muted);
+  font-size: .72rem;
+}
+.fleet-dash-completion-reported {
+  display: flex;
+  gap: .7rem;
+  align-items: flex-start;
+  padding: .8rem;
+  border: 1px solid rgba(47,158,91,.28);
+  border-radius: .8rem;
+  background: rgba(47,158,91,.08);
+}
+.fleet-dash-completion-reported > i {
+  color: #27834b;
+  font-size: 1.1rem;
+  margin-top: .1rem;
+}
+.fleet-dash-completion-reported div {
+  display: grid;
+  gap: .15rem;
+}
+.fleet-dash-completion-reported strong {
+  color: var(--text-primary);
+  font-size: .82rem;
+}
+.fleet-dash-completion-reported span,
+.fleet-dash-completion-reported small {
+  color: var(--text-secondary);
+  font-size: .74rem;
+  line-height: 1.4;
+}
+.fleet-dash-completion-reported small { color: var(--text-muted); }
+.fleet-dash-assignment-empty {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  min-height: 5rem;
+}
+.fleet-dash-assignment-empty i { color: var(--text-muted); font-size: 1.2rem; }
+
+.fleet-dash-attendance .btn {
+  min-width: 7rem;
+}
+.fleet-dash-feedback.is-pending { color: var(--accent-text); }
+
+@media (max-width: 600px) {
+  .fleet-dash-assignment-route {
+    grid-template-columns: 1fr;
+    gap: .45rem;
+  }
+  .fleet-dash-assignment-route > i { display: none; }
+  .fleet-dash-assignment-main { align-items: flex-start; }
+  .fleet-dash-complete-btn { width: 100%; }
 }

@@ -701,3 +701,27 @@
 [data-theme="dark"] .dh-sev-info { color: #60a5fa; }
 [data-theme="dark"] .dh-rec-count { color: #60a5fa; }
 [data-theme="dark"] .dh-rec-medium { color: #e67e00; }
+
+
+/* Diagnostic alerts sit beside Fleet Status so operational signals are visible
+   without pushing them into a separate page. */
+.dh-chart-grid-secondary {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: stretch;
+}
+.dh-widget-alerts {
+  min-height: 100%;
+}
+.dh-widget-alerts .dh-alert-list {
+  max-height: 18rem;
+  overflow: auto;
+  padding-right: .15rem;
+}
+.dh-widget-alerts .dh-empty {
+  min-height: 14rem;
+}
+@media (max-width: 900px) {
+  .dh-chart-grid-secondary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

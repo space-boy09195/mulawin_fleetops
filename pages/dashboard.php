@@ -3,6 +3,8 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/dispatcher_scope.php';
+require_once __DIR__ . '/../includes/employee_profile.php';
+require_once __DIR__ . '/../includes/trip_completion.php';
 
 requireLogin();
 
@@ -178,33 +180,46 @@ if ($canApprovals) {
 
 $stats = array_slice($stats, 0, 5);
 
-$linkedQuery = $pdo->prepare(
-    'SELECT employee_id, full_name, position FROM employees WHERE user_id = ? AND is_active = 1 LIMIT 1'
-);
-$linkedQuery->execute([currentUserId()]);
-$employee = $linkedQuery->fetch(PDO::FETCH_ASSOC) ?: null;
+$employeeLookupFailed = false;
+try {
+    $employee = employeeForCurrentUser($pdo);
+} catch (PDOException $e) {
+    error_log('Dashboard employee lookup failed: ' . $e->getMessage());
+    $employee = null;
+    $employeeLookupFailed = true;
+}
 
 $attendance = null;
+$attendanceStale = false;
 $attendanceDays = null;
 $personalTrips = null;
 $personalTripSummary = null;
+$currentAssignment = null;
 if ($employee) {
     $attendanceQuery = $pdo->prepare(
         'SELECT attendance_date, status, time_in, time_out, overtime_minutes
          FROM employee_attendance
-         WHERE employee_id = ? AND attendance_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND CURDATE()
-         ORDER BY (time_out IS NULL) DESC, attendance_date DESC LIMIT 1'
+         WHERE employee_id = ? AND (
+             attendance_date = ? OR
+             (time_in IS NOT NULL AND time_out IS NULL)
+         )
+         ORDER BY (time_in IS NOT NULL AND time_out IS NULL) DESC, attendance_date DESC LIMIT 1'
     );
-    $attendanceQuery->execute([(int)$employee['employee_id']]);
+    $attendanceQuery->execute([
+        (int)$employee['employee_id'],
+        date('Y-m-d'),
+    ]);
     $attendance = $attendanceQuery->fetch(PDO::FETCH_ASSOC) ?: null;
+    $attendanceStale = $attendance && $attendance['time_in'] && !$attendance['time_out']
+        && (time() - strtotime($attendance['attendance_date'] . ' ' . $attendance['time_in'])) > 16 * 3600;
 
     $attendanceDaysQuery = $pdo->prepare(
         "SELECT COUNT(DISTINCT attendance_date)
          FROM employee_attendance
-         WHERE employee_id = ? AND attendance_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+         WHERE employee_id = ? AND attendance_date >= ?
            AND status IN ('Present','On Duty')"
     );
-    $attendanceDaysQuery->execute([(int)$employee['employee_id']]);
+    $attendanceDaysQuery->execute([(int)$employee['employee_id'], date('Y-m-01')]);
     $attendanceDays = (int)$attendanceDaysQuery->fetchColumn();
 
     $employeeId = (int)$employee['employee_id'];
@@ -238,6 +253,34 @@ if ($employee) {
         $row['on_time'] = (int)($row['on_time'] ?? 0);
         return $row;
     });
+
+    if (preg_match('/driver/i', (string)$employee['position'])) {
+        $currentAssignment = fleetDashboardQuery(static function () use ($pdo, $employeeId): ?array {
+            $stmt = $pdo->prepare(
+                "SELECT t.trip_id, t.trip_number, t.status, t.expected_arrival, t.is_late,
+                        dr.client_name, dr.scheduled_at,
+                        r.origin, r.destination, tr.plate_number,
+                        ccr.report_id, ccr.reported_at, ccr.status AS completion_report_status
+                 FROM dispatch_requests dr
+                 JOIN trips t ON t.dispatch_id = dr.dispatch_id
+                 JOIN routes r ON r.route_id = dr.route_id
+                 JOIN trucks tr ON tr.truck_id = dr.truck_id
+                 WHERE (dr.driver_id = ? OR dr.second_driver_id = ?)
+                   AND t.status NOT IN ('Completed','Cancelled')
+                 ORDER BY COALESCE(dr.scheduled_at, t.created_at) ASC, t.trip_id ASC
+                 LIMIT 1"
+            );
+            $stmt->execute([$employeeId, $employeeId]);
+            $assignment = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            if ($assignment) {
+                $report = findActiveTripCompletionReport($pdo, (int)$assignment['trip_id']);
+                $assignment['report_id'] = $report['report_id'] ?? null;
+                $assignment['reported_at'] = $report['reported_at'] ?? null;
+                $assignment['completion_report_status'] = $report['status'] ?? null;
+            }
+            return $assignment;
+        });
+    }
 }
 
 $recentTrips = [];
@@ -260,9 +303,10 @@ if ($canTrips && (!$employee || !preg_match('/driver|helper/i', (string)$employe
 
 $personalActivity = fleetDashboardQuery(static function () use ($pdo): array {
     $stmt = $pdo->prepare(
-        'SELECT action, table_name, logged_at
-         FROM audit_logs WHERE user_id = ?
-         ORDER BY logged_at DESC LIMIT 5'
+        "SELECT action, table_name, logged_at
+         FROM audit_logs
+         WHERE user_id = ? AND action NOT IN ('LOGIN', 'LOGOUT')
+         ORDER BY logged_at DESC LIMIT 5"
     );
     $stmt->execute([currentUserId()]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -288,9 +332,15 @@ layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard.css');
 <div class="fleet-dash">
   <header class="fleet-dash-header">
     <div>
-      <p class="fleet-dash-eyebrow"><?= htmlspecialchars($roleName) ?> dashboard</p>
+      <p class="fleet-dash-eyebrow">Employee dashboard · System role: <?= htmlspecialchars($roleName) ?></p>
       <h1><?= htmlspecialchars($greeting . ($fullName !== '' ? ', ' . $fullName : '')) ?></h1>
       <p><?= htmlspecialchars($subtitle) ?></p>
+      <?php if ($employee): ?>
+      <p class="fleet-dash-employee-meta">
+        Position: <?= htmlspecialchars($employee['position']) ?>
+        · Employment type: <?= htmlspecialchars($employee['employment_type']) ?>
+      </p>
+      <?php endif; ?>
     </div>
     <time datetime="<?= htmlspecialchars(date('Y-m-d')) ?>"><?= date('l, F j, Y') ?></time>
   </header>
@@ -311,19 +361,28 @@ layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard.css');
     <article class="fleet-dash-panel fleet-dash-attendance">
       <div class="fleet-dash-panel-heading">
         <div><span class="fleet-dash-panel-icon"><i class="bi bi-clock-history"></i></span><h2>My Attendance</h2></div>
-        <?php if ($employee): ?><a href="<?= APP_BASE ?>/pages/attendance.php">Attendance details</a><?php endif; ?>
+        <a href="<?= APP_BASE ?>/pages/attendance.php">Attendance details</a>
       </div>
       <?php if (!$employee): ?>
-        <p class="fleet-dash-empty">Attendance isn't assigned to this account.</p>
+        <p class="fleet-dash-empty" role="status"><?php if ($employeeLookupFailed): ?>
+          Employee profile data is temporarily unavailable. Please try again later.
+        <?php else: ?>
+          No unique active employee record is linked to system account #<?= currentUserId() ?>.
+          Ask HR or an administrator to link the existing employee record; this page does not create employee data.
+        <?php endif; ?></p>
       <?php else: ?>
         <div id="dashboardAttendance" data-dashboard-attendance data-feedback="attendanceFeedback" data-elapsed="dashboardElapsed"
              data-start="<?= $attendance && $attendance['time_in'] && !$attendance['time_out'] ? (int)(strtotime($attendance['attendance_date'] . ' ' . $attendance['time_in']) * 1000) : '' ?>">
-          <?php if (!$attendance || !$attendance['time_in'] || ($attendance['attendance_date'] !== date('Y-m-d') && $attendance['time_out'])): ?>
-            <p class="fleet-dash-attendance-state">No attendance record for today.</p>
+          <div data-attendance-display>
+          <?php if ($attendanceStale): ?>
+            <p class="fleet-dash-attendance-state text-danger" data-attendance-state>Earlier attendance record is still open.</p>
+            <p class="fleet-dash-attendance-note" data-attendance-note>Your Time In on <strong><?= htmlspecialchars($attendance['attendance_date']) ?></strong> at <?= htmlspecialchars(date('g:i A', strtotime($attendance['time_in']))) ?> has no Time Out and is past the 16-hour shift limit. Time In is blocked until HR or an administrator corrects that record.</p>
+          <?php elseif (!$attendance || !$attendance['time_in'] || ($attendance['attendance_date'] !== date('Y-m-d') && $attendance['time_out'])): ?>
+            <p class="fleet-dash-attendance-state" data-attendance-state>No attendance record for today.</p>
             <button class="btn btn-primary" type="button" data-attendance-action="clock_in">Time In</button>
           <?php elseif (!$attendance['time_out']): ?>
-            <p class="fleet-dash-attendance-state">Timed in at <strong><?= htmlspecialchars(date('g:i A', strtotime($attendance['time_in']))) ?></strong></p>
-            <p class="fleet-dash-attendance-note">Your shift is in progress <span id="dashboardElapsed"></span>.</p>
+            <p class="fleet-dash-attendance-state" data-attendance-state>Timed in at <strong><?= htmlspecialchars(date('g:i A', strtotime($attendance['time_in']))) ?></strong></p>
+            <p class="fleet-dash-attendance-note" data-attendance-note>Your shift is in progress <span id="dashboardElapsed"></span>.</p>
             <button class="btn btn-outline-primary" type="button" data-attendance-action="clock_out">Time Out</button>
           <?php else: ?>
             <?php
@@ -331,16 +390,64 @@ layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard.css');
               $end = strtotime($attendance['attendance_date'] . ' ' . $attendance['time_out']);
               if ($end < $start) $end += 86400;
             ?>
-            <p class="fleet-dash-attendance-state">Timed in <strong><?= htmlspecialchars(date('g:i A', $start)) ?></strong> &middot; timed out <strong><?= htmlspecialchars(date('g:i A', $end)) ?></strong></p>
-            <p class="fleet-dash-attendance-note">Worked <?= (int)floor(($end - $start) / 3600) ?>h <?= (int)(floor(($end - $start) / 60) % 60) ?>m today.</p>
+            <p class="fleet-dash-attendance-state" data-attendance-state>Timed in <strong><?= htmlspecialchars(date('g:i A', $start)) ?></strong> &middot; timed out <strong><?= htmlspecialchars(date('g:i A', $end)) ?></strong></p>
+            <p class="fleet-dash-attendance-note" data-attendance-note>Worked <?= (int)floor(($end - $start) / 3600) ?>h <?= (int)(floor(($end - $start) / 60) % 60) ?>m today.</p>
           <?php endif; ?>
-          <p class="fleet-dash-attendance-month"><?= $attendanceDays ?> recorded work day<?= $attendanceDays === 1 ? '' : 's' ?> this month</p>
+          </div>
+          <p class="fleet-dash-attendance-month" data-attendance-days><?= $attendanceDays ?> recorded work day<?= $attendanceDays === 1 ? '' : 's' ?> this month</p>
           <div id="attendanceFeedback" class="fleet-dash-feedback" role="status" aria-live="polite"></div>
         </div>
       <?php endif; ?>
     </article>
 
-    <?php if ($employee && preg_match('/driver|helper/i', (string)$employee['position'])): ?>
+    <?php if ($employee && preg_match('/driver/i', (string)$employee['position'])): ?>
+    <article class="fleet-dash-panel fleet-dash-assignment-panel">
+      <div class="fleet-dash-panel-heading">
+        <div><span class="fleet-dash-panel-icon"><i class="bi bi-signpost-2"></i></span><h2>My Current Assignment</h2></div>
+        <?php if ($currentAssignment): ?><span class="fleet-dash-live"><i class="bi bi-circle-fill"></i> Active</span><?php endif; ?>
+      </div>
+      <?php if ($currentAssignment): ?>
+        <div class="fleet-dash-assignment">
+          <div class="fleet-dash-assignment-main">
+            <div>
+              <span class="fleet-dash-kicker">Trip</span>
+              <strong><?= htmlspecialchars($currentAssignment['trip_number']) ?></strong>
+            </div>
+            <span class="fleet-dash-status"><?= htmlspecialchars($currentAssignment['status']) ?><?= (int)$currentAssignment['is_late'] === 1 ? ' · Late' : '' ?></span>
+          </div>
+          <div class="fleet-dash-assignment-route">
+            <span><i class="bi bi-geo-alt"></i><?= htmlspecialchars($currentAssignment['origin']) ?></span>
+            <i class="bi bi-arrow-right"></i>
+            <span><i class="bi bi-flag"></i><?= htmlspecialchars($currentAssignment['destination']) ?></span>
+          </div>
+          <div class="fleet-dash-assignment-meta">
+            <?php if (!empty($currentAssignment['client_name'])): ?><span><i class="bi bi-building"></i><?= htmlspecialchars($currentAssignment['client_name']) ?></span><?php endif; ?>
+            <span><i class="bi bi-truck"></i><?= htmlspecialchars($currentAssignment['plate_number']) ?></span>
+            <?php if (!empty($currentAssignment['scheduled_at'])): ?><span><i class="bi bi-calendar-event"></i> Scheduled <?= htmlspecialchars(date('M j, g:i A', strtotime($currentAssignment['scheduled_at']))) ?></span><?php endif; ?>
+            <?php if (!empty($currentAssignment['expected_arrival'])): ?><span><i class="bi bi-clock"></i> ETA <?= htmlspecialchars(date('M j, g:i A', strtotime($currentAssignment['expected_arrival']))) ?></span><?php endif; ?>
+          </div>
+          <?php if (!empty($currentAssignment['report_id'])): ?>
+            <div class="fleet-dash-completion-reported">
+              <i class="bi bi-check2-circle"></i>
+              <div><strong>Completion Reported</strong><span>Operations has been notified. The trip still needs its official post-trip completion.</span>
+                <small>Reported <?= htmlspecialchars(date('M j, g:i A', strtotime($currentAssignment['reported_at']))) ?></small>
+              </div>
+            </div>
+          <?php else: ?>
+            <button type="button" class="btn btn-primary fleet-dash-complete-btn" data-report-trip-completed
+                    data-trip-id="<?= (int)$currentAssignment['trip_id'] ?>"
+                    data-trip-number="<?= htmlspecialchars($currentAssignment['trip_number'], ENT_QUOTES) ?>">
+              <i class="bi bi-check2-circle me-1"></i> Report Trip Completed
+            </button>
+            <p class="fleet-dash-action-note">This notifies the post-trip recorder. It does not change the official trip status.</p>
+          <?php endif; ?>
+          <div id="tripCompletionFeedback" class="fleet-dash-feedback" role="status" aria-live="polite"></div>
+        </div>
+      <?php else: ?>
+        <div class="fleet-dash-empty fleet-dash-assignment-empty"><i class="bi bi-truck"></i><span>No active trip is assigned to you right now.</span></div>
+      <?php endif; ?>
+    </article>
+
     <article class="fleet-dash-panel">
       <div class="fleet-dash-panel-heading">
         <div><span class="fleet-dash-panel-icon"><i class="bi bi-truck"></i></span><h2>My Work Summary</h2></div>
@@ -424,7 +531,8 @@ layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard.css');
   <?php endif; ?>
 </div>
 
-<?php if ($employee): ?>
 <script src="<?= APP_BASE ?>/assets/js/dashboard_attendance.js?v=<?= (int)filemtime(__DIR__ . '/../assets/js/dashboard_attendance.js') ?>"></script>
+<?php if ($employee && preg_match('/driver/i', (string)$employee['position']) && $currentAssignment): ?>
+<script src="<?= APP_BASE ?>/assets/js/dashboard_trip_completion.js?v=<?= (int)filemtime(__DIR__ . '/../assets/js/dashboard_trip_completion.js') ?>"></script>
 <?php endif; ?>
 <?php layoutFoot(); ?>

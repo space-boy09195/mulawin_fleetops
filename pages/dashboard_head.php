@@ -3,6 +3,7 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/recommendations.php';
+require_once __DIR__ . '/../includes/employee_profile.php';
 
 requirePermission('company.dashboard.view');
 
@@ -205,28 +206,41 @@ foreach ($recommendationSources as $source) {
 usort($recommendations, static fn($a, $b) => ($a['priority'] === 'high' ? 0 : 1) <=> ($b['priority'] === 'high' ? 0 : 1));
 $recommendations = array_slice($recommendations, 0, 6);
 
-$linkedQuery = $pdo->prepare(
-    'SELECT employee_id FROM employees WHERE user_id = ? AND is_active = 1 LIMIT 1'
-);
-$linkedQuery->execute([currentUserId()]);
-$employeeId = (int)($linkedQuery->fetchColumn() ?: 0);
+$employeeLookupFailed = false;
+try {
+    $employee = employeeForCurrentUser($pdo);
+} catch (PDOException $e) {
+    error_log('Admin dashboard employee lookup failed: ' . $e->getMessage());
+    $employee = null;
+    $employeeLookupFailed = true;
+}
+$employeeId = (int)($employee['employee_id'] ?? 0);
 $attendance = null;
+$attendanceStale = false;
 $attendanceDays = null;
 if ($employeeId > 0) {
     $attendanceQuery = $pdo->prepare(
         'SELECT attendance_date, time_in, time_out
          FROM employee_attendance
-         WHERE employee_id = ? AND attendance_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 1 DAY) AND CURDATE()
-         ORDER BY (time_out IS NULL) DESC, attendance_date DESC LIMIT 1'
+         WHERE employee_id = ? AND (
+             attendance_date = ? OR
+             (time_in IS NOT NULL AND time_out IS NULL)
+         )
+         ORDER BY (time_in IS NOT NULL AND time_out IS NULL) DESC, attendance_date DESC LIMIT 1'
     );
-    $attendanceQuery->execute([$employeeId]);
+    $attendanceQuery->execute([
+        $employeeId,
+        date('Y-m-d'),
+    ]);
     $attendance = $attendanceQuery->fetch(PDO::FETCH_ASSOC) ?: null;
+    $attendanceStale = $attendance && $attendance['time_in'] && !$attendance['time_out']
+        && (time() - strtotime($attendance['attendance_date'] . ' ' . $attendance['time_in'])) > 16 * 3600;
     $daysQuery = $pdo->prepare(
         "SELECT COUNT(DISTINCT attendance_date) FROM employee_attendance
-         WHERE employee_id = ? AND attendance_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+         WHERE employee_id = ? AND attendance_date >= ?
            AND status IN ('Present','On Duty')"
     );
-    $daysQuery->execute([$employeeId]);
+    $daysQuery->execute([$employeeId, date('Y-m-01')]);
     $attendanceDays = (int)$daysQuery->fetchColumn();
 }
 
@@ -326,38 +340,32 @@ layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_head.css');
   <?php endif; ?>
 
   <section class="dh-grid">
-    <article class="dh-widget dh-widget-main">
-      <div class="dh-widget-header"><span class="dh-widget-title"><i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Important Items</span>
-        <?php if ($canIncidents): ?><a href="<?= APP_BASE ?>/pages/incidents.php" class="dh-link">Incidents</a><?php endif; ?>
-      </div>
-      <?php if (!$alerts && $alertsAvailable): ?><div class="dh-empty"><i class="bi bi-shield-check"></i><span>No items require attention.</span></div>
-      <?php elseif (!$alerts): ?><div class="dh-empty"><i class="bi bi-info-circle"></i><span>Some dashboard data is temporarily unavailable.</span></div>
-      <?php else: ?><ul class="dh-alert-list">
-        <?php foreach (array_slice($alerts, 0, 8) as $alert): ?>
-        <li><span class="dh-alert-dot dh-alert-<?= htmlspecialchars($alert['tone']) ?>"></span><span><strong><?= htmlspecialchars($alert['label']) ?></strong><small><?= htmlspecialchars($alert['detail']) ?></small></span></li>
-        <?php endforeach; ?>
-      </ul><?php endif; ?>
-    </article>
-
     <article class="dh-widget dh-widget-attendance">
       <div class="dh-widget-header"><span class="dh-widget-title"><i class="bi bi-clock-history me-2"></i>My Attendance</span>
         <?php if ($employeeId > 0): ?><a href="<?= APP_BASE ?>/pages/attendance.php" class="dh-link">Details</a><?php endif; ?>
       </div>
-      <?php if ($employeeId === 0): ?><div class="dh-empty"><span>Attendance isn't assigned to this account.</span></div>
+      <?php if ($employeeId === 0): ?><div class="dh-empty"><span><?= $employeeLookupFailed
+          ? 'Employee profile data is temporarily unavailable. Please try again later.'
+          : 'No unique active employee record is linked to system account #' . currentUserId() . '. Ask HR or an administrator to link the existing employee record; this page does not create employee data.' ?></span></div>
       <?php else: ?>
         <div id="adminDashboardAttendance" class="dh-attendance-body" data-dashboard-attendance data-feedback="adminAttendanceFeedback" data-elapsed="adminDashboardElapsed"
              data-start="<?= $attendance && $attendance['time_in'] && !$attendance['time_out'] ? (int)(strtotime($attendance['attendance_date'] . ' ' . $attendance['time_in']) * 1000) : '' ?>">
-          <?php if (!$attendance || !$attendance['time_in'] || ($attendance['attendance_date'] !== date('Y-m-d') && $attendance['time_out'])): ?>
-            <p>No attendance record for today.</p><button type="button" class="btn btn-primary" data-attendance-action="clock_in">Time In</button>
+          <div data-attendance-display>
+          <?php if ($attendanceStale): ?>
+            <p class="text-danger" data-attendance-state>Earlier attendance record is still open.</p>
+            <p class="dh-muted" data-attendance-note>Your Time In on <strong><?= htmlspecialchars($attendance['attendance_date']) ?></strong> at <?= htmlspecialchars(date('g:i A', strtotime($attendance['time_in']))) ?> has no Time Out and is past the 16-hour shift limit. Time In is blocked until HR or an administrator corrects that record.</p>
+          <?php elseif (!$attendance || !$attendance['time_in'] || ($attendance['attendance_date'] !== date('Y-m-d') && $attendance['time_out'])): ?>
+            <p data-attendance-state>No attendance record for today.</p><button type="button" class="btn btn-primary" data-attendance-action="clock_in">Time In</button>
           <?php elseif (!$attendance['time_out']): ?>
-            <p>Timed in at <strong><?= htmlspecialchars(date('g:i A', strtotime($attendance['time_in']))) ?></strong></p>
-            <p class="dh-muted">Shift in progress <span id="adminDashboardElapsed"></span></p><button type="button" class="btn btn-outline-primary" data-attendance-action="clock_out">Time Out</button>
+            <p data-attendance-state>Timed in at <strong><?= htmlspecialchars(date('g:i A', strtotime($attendance['time_in']))) ?></strong></p>
+            <p class="dh-muted" data-attendance-note>Shift in progress <span id="adminDashboardElapsed"></span></p><button type="button" class="btn btn-outline-primary" data-attendance-action="clock_out">Time Out</button>
           <?php else: ?>
             <?php $start = strtotime($attendance['attendance_date'] . ' ' . $attendance['time_in']); $end = strtotime($attendance['attendance_date'] . ' ' . $attendance['time_out']); if ($end < $start) $end += 86400; ?>
-            <p>Timed in <strong><?= htmlspecialchars(date('g:i A', $start)) ?></strong>, out <strong><?= htmlspecialchars(date('g:i A', $end)) ?></strong></p>
-            <p class="dh-muted">Worked <?= (int)floor(($end - $start) / 3600) ?>h <?= (int)(floor(($end - $start) / 60) % 60) ?>m</p>
+            <p data-attendance-state>Timed in <strong><?= htmlspecialchars(date('g:i A', $start)) ?></strong>, out <strong><?= htmlspecialchars(date('g:i A', $end)) ?></strong></p>
+            <p class="dh-muted" data-attendance-note>Worked <?= (int)floor(($end - $start) / 3600) ?>h <?= (int)(floor(($end - $start) / 60) % 60) ?>m</p>
           <?php endif; ?>
-          <p class="dh-attendance-days"><?= $attendanceDays ?> recorded work day<?= $attendanceDays === 1 ? '' : 's' ?> this month</p>
+          </div>
+          <p class="dh-attendance-days" data-attendance-days><?= $attendanceDays ?> recorded work day<?= $attendanceDays === 1 ? '' : 's' ?> this month</p>
           <div id="adminAttendanceFeedback" class="dh-attendance-feedback" role="status" aria-live="polite"></div>
         </div>
       <?php endif; ?>
@@ -387,17 +395,41 @@ layoutHead('Dashboard', APP_BASE . '/assets/css/dashboard_head.css');
     <?php endif; ?>
   </section>
 
-  <?php if (isset($charts['trend']) || isset($charts['donut'])): ?>
-  <section class="dh-chart-grid">
-    <?php if (isset($charts['trend'])): ?><article class="dh-widget">
-      <div class="dh-widget-header"><span class="dh-widget-title"><i class="bi bi-graph-up me-2"></i>Trip Trends · 14 Days</span></div><div class="dh-chart-wrap"><canvas id="tripTrendChart"></canvas></div>
-    </article><?php endif; ?>
+  <?php if (isset($charts['trend'])): ?>
+  <section class="dh-chart-grid dh-chart-grid-trend">
+    <article class="dh-widget">
+      <div class="dh-widget-header"><span class="dh-widget-title"><i class="bi bi-graph-up me-2"></i>Trip Trends · 14 Days</span></div>
+      <div class="dh-chart-wrap"><canvas id="tripTrendChart"></canvas></div>
+    </article>
+  </section>
+  <?php endif; ?>
+
+  <?php if (isset($charts['donut']) || $canTrips || $canIncidents || $canParts || $canMaintenance || $canBilling): ?>
+  <section class="dh-chart-grid dh-chart-grid-secondary">
     <?php if (isset($charts['donut'])): ?><article class="dh-widget">
       <div class="dh-widget-header"><span class="dh-widget-title"><i class="bi bi-pie-chart-fill me-2"></i>Fleet Status</span></div>
       <div class="dh-donut-wrap"><div class="dh-donut-canvas-wrap"><canvas id="fleetDonutChart"></canvas><div class="dh-donut-center"><span class="dh-donut-total"><?= array_sum($charts['donut']['data']) ?></span><span class="dh-donut-label">Trucks</span></div></div>
         <div class="dh-donut-legend"><?php foreach ($charts['donut']['labels'] as $i => $label): ?><div class="dh-legend-item"><span class="dh-legend-dot dh-legend-dot-<?= $i ?>"></span><span class="dh-legend-label"><?= htmlspecialchars($label) ?></span><span class="dh-legend-val"><?= (int)$charts['donut']['data'][$i] ?></span></div><?php endforeach; ?></div>
       </div>
     </article><?php endif; ?>
+
+    <article class="dh-widget dh-widget-alerts">
+      <div class="dh-widget-header">
+        <span class="dh-widget-title"><i class="bi bi-radar me-2"></i>Diagnostic Alerts</span>
+        <?php if ($canIncidents): ?><a href="<?= APP_BASE ?>/pages/incidents.php" class="dh-link">Incidents</a><?php endif; ?>
+      </div>
+      <?php if (!$alerts && $alertsAvailable): ?>
+        <div class="dh-empty"><i class="bi bi-shield-check"></i><span>No diagnostic alerts right now.</span></div>
+      <?php elseif (!$alerts): ?>
+        <div class="dh-empty"><i class="bi bi-info-circle"></i><span>Some diagnostic data is temporarily unavailable.</span></div>
+      <?php else: ?>
+        <ul class="dh-alert-list">
+          <?php foreach (array_slice($alerts, 0, 8) as $alert): ?>
+          <li><span class="dh-alert-dot dh-alert-<?= htmlspecialchars($alert['tone']) ?>"></span><span><strong><?= htmlspecialchars($alert['label']) ?></strong><small><?= htmlspecialchars($alert['detail']) ?></small></span></li>
+          <?php endforeach; ?>
+        </ul>
+      <?php endif; ?>
+    </article>
   </section>
   <?php endif; ?>
 </div>

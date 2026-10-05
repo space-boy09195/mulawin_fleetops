@@ -22,7 +22,10 @@ function csrfInput(): string {
 function validateCsrfToken(): bool {
     $submitted = $_POST[CSRF_TOKEN_NAME] ?? '';
     $stored    = $_SESSION[CSRF_TOKEN_NAME] ?? '';
-    return !empty($stored) && hash_equals($stored, $submitted);
+    return is_string($stored)
+        && $stored !== ''
+        && is_string($submitted)
+        && hash_equals($stored, $submitted);
 }
 
 // ---- Abort with 403 if CSRF check fails --------------------

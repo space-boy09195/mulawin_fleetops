@@ -7,6 +7,19 @@
 
 require_once __DIR__ . '/../config/app.php';
 
+function isJsonRequest(): bool {
+    $accept = strtolower((string)($_SERVER['HTTP_ACCEPT'] ?? ''));
+    $requestedWith = strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? ''));
+    return str_contains($accept, 'application/json') || $requestedWith === 'xmlhttprequest';
+}
+
+function sendJsonAccessResponse(int $status, string $message): never {
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => false, 'message' => $message]);
+    exit;
+}
+
 // Harden session cookie before session_start()
 session_name(SESSION_NAME);
 
@@ -37,6 +50,9 @@ if (isset($_SESSION['last_activity'])) {
         $returnTo = validatedLocalReturnPath($_SERVER['REQUEST_URI'] ?? null);
         session_unset();
         session_destroy();
+        if (isJsonRequest()) {
+            sendJsonAccessResponse(401, 'Your session expired. Sign in again and retry.');
+        }
         $loginUrl = APP_BASE . '/login.php?reason=timeout';
         if ($returnTo !== null) {
             $loginUrl .= '&return_to=' . rawurlencode($returnTo);
@@ -69,6 +85,9 @@ function isLoggedIn(): bool {
 // ============================================================
 function requireLogin(): void {
     if (!isLoggedIn()) {
+        if (isJsonRequest()) {
+            sendJsonAccessResponse(401, 'Authentication is required.');
+        }
         $loginUrl = APP_BASE . '/login.php';
         $returnTo = validatedLocalReturnPath($_SERVER['REQUEST_URI'] ?? null);
         if ($returnTo !== null) {
@@ -93,6 +112,9 @@ function requireLogin(): void {
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         error_log('Session account validation failed: ' . $e->getMessage());
+        if (isJsonRequest()) {
+            sendJsonAccessResponse(503, 'Account status is temporarily unavailable. Please try again later.');
+        }
         http_response_code(503);
         exit('Account status is temporarily unavailable. Please try again later.');
     }
@@ -104,6 +126,9 @@ function requireLogin(): void {
         || (int)$user['auth_version'] !== (int)$_SESSION['auth_version']) {
         session_unset();
         session_destroy();
+        if (isJsonRequest()) {
+            sendJsonAccessResponse(401, 'Your account session is no longer valid. Sign in again.');
+        }
         header('Location: ' . APP_BASE . '/login.php?reason=revoked');
         exit;
     }
@@ -122,6 +147,9 @@ function requireRole(array $allowedRoles): void {
         array_values(array_filter($allowedRoles, 'is_int'))
     );
     if (!$permissionKeys || !currentUserHasAnyPermission($permissionKeys)) {
+        if (isJsonRequest()) {
+            sendJsonAccessResponse(403, 'You do not have permission to perform this action.');
+        }
         http_response_code(403);
         include __DIR__ . '/../pages/403.php';
         exit;
@@ -131,6 +159,9 @@ function requireRole(array $allowedRoles): void {
 function requirePermission(string $permissionKey): void {
     requireLogin();
     if (!currentUserHasAnyPermission([$permissionKey])) {
+        if (isJsonRequest()) {
+            sendJsonAccessResponse(403, 'You do not have permission to perform this action.');
+        }
         http_response_code(403);
         include __DIR__ . '/../pages/403.php';
         exit;
@@ -140,6 +171,9 @@ function requirePermission(string $permissionKey): void {
 function requireAnyPermission(array $permissionKeys): void {
     requireLogin();
     if (!$permissionKeys || !currentUserHasAnyPermission($permissionKeys)) {
+        if (isJsonRequest()) {
+            sendJsonAccessResponse(403, 'You do not have permission to perform this action.');
+        }
         http_response_code(403);
         include __DIR__ . '/../pages/403.php';
         exit;
@@ -164,6 +198,9 @@ function currentUserHasAnyPermission(array $permissionKeys): bool {
             $roleKeysCache[$roleId] = array_fill_keys($stmt->fetchAll(PDO::FETCH_COLUMN), true);
         } catch (PDOException $e) {
             error_log('Permission check failed: ' . $e->getMessage());
+            if (isJsonRequest()) {
+                sendJsonAccessResponse(503, 'Access permissions are temporarily unavailable. Please try again later.');
+            }
             http_response_code(503);
             exit('Access permissions are temporarily unavailable. Please try again later.');
         }

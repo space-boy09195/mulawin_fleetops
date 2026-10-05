@@ -87,7 +87,7 @@ $alertCount  = count($alerts);
   <div class="usr-header d-flex align-items-center justify-content-between mb-4">
     <div>
       <h1 class="usr-title mb-0">Users &amp; Employees</h1>
-      <p class="usr-subtitle mb-0">System accounts and field staff management</p>
+      <p class="usr-subtitle mb-0">Assign each system user a role here; Role &amp; Permission Management defines what that role can do.</p>
     </div>
   </div>
 

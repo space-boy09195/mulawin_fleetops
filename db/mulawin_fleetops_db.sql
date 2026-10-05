@@ -1908,6 +1908,12 @@ ALTER TABLE employee_attendance
   ADD COLUMN IF NOT EXISTS overtime_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS overtime_reason VARCHAR(255) NULL;
 
+-- At most one open shift (time_in set, time_out NULL) per employee across all dates.
+ALTER TABLE employee_attendance
+  ADD COLUMN IF NOT EXISTS open_shift_employee_id INT UNSIGNED
+    GENERATED ALWAYS AS (CASE WHEN time_in IS NOT NULL AND time_out IS NULL THEN employee_id ELSE NULL END) VIRTUAL,
+  ADD UNIQUE INDEX IF NOT EXISTS uq_employee_attendance_single_open (open_shift_employee_id);
+
 INSERT IGNORE INTO role_permissions (role_id, permission_id)
 SELECT r.role_id, p.permission_id
 FROM roles r
@@ -2538,3 +2544,83 @@ WHERE p.permission_key = 'reports.view'
     'Payroll'
   );
 -- ===== END SOURCE: analytics_access_migration.sql =====
+
+-- ===== BEGIN SOURCE: driver_trip_completion_migration.sql =====
+-- Driver completion reports are separate from the official trip status.
+-- A driver can report completion; an authorized post-trip recorder still
+-- performs the official Completed transition through the existing workflow.
+
+CREATE TABLE IF NOT EXISTS trip_completion_reports (
+  report_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  trip_id INT UNSIGNED NOT NULL,
+  dispatch_id INT UNSIGNED NOT NULL,
+  reported_by INT UNSIGNED NOT NULL COMMENT 'Employee who reported completion',
+  status ENUM('Pending', 'Acknowledged', 'Rejected') NOT NULL DEFAULT 'Pending',
+  driver_note VARCHAR(500) NULL,
+  reported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  reviewed_by INT UNSIGNED NULL,
+  reviewed_at DATETIME NULL,
+  reviewer_note VARCHAR(500) NULL,
+  PRIMARY KEY (report_id),
+  KEY idx_trip_completion_trip_status (trip_id, status),
+  KEY idx_trip_completion_status (status, reported_at),
+  KEY idx_trip_completion_dispatch (dispatch_id),
+  CONSTRAINT fk_trip_completion_trip
+    FOREIGN KEY (trip_id) REFERENCES trips (trip_id) ON DELETE CASCADE,
+  CONSTRAINT fk_trip_completion_dispatch
+    FOREIGN KEY (dispatch_id) REFERENCES dispatch_requests (dispatch_id) ON DELETE CASCADE,
+  CONSTRAINT fk_trip_completion_employee
+    FOREIGN KEY (reported_by) REFERENCES employees (employee_id),
+  CONSTRAINT fk_trip_completion_reviewer
+    FOREIGN KEY (reviewed_by) REFERENCES users (user_id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- ===== END SOURCE: driver_trip_completion_migration.sql =====
+
+-- ===== BEGIN SOURCE: system_user_employee_migration.sql =====
+-- FleetOps rule: every system login is also an employee.
+-- Link only unambiguous existing employee records. Do not create employee
+-- records from login names or system roles; HR must enter missing real data.
+
+UPDATE employees e
+JOIN users u
+  ON e.user_id IS NULL
+ AND e.is_active = 1
+ AND e.full_name = u.full_name
+JOIN (
+    SELECT full_name
+    FROM employees
+    WHERE user_id IS NULL AND is_active = 1
+    GROUP BY full_name
+    HAVING COUNT(*) = 1
+) unique_employee_names
+  ON unique_employee_names.full_name = e.full_name
+JOIN (
+    SELECT full_name
+    FROM users
+    WHERE is_active = 1
+    GROUP BY full_name
+    HAVING COUNT(*) = 1
+) unique_user_names
+  ON unique_user_names.full_name = u.full_name
+LEFT JOIN (
+    SELECT user_id
+    FROM employees
+    WHERE user_id IS NOT NULL AND is_active = 1
+    GROUP BY user_id
+) already_linked_users
+  ON already_linked_users.user_id = u.user_id
+SET e.user_id = u.user_id
+WHERE u.is_active = 1
+  AND already_linked_users.user_id IS NULL;
+
+-- Review these accounts and link/create their actual employee profiles before
+-- enabling attendance for them. This SELECT does not modify employee data.
+SELECT u.user_id, u.username, u.full_name, r.role_name
+FROM users u
+JOIN roles r ON r.role_id = u.role_id
+LEFT JOIN employees e ON e.user_id = u.user_id AND e.is_active = 1
+WHERE u.is_active = 1
+GROUP BY u.user_id, u.username, u.full_name, r.role_name
+HAVING COUNT(e.employee_id) <> 1
+ORDER BY u.user_id;
+-- ===== END SOURCE: system_user_employee_migration.sql =====

@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/app_settings.php';
+require_once __DIR__ . '/../includes/db_helpers.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 
@@ -148,34 +149,67 @@ if ($action === 'save_role_permissions') {
         }
     }
 
-    $managerPermissionQuery = $pdo->prepare(
-        "SELECT permission_id FROM permissions WHERE permission_key = 'permissions.manage'"
-    );
-    $managerPermissionQuery->execute();
-    $managerPermissionId = (int)$managerPermissionQuery->fetchColumn();
-    if (!in_array($managerPermissionId, $permissionIds, true)) {
-        $remainingManagers = $pdo->prepare(
-            'SELECT COUNT(DISTINCT u.user_id)
-             FROM users u
-             JOIN role_permissions rp ON rp.role_id = u.role_id
-             WHERE u.is_active = 1 AND rp.permission_id = ? AND u.role_id <> ?'
-        );
-        $remainingManagers->execute([$managerPermissionId, $roleId]);
-        if ((int)$remainingManagers->fetchColumn() === 0) {
-            jsonFail('At least one active user in another role must retain permission-management access.', 409);
-        }
-    }
-
-    $oldQuery = $pdo->prepare('SELECT permission_id FROM role_permissions WHERE role_id = ? ORDER BY permission_id');
-    $oldQuery->execute([$roleId]);
-    $oldIds = array_map('intval', $oldQuery->fetchAll(PDO::FETCH_COLUMN));
-
-    $pdo->beginTransaction();
     try {
-        $pdo->prepare('DELETE FROM role_permissions WHERE role_id = ?')->execute([$roleId]);
-        $insert = $pdo->prepare('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)');
-        foreach ($permissionIds as $permissionId) {
-            $insert->execute([$roleId, $permissionId]);
+        $pdo->beginTransaction();
+        $managerPermissionQuery = $pdo->prepare(
+            "SELECT permission_id
+             FROM permissions
+             WHERE permission_key = 'permissions.manage'
+             FOR UPDATE"
+        );
+        $managerPermissionQuery->execute();
+        $managerPermissionId = (int)$managerPermissionQuery->fetchColumn();
+
+        $roleLock = $pdo->prepare('SELECT role_id FROM roles WHERE role_id = ? FOR UPDATE');
+        $roleLock->execute([$roleId]);
+        if (!$roleLock->fetchColumn()) {
+            $pdo->rollBack();
+            jsonFail('Role not found.', 404);
+        }
+
+        $oldQuery = $pdo->prepare(
+            'SELECT permission_id FROM role_permissions WHERE role_id = ? ORDER BY permission_id FOR UPDATE'
+        );
+        $oldQuery->execute([$roleId]);
+        $oldIds = array_map('intval', $oldQuery->fetchAll(PDO::FETCH_COLUMN));
+        sort($permissionIds);
+        $addedIds = array_values(array_diff($permissionIds, $oldIds));
+        $removedIds = array_values(array_diff($oldIds, $permissionIds));
+
+        if ($managerPermissionId > 0
+            && in_array($managerPermissionId, $oldIds, true)
+            && in_array($managerPermissionId, $removedIds, true)) {
+            $remainingManagers = $pdo->prepare(
+                'SELECT COUNT(DISTINCT u.user_id)
+                 FROM users u
+                 JOIN role_permissions rp ON rp.role_id = u.role_id
+                 WHERE u.is_active = 1 AND rp.permission_id = ? AND u.role_id <> ?'
+            );
+            $remainingManagers->execute([$managerPermissionId, $roleId]);
+            if ((int)$remainingManagers->fetchColumn() === 0) {
+                $pdo->rollBack();
+                jsonFail('At least one active user in another role must retain permission-management access.', 409);
+            }
+        }
+
+        if ($removedIds) {
+            $placeholders = implode(',', array_fill(0, count($removedIds), '?'));
+            $remove = $pdo->prepare(
+                "DELETE FROM role_permissions WHERE role_id = ? AND permission_id IN ($placeholders)"
+            );
+            $remove->execute(array_merge([$roleId], $removedIds));
+        }
+        if ($addedIds) {
+            $insert = $pdo->prepare(
+                'INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)'
+            );
+            foreach ($addedIds as $permissionId) {
+                $insert->execute([$roleId, $permissionId]);
+            }
+        }
+
+        if ($addedIds || $removedIds) {
+            auditLog('UPDATE_ROLE_PERMISSIONS', 'roles', $roleId, $oldIds, $permissionIds);
         }
         $pdo->commit();
     } catch (Throwable $e) {
@@ -186,8 +220,14 @@ if ($action === 'save_role_permissions') {
         jsonFail('Could not save role permissions.', 500);
     }
 
-    auditLog('UPDATE_ROLE_PERMISSIONS', 'roles', $roleId, $oldIds, $permissionIds);
-    jsonOk([], 'Role permissions saved.');
+    jsonOk([
+        'added_count' => count($addedIds),
+        'removed_count' => count($removedIds),
+    ], sprintf(
+        'Role permissions saved: %d added, %d removed.',
+        count($addedIds),
+        count($removedIds)
+    ));
 }
 
 if ($action === 'save_email_domain') {

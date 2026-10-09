@@ -25,23 +25,51 @@ date_default_timezone_set(APP_TIMEZONE);
 
 // ---- Role IDs (must match roles table in DB) ---------------
 define('ROLE_ADMIN',           1);
-define('ROLE_HEAD_MANAGEMENT', ROLE_ADMIN); // Legacy alias for existing Admin-only routes.
+define('ROLE_OPERATIONS_HEAD',      5);
 define('ROLE_DISPATCHER',      2);
+define('ROLE_CARRIER_DISPATCHER',   6);
+define('ROLE_CONTAINER_WING_DISPATCHER', 7);
+define('ROLE_PURCHASING_OFFICER',   8);
 define('ROLE_MAINTENANCE',     3);
-define('ROLE_ACCOUNTING',      4);
+define('ROLE_FINANCE',         9);
+define('ROLE_BILLING',        10);
+define('ROLE_PAYROLL',       11);
+define('ROLE_AUDIT',         12);
+define('ROLE_DRIVER',        13); // position in employees, may have multiple active users
+define('ROLE_HELPER',       14); // position in employees, may have multiple active users
+
+define('ROLE_HEAD_MANAGEMENT', ROLE_ADMIN); // Legacy alias for existing Admin-only routes.
 
 // ---- Role labels (for display) ----------------------------
 define('ROLE_LABELS', [
-    ROLE_ADMIN           => 'Admin',
-    ROLE_DISPATCHER      => 'Dispatcher',
-    ROLE_MAINTENANCE     => 'Maintenance',
-    ROLE_ACCOUNTING      => 'Accounting',
+    ROLE_ADMIN             => 'Admin',
+    ROLE_OPERATIONS_HEAD   => 'Operations Head',
+    ROLE_DISPATCHER        => 'Dispatcher',
+    ROLE_CARRIER_DISPATCHER => 'Car Carrier Dispatcher',
+    ROLE_CONTAINER_WING_DISPATCHER => 'Container & Wing Van Dispatcher',
+    ROLE_PURCHASING_OFFICER => 'Purchasing Officer',
+    ROLE_MAINTENANCE       => 'Maintenance',
+    ROLE_FINANCE           => 'Finance',
+    ROLE_BILLING           => 'Billing and Collection',
+    ROLE_PAYROLL           => 'Payroll',
+    ROLE_AUDIT             => 'Audit',
+    ROLE_DRIVER            => 'Driver',
+    ROLE_HELPER            => 'Helper',
 ]);
 
 // ---- Redirect targets per role after login ----------------
 define('ROLE_DASHBOARDS', [
     ROLE_ADMIN           => APP_BASE . '/pages/dashboard_head.php',
+    ROLE_OPERATIONS_HEAD => APP_BASE . '/pages/dashboard_head.php',
     ROLE_DISPATCHER      => APP_BASE . '/pages/dashboard.php',
+    ROLE_CARRIER_DISPATCHER => APP_BASE . '/pages/dashboard.php',
+    ROLE_CONTAINER_WING_DISPATCHER => APP_BASE . '/pages/dashboard.php',
+    ROLE_PURCHASING_OFFICER => APP_BASE . '/pages/purchasing.php',
     ROLE_MAINTENANCE     => APP_BASE . '/pages/dashboard.php',
-    ROLE_ACCOUNTING      => APP_BASE . '/pages/dashboard.php',
+    ROLE_FINANCE         => APP_BASE . '/pages/finance.php',
+    ROLE_BILLING         => APP_BASE . '/pages/billing.php',
+    ROLE_PAYROLL         => APP_BASE . '/pages/payroll.php',
+    ROLE_AUDIT           => APP_BASE . '/pages/permissions.php',
+    ROLE_DRIVER          => APP_BASE . '/pages/dashboard.php',
+    ROLE_HELPER          => APP_BASE . '/pages/dashboard.php',
 ]);

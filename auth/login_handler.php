@@ -10,6 +10,16 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
 
+// Detect whether the database schema has users.employee_id column
+// Old schema: users has full_name, no employee_id
+// New schema: users has nullable employee_id, full_name stored in employees table
+$stmt = $pdo->prepare('DESCRIBE users');
+$stmt->execute();
+$columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$colNames = array_column($columns, 'Field');
+$hasEmployeeId = in_array('employee_id', $colNames);
+$hasFullNameInUsers = in_array('full_name', $colNames);
+
 const LOGIN_FAILURE_WINDOW_SECONDS = 30;
 const LOGIN_FAILURE_LIMIT = 10;
 const LOGIN_IP_FAILURE_LIMIT = 50;
@@ -175,12 +185,46 @@ if (loginIsRateLimited($failureCounts)) {
     redirectLoginError('rate_limited');
 }
 
+
 $stmt = $pdo->prepare(
-    "SELECT u.user_id, u.full_name, u.password_hash, u.is_active, u.auth_version, u.role_id, r.role_name
-       FROM users u
-       JOIN roles r ON u.role_id = r.role_id
-      WHERE u.username = :username
-      LIMIT 1"
+    $hasEmployeeId
+        ? "SELECT
+             u.user_id,
+             COALESCE(
+                 NULLIF(
+                     TRIM(CONCAT_WS(
+                         ' ',
+                         NULLIF(TRIM(e.first_name), ''),
+                         NULLIF(TRIM(e.middle_name), ''),
+                         NULLIF(TRIM(e.last_name), ''),
+                         NULLIF(TRIM(e.suffix), '')
+                     )),
+                     ''
+                 ),
+                 u.username
+             ) AS full_name,
+             u.password_hash,
+             u.is_active,
+             u.auth_version,
+             u.role_id,
+             r.role_name
+          FROM users u
+          JOIN roles r ON u.role_id = r.role_id
+          LEFT JOIN employees e ON u.employee_id = e.employee_id
+          WHERE u.username = :username
+          LIMIT 1"
+        : "SELECT
+             u.user_id,
+             u.full_name,
+             u.password_hash,
+             u.is_active,
+             u.auth_version,
+             u.role_id,
+             r.role_name
+          FROM users u
+          JOIN roles r ON u.role_id = r.role_id
+          WHERE u.username = :username
+          LIMIT 1"
 );
 $stmt->execute([':username' => $username]);
 $user = $stmt->fetch();

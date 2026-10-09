@@ -17,7 +17,18 @@ $usersSql = "
     SELECT
         u.user_id,
         u.username,
-        u.full_name,
+        COALESCE(
+            NULLIF(
+                TRIM(CONCAT_WS(
+                    ' ',
+                    NULLIF(TRIM(e.first_name), ''),
+                    NULLIF(TRIM(e.middle_name), ''),
+                    NULLIF(TRIM(e.last_name), ''),
+                    NULLIF(TRIM(e.suffix), '')
+                ))
+            ),
+            u.username
+        ) AS full_name,
         u.email,
         u.is_active,
         u.created_at,
@@ -25,7 +36,8 @@ $usersSql = "
         r.role_id
     FROM users u
     JOIN roles r ON u.role_id = r.role_id
-    ORDER BY u.is_active DESC, r.role_id ASC, u.full_name ASC
+    LEFT JOIN employees e ON u.employee_id = e.employee_id
+    ORDER BY u.is_active DESC, r.role_id ASC, full_name ASC
 ";
 $users = $pdo->query($usersSql)->fetchAll(PDO::FETCH_ASSOC);
 

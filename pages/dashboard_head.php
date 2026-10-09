@@ -247,8 +247,25 @@ if ($employeeId > 0) {
 $auditRows = null;
 if ($canAudit) {
     $auditRows = adminDashboardQuery(static fn() => $pdo->query(
-        "SELECT l.action, l.table_name, l.logged_at, u.full_name
-         FROM audit_logs l LEFT JOIN users u ON u.user_id = l.user_id
+        "SELECT
+             l.action,
+             l.table_name,
+             l.logged_at,
+             COALESCE(
+                 NULLIF(
+                     TRIM(CONCAT_WS(
+                         ' ',
+                         NULLIF(TRIM(e.first_name), ''),
+                         NULLIF(TRIM(e.middle_name), ''),
+                         NULLIF(TRIM(e.last_name), ''),
+                         NULLIF(TRIM(e.suffix), '')
+                     ))
+                 '',
+                 CONCAT_WS(' ', u.username, u.username)
+             ) AS actor_name
+         FROM audit_logs l
+         LEFT JOIN users u ON u.user_id = l.user_id
+         LEFT JOIN employees e ON u.employee_id = e.employee_id
          ORDER BY l.logged_at DESC LIMIT 6"
     )->fetchAll(PDO::FETCH_ASSOC));
 }

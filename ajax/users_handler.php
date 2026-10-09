@@ -16,27 +16,46 @@ enforceCsrf();
 $pdo    = getDBConnection();
 $action = $_POST['action'] ?? '';
 
-function assertSingleActiveOperationsHead(PDO $pdo, int $roleId, int $active, ?int $excludeUserId = null): void {
+function assertSingleActiveUser(PDO $pdo, int $roleId, int $active, ?int $excludeUserId = null): void {
+    // Only enforce single-active-user when the role requires it
+    // Single-holder roles (one active user max): all roles except Driver (13) and Helper (14)
+    $singleHolderRoles = [1, 2, 5, 6, 7, 8, 9, 10, 11, 12]; // Admin, Dispatcher, Operations Head, Carrier Dispatcher, Container Wing Dispatcher, Purchasing Officer, Finance, Billing, Payroll, Audit
+    $multiUserRoles = [13, 14]; // Driver, Helper may have multiple active users
+
     if ($active !== 1) {
         return;
     }
-    $operationsRole = $pdo->prepare("SELECT role_id FROM roles WHERE role_name = 'Operations Head' FOR UPDATE");
-    $operationsRole->execute();
-    $operationsRoleId = $operationsRole->fetchColumn();
-    if (!$operationsRoleId || (int)$operationsRoleId !== $roleId) {
+
+    // Skip enforcement for multi-user roles
+    if (in_array($roleId, $multiUserRoles, true)) {
         return;
     }
 
-    $sql = 'SELECT COUNT(*) FROM users WHERE role_id = ? AND is_active = 1';
-    $params = [$roleId];
-    if ($excludeUserId !== null) {
-        $sql .= ' AND user_id <> ?';
-        $params[] = $excludeUserId;
+    // Skip enforcement for roles not in the single-holder list
+    if (!in_array($roleId, $singleHolderRoles, true)) {
+        return;
     }
-    $activeHeads = $pdo->prepare($sql);
-    $activeHeads->execute($params);
-    if ((int)$activeHeads->fetchColumn() > 0) {
-        throw new DomainException('Only one active Operations Head account is allowed.');
+
+    // Use FOR UPDATE to prevent race conditions between concurrent requests
+    $countRole = $pdo->prepare(
+        'SELECT COUNT(*) FROM users WHERE role_id = ? AND is_active = 1 FOR UPDATE'
+    );
+    $countRole->execute([$roleId]);
+
+    $count = (int)$countRole->fetchColumn();
+
+    // If adding a new user (no exclusion), check that there's currently 0 active users
+    // If editing (with exclusion), check that there's currently 1 active user (the one being edited)
+    if ($excludeUserId === null) {
+        // New user: must have 0 active users currently (will be first for this role)
+        if ($count > 0) {
+            throw new DomainException('Only one active account is allowed for this role.');
+        }
+    } else {
+        // Edit user: must have 1 active user currently (the one being edited), or 0 if replacing
+        if ($count > 1) {
+            throw new DomainException('Only one active account is allowed for this role.');
+        }
     }
 }
 
@@ -86,14 +105,31 @@ if ($action === 'add_user') {
 
     $pdo->beginTransaction();
     try {
-        assertSingleActiveOperationsHead($pdo, $roleId, 1);
+        assertSingleActiveUser($pdo, $roleId, 1);
         $hash = password_hash($password, PASSWORD_BCRYPT);
         $stmt = $pdo->prepare("
-            INSERT INTO users (role_id, username, full_name, email, password_hash, is_active)
+            INSERT INTO users (role_id, username, email, password_hash, is_active, auth_version)
             VALUES (?, ?, ?, ?, ?, 1)
         ");
-        $stmt->execute([$roleId, $username, $fullName, $email, $hash]);
+        $stmt->execute([$roleId, $username, $email, $hash]);
         $newId = (int)$pdo->lastInsertId();
+
+        // Create linked employee record — full_name stored in employees table
+        $empStmt = $pdo->prepare(
+            "INSERT INTO employees (user_id, employee_code, full_name, position, is_active, employment_type)
+             VALUES (:user_id, :employee_code, :full_name, :position, 1, 'Employee')"
+        );
+        $empStmt->execute([
+            ':user_id'       => $newId,
+            ':employee_code' => 'EMP-' . sprintf('%04d', $newId),
+            ':full_name'     => $fullName,
+            ':position'      => 'User',
+        ]);
+        $empId = (int)$pdo->lastInsertId(); // employee_id auto-increment
+
+        // Link user to employee
+        $pdo->prepare('UPDATE users SET employee_id = ? WHERE user_id = ?')->execute([$empId, $newId]);
+
         auditLog('ADD_USER', 'users', $newId, null, [
             'username'  => $username,
             'full_name' => $fullName,
@@ -149,18 +185,26 @@ if ($action === 'edit_user') {
 
     $pdo->beginTransaction();
     try {
-        assertSingleActiveOperationsHead($pdo, $roleId, $isActive, $userId);
+        assertSingleActiveUser($pdo, $roleId, $isActive, $userId);
+        // UPDATE users table — do NOT set full_name (column does not exist in new schema)
+        // full_name is maintained in the employees table instead
         $pdo->prepare("
             UPDATE users SET
-                full_name = ?, username = ?, email = ?,
+                username = ?, email = ?,
                 auth_version = auth_version + CASE
                     WHEN role_id <> ? OR is_active <> ? THEN 1 ELSE 0
                 END,
                 role_id   = ?, is_active = ?
             WHERE user_id = ?
         ")->execute([
-            $fullName, $username, $email,
+            $username, $email,
             $roleId, $isActive, $roleId, $isActive, $userId,
+        ]);
+
+        // UPDATE linked employee's full_name — find employee by user_id
+        $emp = findOrFail($pdo, 'employees', 'user_id', $userId, 'Employee not found.');
+        $pdo->prepare('UPDATE employees SET full_name = ? WHERE employee_id = ?')->execute([
+            $fullName, $emp['employee_id'],
         ]);
         $pdo->commit();
 

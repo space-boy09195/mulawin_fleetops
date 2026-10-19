@@ -6,9 +6,9 @@ instead of being loaded from a CDN (`cdn.jsdelivr.net`). Reasons:
 - One less third-party DNS/TLS handshake on every page load — on a slow or
   congested connection this was showing up as a visibly slower, "unstyled"
   first paint.
-- `assets/.htaccess` sets long-lived `Cache-Control` headers for everything
-  under `assets/`, which only helps if the files are actually served from
-  this origin.
+- Serving the files from this origin also makes long-lived browser caching
+  possible. Note: no `assets/.htaccess` exists in the current repository, so
+  caching for `assets/` is not currently configured by such a file.
 - No dependency on jsdelivr's uptime for the app to render at all.
 
 ## Versions currently vendored

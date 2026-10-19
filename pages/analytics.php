@@ -1,1365 +1,806 @@
 <?php
 // ============================================================
 // pages/analytics.php
-// Cross-functional analytics hub — access is controlled by reports.view.
-// Pulls together Operations, Maintenance, and Accounting data
-// that no single role dashboard shows together.
+// Department analytics (Operations, Accounting, Maintenance). Each department
+// shows key indicators first, then supporting charts, then detailed tables.
+// Every chart carries its formula, source fields and date basis (see
+// docs/analytics_metric_traceability.md). Nothing here invents a definition the
+// client has not confirmed; unresolved metrics are listed as not shown.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/alerts.php';
-require_once __DIR__ . '/../includes/csrf.php';
+require_once __DIR__ . '/../includes/dispatcher_scope.php';
+require_once __DIR__ . '/../includes/finance_records.php';
+require_once __DIR__ . '/../includes/analytics_period.php';
 
-requirePermission('reports.view');
-$role   = currentRoleId();
-$isHead = $role === ROLE_HEAD_MANAGEMENT;
-
-$GLOBALS['page_js'] = APP_BASE . '/assets/js/analytics.js';
-$GLOBALS['page_needs_chart'] = true;
-layoutHead('Analytics', APP_BASE . '/assets/css/analytics.css');
+requireAnyPermission([
+    'reports.view',
+    'operations.reports.view',
+    'maintenance.reports.view',
+    'billing.view',
+]);
 
 $pdo = getDBConnection();
+$isHead = isAdmin();
+$roleKey = currentRoleKey();
+$isDispatcher = in_array($roleKey, ['car_carrier_dispatcher', 'container_wing_van_dispatcher'], true);
+$canOperations = $isHead || currentUserHasAnyPermission(['operations.reports.view'])
+    || (currentUserHasAnyPermission(['reports.view']) && in_array($roleKey, [
+        'operations_head', 'car_carrier_dispatcher', 'container_wing_van_dispatcher',
+    ], true));
+$canFleet = $isHead || ($canOperations && currentUserHasAnyPermission(['fleet.view']));
+$canMaintenance = $isHead || currentUserHasAnyPermission(['maintenance.reports.view']);
+$canFinancials = $isHead || currentUserHasAnyPermission(['billing.view']);
 
-// ── Period filter ──────────────────────────────────────────────────────────
 $periods = [
-    '1m'  => ['label' => 'This Month',      'months' => 1],
-    '3m'  => ['label' => 'Last 3 Months',   'months' => 3],
-    '6m'  => ['label' => 'Last 6 Months',   'months' => 6],
-    '1y'  => ['label' => 'Last 12 Months',  'months' => 12],
-    'all' => ['label' => 'All Time',        'months' => null],
+    '1m' => ['label' => 'Last 1 month', 'months' => 1],
+    '3m' => ['label' => 'Last 3 months', 'months' => 3],
+    '6m' => ['label' => 'Last 6 months', 'months' => 6],
+    '1y' => ['label' => 'Last 12 months', 'months' => 12],
+    'all' => ['label' => 'All recorded time', 'months' => null],
 ];
 $period = $_GET['period'] ?? '6m';
-if (!isset($periods[$period])) $period = '6m';
+if (!is_string($period) || !isset($periods[$period])) {
+    $period = '6m';
+}
 $periodLabel = $periods[$period]['label'];
-$months      = $periods[$period]['months'];
-
-// ── Granularity filter (controls trend chart bucketing) ──────────────────────
-$granularities = ['day' => 'Daily', 'week' => 'Weekly', 'month' => 'Monthly'];
-$requestedGranularity = $_GET['granularity'] ?? 'month';
-if (!isset($granularities[$requestedGranularity])) $requestedGranularity = 'month';
-
-// ── Resolve the actual date range (shared by KPIs, leaderboards, and trends) ──
-$rangeEnd = new DateTime('today');
-if ($months !== null) {
-    $rangeStart = (new DateTime('today'))->modify("-$months months");
-} else {
-    // "All Time" — find the earliest relevant record, but clamp to 24 months
-    // back so a Daily view over years of history doesn't produce an
-    // unreasonably huge chart.
-    $earliest = $pdo->query("
-        SELECT MIN(d) FROM (
-            SELECT MIN(created_at)     AS d FROM billings
-            UNION ALL SELECT MIN(date_performed) FROM maintenance_records
-            UNION ALL SELECT MIN(reported_at)    FROM incidents
-        ) x
-    ")->fetchColumn();
-    $rangeStart = $earliest ? new DateTime($earliest) : (new DateTime('today'))->modify('-6 months');
-    $clamp = (new DateTime('today'))->modify('-24 months');
-    if ($rangeStart < $clamp) $rangeStart = $clamp;
-}
+$rangeEnd = new DateTime('tomorrow');
+$rangeStart = $periods[$period]['months'] === null
+    ? new DateTime('1000-01-01')
+    : (new DateTime('today'))->modify('-' . $periods[$period]['months'] . ' months');
 $rangeStartSql = $rangeStart->format('Y-m-d 00:00:00');
-$rangeEndExclusive = (clone $rangeEnd)->modify('+1 day');
-$rangeEndSql = $rangeEndExclusive->format('Y-m-d 00:00:00');
-$rangeDays     = (int)$rangeStart->diff($rangeEnd)->days;
+$rangeEndSql = $rangeEnd->format('Y-m-d 00:00:00');
+$rangeDays = (int)$rangeStart->diff(new DateTime('today'))->days;
 
-// ── Guardrail: which granularities are practical for this date range? ────────
-// Daily over a long range produces hundreds of dense, unreadable points.
-// Monthly over a very short range produces only 1 bucket, which is degenerate.
-$granularityAllowed = [
-    'day'   => $rangeDays <= 92,   // ~3 months — beyond this, daily gets too dense
-    'week'  => true,               // reasonable at any range, always available
-    'month' => $rangeDays >= 32,   // needs at least ~1 month to be meaningful
+$granularities = ['day' => 'Daily', 'week' => 'Weekly', 'month' => 'Monthly'];
+$granularity = $_GET['granularity'] ?? 'month';
+if (!is_string($granularity) || !isset($granularities[$granularity])) {
+    $granularity = 'month';
+}
+if ($granularity === 'day' && $rangeDays > 92) {
+    $granularity = 'week';
+}
+$rangeParams = [':rangeStart' => $rangeStartSql, ':rangeEnd' => $rangeEndSql];
+
+// ── Operations scope (dispatchers see only their own scoped trips) ───────────
+$tripWhere = [];
+$tripParams = $rangeParams;
+$scope = [];
+if ($isDispatcher) {
+    $scope = dispatcherScope();
+    $tripWhere[] = "t.trip_id IN (
+        SELECT dr.trip_id FROM dispatch_requests dr WHERE dr.submitted_by = :viewerId
+    )";
+    $tripParams[':viewerId'] = currentUserId();
+    if (!empty($scope['truck_types'])) {
+        $typeParams = [];
+        foreach (array_values($scope['truck_types']) as $index => $truckType) {
+            $key = ':truckType' . $index;
+            $typeParams[] = $key;
+            $tripParams[$key] = $truckType;
+        }
+        $tripWhere[] = 'tr.truck_type IN (' . implode(', ', $typeParams) . ')';
+    }
+    if (!empty($scope['shift']) || !empty($scope['denied'])) {
+        $tripWhere[] = 't.shift = :shift';
+        $tripParams[':shift'] = (string)($scope['shift'] ?? '');
+    }
+}
+$tripScopeSql = $tripWhere ? ' AND ' . implode(' AND ', $tripWhere) : '';
+
+// ── Display helpers (closures: this data layer is evaluated by static tests) ─
+$peso = static fn($v): string => '₱' . number_format((float)$v, 2);
+$sumField = static function (array $rows, string $field): float {
+    $total = 0.0;
+    foreach ($rows as $row) {
+        $total += (float)($row[$field] ?? 0);
+    }
+    return $total;
+};
+$sortDesc = static function (array $rows, string $field): array {
+    usort($rows, static fn($a, $b) => (float)$b[$field] <=> (float)$a[$field]);
+    return $rows;
+};
+$orderBy = static function (array $rows, string $field, array $order): array {
+    usort($rows, static function ($a, $b) use ($field, $order) {
+        $pa = array_search((string)$a[$field], $order, true);
+        $pb = array_search((string)$b[$field], $order, true);
+        return ($pa === false ? 99 : $pa) <=> ($pb === false ? 99 : $pb);
+    });
+    return $rows;
+};
+$colorOf = static fn(array $map, $key): string => $map[(string)$key] ?? '#8a948c';
+$countOf = static function (array $rows, string $field, string $value, string $count): int {
+    foreach ($rows as $row) {
+        if ((string)$row[$field] === $value) {
+            return (int)$row[$count];
+        }
+    }
+    return 0;
+};
+// Continuous bucket keys so quiet periods plot as 0 instead of a gap.
+$buckets = static function (array ...$rowSets) use ($period, $rangeStart, $granularity): array {
+    $present = [];
+    foreach ($rowSets as $rows) {
+        foreach ($rows as $row) {
+            $present[] = (string)$row['bucket'];
+        }
+    }
+    if (!$present) {
+        return ['keys' => [], 'labels' => []];
+    }
+    sort($present);
+    $start = clone $rangeStart;
+    if ($period === 'all') {
+        $first = $present[0];
+        $start = new DateTime(strlen($first) === 7 ? $first . '-01' : $first);
+    }
+    return buildBuckets($start, new DateTime('today'), $granularity);
+};
+$series = static function (array $keys, array $rows, string $field): array {
+    $map = [];
+    foreach ($rows as $row) {
+        $map[(string)$row['bucket']] = (float)$row[$field];
+    }
+    return array_map(static fn($key) => $map[$key] ?? 0, $keys);
+};
+
+$tripStatusOrder = ['Pending Approval', 'Approved', 'Assigned', 'Ready for Dispatch', 'Dispatched', 'In Progress', 'Delivered', 'Returned', 'Completed', 'For Review', 'Cancelled'];
+$tripStatusColors = [
+    'Pending Approval' => '#d99a00', 'Approved' => '#2f6fdd', 'Assigned' => '#7a55c9', 'Ready for Dispatch' => '#1aa5a0',
+    'Dispatched' => '#2aa6d6', 'In Progress' => '#1d4fb8', 'Delivered' => '#2f9e5b', 'Returned' => '#e07b1f',
+    'Completed' => '#17753f', 'For Review' => '#8a948c', 'Cancelled' => '#d6403f',
 ];
+$fleetStatusOrder = ['Available', 'Assigned', 'On Trip', 'Under Maintenance', 'Unavailable'];
+$fleetStatusColors = ['Available' => '#2f9e5b', 'Assigned' => '#7a55c9', 'On Trip' => '#2f6fdd', 'Under Maintenance' => '#d99a00', 'Unavailable' => '#d6403f'];
+$billingStatusOrder = ['Issued', 'Partially Paid', 'Paid', 'Overdue'];
+$billingStatusColors = ['Issued' => '#2f6fdd', 'Partially Paid' => '#d99a00', 'Paid' => '#2f9e5b', 'Overdue' => '#d6403f'];
+$methodColors = ['Cash' => '#2f9e5b', 'Check' => '#2f6fdd', 'Bank Transfer' => '#7a55c9', 'Other' => '#8a948c'];
+$maintStatusOrder = ['Reported', 'Scheduled', 'In Progress', 'Waiting for Parts', 'Completed', 'Cancelled'];
+$maintStatusColors = ['Reported' => '#8a948c', 'Scheduled' => '#2f6fdd', 'In Progress' => '#1d4fb8', 'Waiting for Parts' => '#d99a00', 'Completed' => '#2f9e5b', 'Cancelled' => '#d6403f'];
+$maintTypeColors = ['Preventive' => '#2f9e5b', 'Repair' => '#d6403f', 'Inspection' => '#2f6fdd', 'Other' => '#8a948c'];
 
-// If the requested granularity isn't practical for this range, fall back to
-// Weekly (always allowed above) rather than silently ignoring the request.
-$granularity = $granularityAllowed[$requestedGranularity] ? $requestedGranularity : 'week';
-$granularityLabel = $granularities[$granularity];
-$granularityWasAdjusted = $granularity !== $requestedGranularity;
+$charts = [];
+$sections = [];
 
-// Date filters as bindable clauses — $months === null (All Time) still uses
-// the clamped $rangeStart so trend buckets stay bounded; KPIs/leaderboards
-// use the same start for consistency across the page.
-$tripDateFilter  = "AND t.created_at >= :rangeStart AND t.created_at < :rangeEnd";
-$billDateFilter  = "AND b.created_at >= :rangeStart AND b.created_at < :rangeEnd";
-$collDateFilter  = "AND c.payment_date >= :rangeStart AND c.payment_date < :rangeEnd";
-$maintDateFilter = "AND date_performed >= :rangeStart AND date_performed < :rangeEnd";
-
-// ── Bucket-expression helper for the selected granularity ────────────────────
-function bucketExpr(string $col, string $granularity): string {
-    return match ($granularity) {
-        'day'   => "DATE_FORMAT($col, '%Y-%m-%d')",
-        'week'  => "DATE_FORMAT(DATE_SUB($col, INTERVAL WEEKDAY($col) DAY), '%Y-%m-%d')",
-        default => "DATE_FORMAT($col, '%Y-%m')", // month
-    };
-}
-
-// Generates the full list of bucket keys + display labels between two dates,
-// so months/weeks/days with zero activity still show as 0 instead of a gap.
-function buildBuckets(DateTime $start, DateTime $end, string $granularity): array {
-    $keys = [];
-    $labels = [];
-    $cursor = clone $start;
-
-    if ($granularity === 'day') {
-        $cursor->setTime(0, 0, 0);
-        while ($cursor <= $end) {
-            $keys[]   = $cursor->format('Y-m-d');
-            $labels[] = $cursor->format('M d');
-            $cursor->modify('+1 day');
-        }
-    } elseif ($granularity === 'week') {
-        $cursor->modify('monday this week');
-        while ($cursor <= $end) {
-            $keys[]   = $cursor->format('Y-m-d');
-            $labels[] = $cursor->format('M d');
-            $cursor->modify('+7 days');
-        }
-    } else {
-        $cursor->modify('first day of this month');
-        while ($cursor <= $end) {
-            $keys[]   = $cursor->format('Y-m');
-            $labels[] = $cursor->format('M Y');
-            $cursor->modify('first day of next month');
-        }
-    }
-    return ['keys' => $keys, 'labels' => $labels];
-}
-
-$buckets = buildBuckets($rangeStart, $rangeEnd, $granularity);
-
-// Runs a query that references :rangeStart, binding it once so every call
-// site doesn't have to repeat the bind boilerplate.
-function qRange(PDO $pdo, string $sql, string $rangeStartSql, string $rangeEndSql): PDOStatement {
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':rangeStart' => $rangeStartSql, ':rangeEnd' => $rangeEndSql]);
-    return $stmt;
-}
-
-// ══════════════════════════════════════════════════════════════════════════
-// PERIOD-OVER-PERIOD COMPARISON
-// Resolves an immediately-preceding window of the same length as the
-// selected period, so KPI cards can show "+12.4% vs last period" alongside
-// the raw number. "All Time" has no natural prior window, so comparison is
-// simply turned off for that period rather than showing a misleading figure.
-// ══════════════════════════════════════════════════════════════════════════
-$hasComparison = $months !== null;
-if ($hasComparison) {
-    $prevRangeEnd      = clone $rangeStart;                 // exclusive upper bound
-    $prevRangeStart     = (clone $rangeStart)->modify("-$months months");
-    $prevRangeStartSql = $prevRangeStart->format('Y-m-d 00:00:00');
-    $prevRangeEndSql   = $prevRangeEnd->format('Y-m-d 00:00:00');
-} else {
-    $prevRangeStartSql = null;
-    $prevRangeEndSql   = null;
-}
-
-// Runs a query bound between the previous period's start (inclusive) and the
-// current period's start (exclusive) — i.e. the window immediately before
-// the one currently on screen.
-function qPrev(PDO $pdo, string $sql, ?string $prevStart, ?string $prevEnd) {
-    if ($prevStart === null) return null;
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([':prevStart' => $prevStart, ':prevEnd' => $prevEnd]);
-    return $stmt;
-}
-
-// Percent change from $previous to $current. Returns null (rather than a
-// divide-by-zero or a misleading 0%) when there's no previous-period
-// baseline to compare against.
-function pctChange(float $current, float $previous): ?float {
-    if ($previous == 0.0) {
-        return $current == 0.0 ? 0.0 : null;
-    }
-    return round((($current - $previous) / $previous) * 100, 1);
-}
-
-// Renders a small "▲ +12.4% vs last period" badge for a KPI card, comparing
-// raw amounts/counts. $higherIsBetter flips which direction is shown as
-// good (green) vs bad (red) — e.g. rising revenue is good, rising cost isn't.
-function trendBadge($current, $previous, bool $higherIsBetter = true, bool $hasComparison = true): string {
-    if (!$hasComparison || $previous === null) return '';
-    $pct = pctChange((float)$current, (float)$previous);
-    if ($pct === null) {
-        return '<span class="an-trend an-trend-flat"><i class="bi bi-dash"></i> new vs last period</span>';
-    }
-    if (abs($pct) < 0.05) {
-        return '<span class="an-trend an-trend-flat"><i class="bi bi-dash"></i> flat vs last period</span>';
-    }
-    $up   = $pct > 0;
-    $good = $higherIsBetter ? $up : !$up;
-    $cls  = $good ? 'an-trend-up' : 'an-trend-down';
-    $icon = $up ? 'bi-arrow-up-short' : 'bi-arrow-down-short';
-    $sign = $up ? '+' : '';
-    return '<span class="an-trend ' . $cls . '"><i class="bi ' . $icon . '"></i> ' . $sign . number_format($pct, 1) . '% vs last period</span>';
-}
-
-// Same idea, but for metrics that are ALREADY percentages (on-time rate,
-// utilization rate). Comparing those with percent-of-a-percent math is
-// confusing ("90%→95%" reads as "+5.6%"), so this shows the plain
-// percentage-point difference instead ("+5.0 pts").
-function trendBadgePts($current, $previous, bool $higherIsBetter = true, bool $hasComparison = true): string {
-    if (!$hasComparison || $previous === null) return '';
-    $diff = round((float)$current - (float)$previous, 1);
-    if (abs($diff) < 0.05) {
-        return '<span class="an-trend an-trend-flat"><i class="bi bi-dash"></i> flat vs last period</span>';
-    }
-    $up   = $diff > 0;
-    $good = $higherIsBetter ? $up : !$up;
-    $cls  = $good ? 'an-trend-up' : 'an-trend-down';
-    $icon = $up ? 'bi-arrow-up-short' : 'bi-arrow-down-short';
-    $sign = $up ? '+' : '';
-    return '<span class="an-trend ' . $cls . '"><i class="bi ' . $icon . '"></i> ' . $sign . number_format($diff, 1) . ' pts vs last period</span>';
-}
-
-// ── KPI: Revenue billed vs collected ──────────────────────────────────────────
-$revenue = (float)qRange($pdo, "
-    SELECT COALESCE(SUM(b.amount), 0) FROM billings b WHERE 1=1 $billDateFilter
-", $rangeStartSql, $rangeEndSql)->fetchColumn();
-
-$collected = (float)qRange($pdo, "
-    SELECT COALESCE(SUM(c.amount_paid), 0) FROM collections c WHERE 1=1 $collDateFilter
-", $rangeStartSql, $rangeEndSql)->fetchColumn();
-
-$collectionRate = $revenue > 0 ? round(($collected / $revenue) * 100, 1) : 0;
-
-// ── KPI: Maintenance cost ─────────────────────────────────────────────────────
-$maintCost = (float)qRange($pdo, "
-    SELECT COALESCE(SUM(cost), 0) FROM maintenance_records WHERE 1=1 $maintDateFilter
-", $rangeStartSql, $rangeEndSql)->fetchColumn();
-
-// ── KPI: Completed trips + on-time rate ───────────────────────────────────────
-$tripStats = qRange($pdo, "
-    SELECT
-        COUNT(*)                                            AS completed,
-        SUM(CASE WHEN is_late = 1 THEN 1 ELSE 0 END)         AS late_count
-    FROM trips t
-    WHERE t.status = 'Completed' $tripDateFilter
-", $rangeStartSql, $rangeEndSql)->fetch(PDO::FETCH_ASSOC);
-$completedTrips = (int)($tripStats['completed'] ?? 0);
-$lateCount      = (int)($tripStats['late_count'] ?? 0);
-$onTimeRate     = $completedTrips > 0 ? round((($completedTrips - $lateCount) / $completedTrips) * 100, 1) : 0;
-
-// ── KPI: Fleet utilization (distinct trucks dispatched / total trucks) ───────
-$totalTrucks = (int)$pdo->query("SELECT COUNT(*) FROM trucks")->fetchColumn();
-$avgCostPerTruck = $totalTrucks > 0 ? $maintCost / $totalTrucks : 0;
-$utilizedTrucks = (int)qRange($pdo, "
-    SELECT COUNT(DISTINCT dr.truck_id)
-    FROM dispatch_requests dr
-    JOIN trips t ON t.dispatch_id = dr.dispatch_id
-    WHERE 1=1 $tripDateFilter
-", $rangeStartSql, $rangeEndSql)->fetchColumn();
-$utilizationRate = $totalTrucks > 0 ? round(($utilizedTrucks / $totalTrucks) * 100, 1) : 0;
-
-// ── KPI: Avg revenue per completed trip ───────────────────────────────────────
-$avgRevenuePerTrip = $completedTrips > 0 ? $revenue / $completedTrips : 0;
-
-// ── Previous-period equivalents of the above, for the trend badges ───────────
-$revenuePrev = $hasComparison ? (float)qPrev($pdo, "
-    SELECT COALESCE(SUM(b.amount), 0) FROM billings b
-    WHERE b.created_at >= :prevStart AND b.created_at < :prevEnd
-", $prevRangeStartSql, $prevRangeEndSql)->fetchColumn() : null;
-
-$collectedPrev = $hasComparison ? (float)qPrev($pdo, "
-    SELECT COALESCE(SUM(c.amount_paid), 0) FROM collections c
-    WHERE c.payment_date >= :prevStart AND c.payment_date < :prevEnd
-", $prevRangeStartSql, $prevRangeEndSql)->fetchColumn() : null;
-$collectionRatePrev = ($hasComparison && $revenuePrev > 0) ? round(($collectedPrev / $revenuePrev) * 100, 1) : null;
-
-$maintCostPrev = $hasComparison ? (float)qPrev($pdo, "
-    SELECT COALESCE(SUM(cost), 0) FROM maintenance_records
-    WHERE date_performed >= :prevStart AND date_performed < :prevEnd
-", $prevRangeStartSql, $prevRangeEndSql)->fetchColumn() : null;
-
-$tripStatsPrev = $hasComparison ? qPrev($pdo, "
-    SELECT
-        COUNT(*)                                      AS completed,
-        SUM(CASE WHEN is_late = 1 THEN 1 ELSE 0 END)   AS late_count
-    FROM trips t
-    WHERE t.status = 'Completed' AND t.created_at >= :prevStart AND t.created_at < :prevEnd
-", $prevRangeStartSql, $prevRangeEndSql)->fetch(PDO::FETCH_ASSOC) : null;
-$completedTripsPrev = $hasComparison ? (int)($tripStatsPrev['completed'] ?? 0) : null;
-$lateCountPrev      = $hasComparison ? (int)($tripStatsPrev['late_count'] ?? 0) : null;
-$onTimeRatePrev     = ($hasComparison && $completedTripsPrev > 0)
-    ? round((($completedTripsPrev - $lateCountPrev) / $completedTripsPrev) * 100, 1)
-    : null;
-
-$utilizedTrucksPrev = $hasComparison ? (int)qPrev($pdo, "
-    SELECT COUNT(DISTINCT dr.truck_id)
-    FROM dispatch_requests dr
-    JOIN trips t ON t.dispatch_id = dr.dispatch_id
-    WHERE t.created_at >= :prevStart AND t.created_at < :prevEnd
-", $prevRangeStartSql, $prevRangeEndSql)->fetchColumn() : null;
-// Uses today's total fleet size as the denominator for both periods — the
-// system doesn't track historical fleet size at each past date, and at
-// capstone scale the truck count doesn't meaningfully shift month to month.
-$utilizationRatePrev = ($hasComparison && $totalTrucks > 0)
-    ? round(($utilizedTrucksPrev / $totalTrucks) * 100, 1)
-    : null;
-
-$avgRevenuePerTripPrev = ($hasComparison && $completedTripsPrev > 0)
-    ? $revenuePrev / $completedTripsPrev
-    : null;
-
-$avgCostPerTruckPrev = ($hasComparison && $totalTrucks > 0)
-    ? $maintCostPrev / $totalTrucks
-    : null;
-
-// Defensive flag, shared by every payroll-dependent query below: if
-// payroll_records doesn't exist yet, degrade gracefully instead of a fatal
-// crash, and surface one clear on-page notice rather than several.
-$payrollTableMissing = false;
-
-// ── Rolling-period totals for the remaining expense categories, for
-//    Variance Analysis. Same categories already shown on the Billing page's
-//    Expenses & Profit tab, just scoped to this page's rolling period filter
-//    instead of that page's own filter — same underlying tables either way. ──
-$expCategoryTotalsStmt = $pdo->prepare("
-    SELECT expense_type, COALESCE(SUM(amount), 0) AS total
-    FROM trip_expenses
-    WHERE expense_date >= :rangeStart AND expense_date < :rangeEnd
-    GROUP BY expense_type
-");
-$expCategoryTotalsStmt->execute([':rangeStart' => $rangeStartSql, ':rangeEnd' => $rangeEndSql]);
-$expenseCategoryTotals = ['Fuel' => 0.0, 'Toll' => 0.0, 'Driver Allowance' => 0.0, 'Other' => 0.0];
-foreach ($expCategoryTotalsStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-    $expenseCategoryTotals[$row['expense_type']] = (float)$row['total'];
-}
-
-// Defensive: same missing-table handling as the Net Profit Trend chart below.
-$payrollTotalForVariance = 0.0;
-try {
-    $payrollTotalStmt = $pdo->prepare("SELECT COALESCE(SUM(amount_paid), 0) FROM payroll_records WHERE paid_date >= :rangeStart AND paid_date < :rangeEnd");
-    $payrollTotalStmt->execute([':rangeStart' => $rangeStartSql, ':rangeEnd' => $rangeEndSql]);
-    $payrollTotalForVariance = (float)$payrollTotalStmt->fetchColumn();
-} catch (PDOException $e) {
-    if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
-        $payrollTableMissing = true;
-    } else {
-        throw $e;
-    }
-}
-
-$tripPayTableMissing = false;
-$tripPayTotalForVariance = 0.0;
-try {
-    $tripPayTotalStmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM trip_pay WHERE paid_date >= :rangeStart AND paid_date < :rangeEnd");
-    $tripPayTotalStmt->execute([':rangeStart' => $rangeStartSql, ':rangeEnd' => $rangeEndSql]);
-    $tripPayTotalForVariance = (float)$tripPayTotalStmt->fetchColumn();
-} catch (PDOException $e) {
-    if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
-        $tripPayTableMissing = true;
-    } else {
-        throw $e;
-    }
-}
-
-// ── Revenue vs Maintenance Cost trend (bucketed by selected granularity) ─────
-$revBucketExpr  = bucketExpr('created_at', $granularity);
-$costBucketExpr = bucketExpr('date_performed', $granularity);
-
-$revByBucket = qRange($pdo, "
-    SELECT $revBucketExpr AS bucket, SUM(amount) AS total
-    FROM billings
-    WHERE created_at >= :rangeStart AND created_at < :rangeEnd
-    GROUP BY bucket
-", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
-
-$costByBucket = qRange($pdo, "
-    SELECT $costBucketExpr AS bucket, SUM(cost) AS total
-    FROM maintenance_records
-    WHERE date_performed >= :rangeStart AND date_performed < :rangeEnd
-    GROUP BY bucket
-", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
-
-$trendLabels = $buckets['labels'];
-$revTrend    = array_map(fn($k) => round((float)($revByBucket[$k]  ?? 0), 2), $buckets['keys']);
-$costTrend   = array_map(fn($k) => round((float)($costByBucket[$k] ?? 0), 2), $buckets['keys']);
-
-// ── Net Profit trend (Head Management only) — Revenue minus Total Expenses,
-//    bucketed the same way. Total Expenses here is the SAME definition used
-//    on the Billing page's Expenses & Profit tab (maintenance cost + all
-//    trip_expenses categories + periodic payroll + separate trip_pay wages),
-//    so the two never disagree with each other. ──
-$profitTrend = null;
-if ($isHead) {
-    $tripExpBucketExpr = bucketExpr('expense_date', $granularity);
-    $tripExpByBucket = qRange($pdo, "
-        SELECT $tripExpBucketExpr AS bucket, SUM(amount) AS total
-        FROM trip_expenses
-        WHERE expense_date >= :rangeStart AND expense_date < :rangeEnd
-        GROUP BY bucket
-    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
-
-    // Defensive: if payroll_records hasn't been created yet, degrade to "no
-    // payroll data" instead of a fatal crash, but keep the profit chart
-    // rendering with what IS available — and flag it so the page can tell
-    // Head Management the profit figure is understated until it's fixed.
-    $payrollByBucket = [];
-    try {
-        $payrollBucketExpr = bucketExpr('paid_date', $granularity);
-        $payrollByBucket = qRange($pdo, "
-            SELECT $payrollBucketExpr AS bucket, SUM(amount_paid) AS total
-            FROM payroll_records
-            WHERE paid_date >= :rangeStart AND paid_date < :rangeEnd
-            GROUP BY bucket
-        ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
-    } catch (PDOException $e) {
-        if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
-            $payrollTableMissing = true;
-        } else {
-            throw $e;
-        }
-    }
-
-    // Same defensive pattern for trip_pay (Driver/Helper crew pay).
-    $tripPayByBucket = [];
-    try {
-        $tripPayBucketExpr = bucketExpr('paid_date', $granularity);
-        $tripPayByBucket = qRange($pdo, "
-            SELECT $tripPayBucketExpr AS bucket, SUM(amount) AS total
-            FROM trip_pay
-            WHERE paid_date >= :rangeStart AND paid_date < :rangeEnd
-            GROUP BY bucket
-        ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
-    } catch (PDOException $e) {
-        if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
-            $tripPayTableMissing = true;
-        } else {
-            throw $e;
-        }
-    }
-
-    $totalExpensesTrend = array_map(
-        fn($k) => round(
-            (float)($costByBucket[$k] ?? 0) + (float)($tripExpByBucket[$k] ?? 0)
-                + (float)($payrollByBucket[$k] ?? 0) + (float)($tripPayByBucket[$k] ?? 0),
-            2
-        ),
-        $buckets['keys']
-    );
-    $netProfitTrend = array_map(fn($i) => round($revTrend[$i] - $totalExpensesTrend[$i], 2), array_keys($buckets['keys']));
-
-    $profitTrend = [
-        'labels'   => $trendLabels,
-        'revenue'  => $revTrend,
-        'expenses' => $totalExpensesTrend,
-        'profit'   => $netProfitTrend,
-    ];
-}
-
-// ── Trip status breakdown (period-aware) ──────────────────────────────────────
-$statusRows = qRange($pdo, "
-    SELECT status, COUNT(*) AS cnt FROM trips t WHERE 1=1 $tripDateFilter GROUP BY status
-", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
-$statusLabels = ['Loading', 'In Transit', 'Unloading', 'Completed', 'Cancelled'];
-$statusData   = array_map(fn($s) => (int)($statusRows[$s] ?? 0), $statusLabels);
-$statusColors = ['#6c757d', '#0d6efd', '#0dcaf0', '#198754', '#dc3545'];
-
-// ── Maintenance cost by type (period-aware) ───────────────────────────────────
-$maintTypeRows = qRange($pdo, "
-    SELECT maintenance_type, COALESCE(SUM(cost), 0) AS total_cost
-    FROM maintenance_records
-    WHERE 1=1 $maintDateFilter
-    GROUP BY maintenance_type
-", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
-$maintTypeLabels = ['Preventive', 'Corrective', 'Inspection'];
-$maintTypeData   = array_map(fn($t) => round((float)($maintTypeRows[$t] ?? 0), 2), $maintTypeLabels);
-$maintTypeColors = ['#198754', '#dc3545', '#0d6efd'];
-
-// ── Top 5 trucks by revenue ────────────────────────────────────────────────────
-$topTrucks = qRange($pdo, "
-    SELECT tr.plate_number, tr.brand, tr.model,
-           COUNT(DISTINCT t.trip_id) AS trip_count,
-           COALESCE(SUM(b.amount), 0) AS revenue
-    FROM trucks tr
-    JOIN dispatch_requests dr ON dr.truck_id = tr.truck_id
-    JOIN trips t ON t.dispatch_id = dr.dispatch_id AND t.status = 'Completed'
-    LEFT JOIN billings b ON b.trip_id = t.trip_id
-    WHERE 1=1 $tripDateFilter
-    GROUP BY tr.truck_id
-    ORDER BY revenue DESC
-    LIMIT 5
-", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
-
-// ── Top 5 drivers by completed trips ──────────────────────────────────────────
-$topDrivers = qRange($pdo, "
-    SELECT e.full_name,
-           COUNT(*) AS trip_count,
-           SUM(CASE WHEN t.is_late = 1 THEN 1 ELSE 0 END) AS late_count
-    FROM dispatch_requests dr
-    JOIN trips t ON t.dispatch_id = dr.dispatch_id AND t.status = 'Completed'
-    JOIN employees e ON e.employee_id = dr.driver_id
-    WHERE 1=1 $tripDateFilter
-    GROUP BY e.employee_id
-    ORDER BY trip_count DESC
-    LIMIT 5
-", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
-
-// ── Incident trend (bucketed by selected granularity) ─────────────────────────
-$incBucketExpr = bucketExpr('reported_at', $granularity);
-$incByBucket = qRange($pdo, "
-    SELECT $incBucketExpr AS bucket, COUNT(*) AS cnt
-    FROM incidents
-    WHERE reported_at >= :rangeStart AND reported_at < :rangeEnd
-    GROUP BY bucket
-", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
-$incTrend = array_map(fn($k) => (int)($incByBucket[$k] ?? 0), $buckets['keys']);
-
-// ══════════════════════════════════════════════════════════════════════════
-// ROLE-SPECIFIC DATA — each role gets its own relevant slice, not a
-// relabeled copy of the Head Management view.
-//
-// Safe defaults first: each variable below is only assigned its real value
-// inside a role-matching if-block further down, then read again later in a
-// separate block that re-checks the same $role condition. That's always
-// safe at runtime ($role never changes mid-request), but a static analyzer
-// can't prove the two checks agree, so it flags the later read as a
-// possibly-undefined variable. Defaulting them here removes the warning
-// and costs nothing.
-// ══════════════════════════════════════════════════════════════════════════
-$tripVolumeTrend             = array_fill(0, count($buckets['keys']), 0);
-$collTrend                   = array_fill(0, count($buckets['keys']), 0.0);
-$maintRecordsLoggedCount     = 0;
-$maintRecordsLoggedCountPrev = null;
-$openIncidentsCount          = 0;
-
-// ── Dispatcher: trip volume trend + trucks by trip count ─────────────────────
-if ($role === ROLE_DISPATCHER) {
-    $tripVolBucketExpr = bucketExpr('t.created_at', $granularity);
-    $tripVolByBucket = qRange($pdo, "
-        SELECT $tripVolBucketExpr AS bucket, COUNT(*) AS cnt
+// ════════════════════════════════════════════════════════════════════════════
+// OPERATIONS
+// ════════════════════════════════════════════════════════════════════════════
+if ($canOperations) {
+    $departureBucket = bucketExpr('t.departure_time', $granularity);
+    // COUNT(DISTINCT trip_id): one trip is never counted twice by a join.
+    $stmt = $pdo->prepare("
+        SELECT $departureBucket AS bucket, COUNT(DISTINCT t.trip_id) AS trip_count
         FROM trips t
-        WHERE t.status = 'Completed' AND t.created_at >= :rangeStart AND t.created_at < :rangeEnd
+        LEFT JOIN trucks tr ON tr.truck_id = t.truck_id
+        WHERE t.departure_time IS NOT NULL
+          AND t.departure_time >= :rangeStart AND t.departure_time < :rangeEnd
+          $tripScopeSql
         GROUP BY bucket
-    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
-    $tripVolumeTrend = array_map(fn($k) => (int)($tripVolByBucket[$k] ?? 0), $buckets['keys']);
+        ORDER BY bucket
+    ");
+    $stmt->execute($tripParams);
+    $departureRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $topTrucksByTrips = qRange($pdo, "
-        SELECT tr.plate_number, tr.brand, tr.model,
-               COUNT(*) AS trip_count,
-               SUM(CASE WHEN t.is_late = 1 THEN 1 ELSE 0 END) AS late_count
-        FROM trucks tr
-        JOIN dispatch_requests dr ON dr.truck_id = tr.truck_id
-        JOIN trips t ON t.dispatch_id = dr.dispatch_id AND t.status = 'Completed'
-        WHERE t.created_at >= :rangeStart AND t.created_at < :rangeEnd
-        GROUP BY tr.truck_id
-        ORDER BY trip_count DESC
-        LIMIT 5
-    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
+    $stmt = $pdo->prepare("
+        SELECT COALESCE(NULLIF(TRIM(cl.client_name), ''), 'Unassigned') AS client_name,
+               COUNT(DISTINCT t.trip_id) AS trip_count
+        FROM trips t
+        LEFT JOIN trucks tr ON tr.truck_id = t.truck_id
+        LEFT JOIN clients cl ON cl.client_id = t.client_id
+        WHERE t.departure_time IS NOT NULL
+          AND t.departure_time >= :rangeStart AND t.departure_time < :rangeEnd
+          $tripScopeSql
+        GROUP BY client_name
+        ORDER BY client_name
+    ");
+    $stmt->execute($tripParams);
+    $clientRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmt = $pdo->prepare("
+        SELECT COALESCE(NULLIF(TRIM(tr.plate_number), ''), 'Unassigned') AS plate_number,
+               COUNT(DISTINCT t.trip_id) AS trip_count
+        FROM trips t
+        LEFT JOIN trucks tr ON tr.truck_id = t.truck_id
+        WHERE t.departure_time IS NOT NULL
+          AND t.departure_time >= :rangeStart AND t.departure_time < :rangeEnd
+          $tripScopeSql
+        GROUP BY plate_number
+        ORDER BY plate_number
+    ");
+    $stmt->execute($tripParams);
+    $truckRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmt = $pdo->prepare("
+        SELECT t.status, COUNT(DISTINCT t.trip_id) AS trip_count
+        FROM trips t
+        LEFT JOIN trucks tr ON tr.truck_id = t.truck_id
+        WHERE t.scheduled_departure >= :rangeStart AND t.scheduled_departure < :rangeEnd
+          $tripScopeSql
+        GROUP BY t.status
+        ORDER BY t.status
+    ");
+    $stmt->execute($tripParams);
+    $statusRows = $orderBy($stmt->fetchAll(PDO::FETCH_ASSOC), 'status', $tripStatusOrder);
+
+    $fleetRows = [];
+    if ($canFleet) {
+        $fleetSql = 'SELECT tr.status, COUNT(*) AS truck_count FROM trucks tr';
+        $fleetParams = [];
+        if ($isDispatcher && !empty($scope['truck_types'])) {
+            $fleetKeys = [];
+            foreach (array_values($scope['truck_types']) as $index => $truckType) {
+                $key = ':fleetType' . $index;
+                $fleetKeys[] = $key;
+                $fleetParams[$key] = $truckType;
+            }
+            $fleetSql .= ' WHERE tr.truck_type IN (' . implode(', ', $fleetKeys) . ')';
+        }
+        $fleetSql .= ' GROUP BY tr.status ORDER BY tr.status';
+        $stmt = $pdo->prepare($fleetSql);
+        $stmt->execute($fleetParams);
+        $fleetRows = $orderBy($stmt->fetchAll(PDO::FETCH_ASSOC), 'status', $fleetStatusOrder);
+    }
+
+    $tripsDeparted = (int)$sumField($departureRows, 'trip_count');
+    $tripsScheduled = (int)$sumField($statusRows, 'trip_count');
+    $pendingTrips = $countOf($statusRows, 'status', 'Pending Approval', 'trip_count');
+    $cancelledTrips = $countOf($statusRows, 'status', 'Cancelled', 'trip_count');
+    $completedTrips = $countOf($statusRows, 'status', 'Completed', 'trip_count');
+
+    $kpis = [
+        ['label' => 'Trips with recorded departure', 'value' => number_format($tripsDeparted), 'sub' => 'By actual departure time, ' . $periodLabel, 'tone' => 'primary', 'hero' => true],
+        ['label' => 'Trips scheduled', 'value' => number_format($tripsScheduled), 'sub' => 'By scheduled departure; all current statuses', 'tone' => ''],
+        ['label' => 'Pending approval', 'value' => number_format($pendingTrips), 'sub' => 'Needs a decision before dispatch', 'tone' => $pendingTrips > 0 ? 'warn' : 'good'],
+        ['label' => 'Cancelled', 'value' => number_format($cancelledTrips), 'sub' => 'Kept separate from operating trips', 'tone' => $cancelledTrips > 0 ? 'danger' : 'good'],
+        ['label' => 'Status “Completed”', 'value' => number_format($completedTrips), 'sub' => 'Stored status; units not verified', 'tone' => ''],
+    ];
+    if ($canFleet) {
+        $kpis[] = ['label' => 'Trucks on trip', 'value' => number_format($countOf($fleetRows, 'status', 'On Trip', 'truck_count')), 'sub' => 'Current stored status', 'tone' => ''];
+        $underMaint = $countOf($fleetRows, 'status', 'Under Maintenance', 'truck_count');
+        $kpis[] = ['label' => 'Trucks under maintenance', 'value' => number_format($underMaint), 'sub' => 'Current stored status', 'tone' => $underMaint > 0 ? 'warn' : 'good'];
+    }
+
+    $trip = $buckets($departureRows);
+    $charts['opsTripTrend'] = [
+        'title' => 'Trips by actual departure', 'span' => 8, 'height' => 'tall', 'type' => 'bar', 'format' => 'count', 'unit' => 'trip',
+        'note' => $granularities[$granularity] . ' buckets' . ($granularity === 'week' ? ' (weeks start Monday)' : '') . '. Not a waybill-submission count.',
+        'labels' => $trip['labels'],
+        'datasets' => [['label' => 'Trips', 'data' => $series($trip['keys'], $departureRows, 'trip_count'), 'color' => '#2f6fdd']],
+        'method' => [
+            'Formula' => 'COUNT(DISTINCT trip_id) per bucket',
+            'Source' => 'trips.trip_id, trips.departure_time',
+            'Date basis' => 'Recorded actual departure time (proposed basis; the client’s weekly basis is unconfirmed). Trips without a departure are not counted.',
+            'Limits' => 'Dispatchers see only their own scoped trips. Not units, not waybills.',
+        ],
+    ];
+    $charts['opsTripStatus'] = [
+        'title' => 'Trips by current status', 'span' => 4, 'height' => 'tall', 'type' => 'doughnut', 'format' => 'count', 'unit' => 'trip',
+        'note' => 'Scheduled in ' . strtolower($periodLabel) . '. Statuses are never merged.',
+        'labels' => array_map(static fn($r) => (string)$r['status'], $statusRows),
+        'datasets' => [[
+            'label' => 'Trips', 'data' => array_map(static fn($r) => (int)$r['trip_count'], $statusRows),
+            'colors' => array_map(static fn($r) => $colorOf($tripStatusColors, $r['status']), $statusRows),
+        ]],
+        'method' => [
+            'Formula' => 'COUNT(DISTINCT trip_id) grouped by trips.status',
+            'Source' => 'trips.trip_id, trips.status',
+            'Date basis' => 'Scheduled departure in the period; the status is the current one, not a historical snapshot.',
+            'Limits' => 'Delivered / Returned / Completed does not prove all required units were delivered. Pending approval and cancelled are separate slices.',
+        ],
+    ];
+    $topClients = array_slice(array_values(array_filter($sortDesc($clientRows, 'trip_count'), static fn($r) => (int)$r['trip_count'] > 0)), 0, 8);
+    $charts['opsClients'] = [
+        'title' => 'Top clients by trips', 'span' => 4, 'height' => 'medium', 'type' => 'hbar', 'format' => 'count', 'unit' => 'trip',
+        'note' => 'Top 8 of ' . count($clientRows) . '. Full list under detailed records.',
+        'labels' => array_map(static fn($r) => (string)$r['client_name'], $topClients),
+        'datasets' => [['label' => 'Trips', 'data' => array_map(static fn($r) => (int)$r['trip_count'], $topClients), 'color' => '#1aa5a0']],
+        'method' => [
+            'Formula' => 'COUNT(DISTINCT trip_id) per client, highest first',
+            'Source' => 'trips.client_id → clients.client_name',
+            'Date basis' => 'Actual departure time in the period.',
+            'Limits' => 'One client level only; whether it is the company or the end client is unconfirmed.',
+        ],
+    ];
+    $topTrucks = array_slice(array_values(array_filter($sortDesc($truckRows, 'trip_count'), static fn($r) => (int)$r['trip_count'] > 0)), 0, 8);
+    $charts['opsTrucks'] = [
+        'title' => 'Top trucks by trips', 'span' => 4, 'height' => 'medium', 'type' => 'hbar', 'format' => 'count', 'unit' => 'trip',
+        'note' => 'Top 8 of ' . count($truckRows) . '. Full list under detailed records.',
+        'labels' => array_map(static fn($r) => (string)$r['plate_number'], $topTrucks),
+        'datasets' => [['label' => 'Trips', 'data' => array_map(static fn($r) => (int)$r['trip_count'], $topTrucks), 'color' => '#7a55c9']],
+        'method' => [
+            'Formula' => 'COUNT(DISTINCT trip_id) per truck, highest first',
+            'Source' => 'trips.truck_id → trucks.plate_number',
+            'Date basis' => 'Actual departure time in the period.',
+            'Limits' => 'A trip count only; not a utilization or performance score.',
+        ],
+    ];
+    if ($canFleet) {
+        $charts['opsFleet'] = [
+            'title' => 'Fleet by current status', 'span' => 4, 'height' => 'medium', 'type' => 'doughnut', 'format' => 'count', 'unit' => 'truck',
+            'note' => 'Snapshot of today; no reporting period applies.',
+            'labels' => array_map(static fn($r) => (string)$r['status'], $fleetRows),
+            'datasets' => [[
+                'label' => 'Trucks', 'data' => array_map(static fn($r) => (int)$r['truck_count'], $fleetRows),
+                'colors' => array_map(static fn($r) => $colorOf($fleetStatusColors, $r['status']), $fleetRows),
+            ]],
+            'method' => [
+                'Formula' => 'COUNT(truck_id) grouped by trucks.status',
+                'Source' => 'trucks.truck_id, trucks.status',
+                'Date basis' => 'Current stored status.',
+                'Limits' => 'Not utilization, truck-days or downtime; no client status codes (NT, DT) are interpreted.',
+            ],
+        ];
+    }
+
+    $sections['operations'] = [
+        'title' => 'Operations', 'icon' => 'bi-truck',
+        'blurb' => 'Trip volume, trip status and fleet position.',
+        'kpis' => $kpis,
+        'charts' => array_values(array_filter(['opsTripTrend', 'opsTripStatus', 'opsClients', 'opsTrucks', 'opsFleet'], static fn($id) => isset($charts[$id]))),
+        'tables' => [
+            ['title' => 'Trips by actual departure period', 'headers' => [$granularities[$granularity] . ' bucket', 'Trips'],
+             'rows' => array_map(static fn($r) => [(string)$r['bucket'], (int)$r['trip_count']], $departureRows)],
+            ['title' => 'Trips by current status', 'headers' => ['Recorded status', 'Trips'],
+             'rows' => array_map(static fn($r) => [(string)$r['status'], (int)$r['trip_count']], $statusRows)],
+            ['title' => 'Trips by recorded client field', 'headers' => ['Client field', 'Trips'],
+             'rows' => array_map(static fn($r) => [(string)$r['client_name'], (int)$r['trip_count']], $sortDesc($clientRows, 'trip_count'))],
+            ['title' => 'Trips by truck', 'headers' => ['Truck', 'Trips'],
+             'rows' => array_map(static fn($r) => [(string)$r['plate_number'], (int)$r['trip_count']], $sortDesc($truckRows, 'trip_count'))],
+        ],
+        'unavailable' => 'Recorded delays (a past ETA is an alert, not a delay), delivered-unit completion, fleet utilization / truck-days, on-time rate, driver attribution and missing waybills are not shown: the data or the client’s definition is not confirmed.',
+    ];
+    if ($canFleet) {
+        $sections['operations']['tables'][] = ['title' => 'Fleet by stored status', 'headers' => ['Stored truck status', 'Trucks'],
+            'rows' => array_map(static fn($r) => [(string)$r['status'], (int)$r['truck_count']], $fleetRows)];
+    }
 }
 
-// ── Maintenance: cost-only trend, open incidents, records logged, top trucks ─
-if ($role === ROLE_MAINTENANCE) {
-    $openIncidentsCount = (int)$pdo->query("
-        SELECT COUNT(*) FROM incidents WHERE resolved_at IS NULL
-    ")->fetchColumn();
+// ════════════════════════════════════════════════════════════════════════════
+// ACCOUNTING
+// ════════════════════════════════════════════════════════════════════════════
+if ($canFinancials) {
+    $eligibleBilling = billingRevenueSql('b');
+    $billBucket = bucketExpr('b.billing_date', $granularity);
+    $payBucket = bucketExpr('c.payment_date', $granularity);
 
-    $maintRecordsLoggedCount = (int)qRange($pdo, "
-        SELECT COUNT(*) FROM maintenance_records WHERE date_performed >= :rangeStart AND date_performed < :rangeEnd
-    ", $rangeStartSql, $rangeEndSql)->fetchColumn();
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*) AS record_count, SUM(b.total_amount) AS total_amount
+        FROM billings b
+        WHERE $eligibleBilling
+          AND b.billing_date >= :rangeStart AND b.billing_date < :rangeEnd
+    ");
+    $stmt->execute($rangeParams);
+    $billingStats = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
-    $maintRecordsLoggedCountPrev = $hasComparison ? (int)qPrev($pdo, "
-        SELECT COUNT(*) FROM maintenance_records
-        WHERE date_performed >= :prevStart AND date_performed < :prevEnd
-    ", $prevRangeStartSql, $prevRangeEndSql)->fetchColumn() : null;
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*) AS record_count, SUM(c.amount) AS total_amount
+        FROM collections c
+        WHERE c.payment_date >= :rangeStart AND c.payment_date < :rangeEnd
+    ");
+    $stmt->execute($rangeParams);
+    $collectionStats = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
-    $topTrucksByMaintCost = qRange($pdo, "
-        SELECT tr.plate_number, tr.brand, tr.model,
-               COUNT(*) AS record_count,
-               COALESCE(SUM(mr.cost), 0) AS total_cost
-        FROM trucks tr
-        JOIN maintenance_records mr ON mr.truck_id = tr.truck_id
-        WHERE mr.date_performed >= :rangeStart AND mr.date_performed < :rangeEnd
-        GROUP BY tr.truck_id
-        ORDER BY total_cost DESC
-        LIMIT 5
+    $billedTrend = qRange($pdo, "
+        SELECT $billBucket AS bucket, SUM(b.total_amount) AS amount
+        FROM billings b
+        WHERE $eligibleBilling
+          AND b.billing_date >= :rangeStart AND b.billing_date < :rangeEnd
+        GROUP BY bucket
+        ORDER BY bucket
     ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
-}
 
-// ── Accounting: billed vs collected trend, top clients ────────────────────────
-if ($role === ROLE_ACCOUNTING) {
-    $collBucketExpr = bucketExpr('c.payment_date', $granularity);
-    $collByBucket = qRange($pdo, "
-        SELECT $collBucketExpr AS bucket, SUM(c.amount_paid) AS total
+    $collectedTrend = qRange($pdo, "
+        SELECT $payBucket AS bucket, SUM(c.amount) AS amount
         FROM collections c
         WHERE c.payment_date >= :rangeStart AND c.payment_date < :rangeEnd
         GROUP BY bucket
-    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_KEY_PAIR);
-    $collTrend = array_map(fn($k) => round((float)($collByBucket[$k] ?? 0), 2), $buckets['keys']);
-
-    $topClientsByRevenue = qRange($pdo, "
-        SELECT COALESCE(NULLIF(b.client_name, ''), CONCAT('Trip ', t.trip_number)) AS client_label,
-               COUNT(*) AS invoice_count,
-               COALESCE(SUM(b.amount), 0) AS revenue
-        FROM billings b
-        JOIN trips t ON b.trip_id = t.trip_id
-        WHERE b.created_at >= :rangeStart AND b.created_at < :rangeEnd
-        GROUP BY client_label
-        ORDER BY revenue DESC
-        LIMIT 5
+        ORDER BY bucket
     ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
+
+    $billingStatusRows = $orderBy(qRange($pdo, "
+        SELECT b.status, COUNT(*) AS record_count, SUM(b.total_amount) AS amount
+        FROM billings b
+        WHERE $eligibleBilling
+          AND b.billing_date >= :rangeStart AND b.billing_date < :rangeEnd
+        GROUP BY b.status
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC), 'status', $billingStatusOrder);
+
+    $billingClientRows = qRange($pdo, "
+        SELECT COALESCE(NULLIF(TRIM(cl.client_name), ''), 'Unassigned') AS client_name,
+               COUNT(*) AS record_count, SUM(b.total_amount) AS amount
+        FROM billings b
+        LEFT JOIN clients cl ON cl.client_id = b.client_id
+        WHERE $eligibleBilling
+          AND b.billing_date >= :rangeStart AND b.billing_date < :rangeEnd
+        GROUP BY client_name
+        ORDER BY amount DESC
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
+
+    $paymentMethodRows = qRange($pdo, "
+        SELECT c.payment_method, COUNT(*) AS record_count, SUM(c.amount) AS amount
+        FROM collections c
+        WHERE c.payment_date >= :rangeStart AND c.payment_date < :rangeEnd
+        GROUP BY c.payment_method
+        ORDER BY amount DESC
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
+
+    $billedTotal = (float)($billingStats['total_amount'] ?? 0);
+    $billedCount = (int)($billingStats['record_count'] ?? 0);
+    $collectedTotal = (float)($collectionStats['total_amount'] ?? 0);
+    $collectedCount = (int)($collectionStats['record_count'] ?? 0);
+    $overdueBillings = $countOf($billingStatusRows, 'status', 'Overdue', 'record_count');
+
+    $kpis = [
+        ['label' => 'Recorded billings', 'value' => $billedCount ? $peso($billedTotal) : '—', 'sub' => $billedCount ? number_format($billedCount) . ' billings by billing date' : 'No eligible billing in this period', 'tone' => 'primary', 'hero' => true],
+        ['label' => 'Recorded collections', 'value' => $collectedCount ? $peso($collectedTotal) : '—', 'sub' => $collectedCount ? number_format($collectedCount) . ' payments by payment date' : 'No payment recorded in this period', 'tone' => 'good'],
+        ['label' => 'Billings marked Overdue', 'value' => number_format($overdueBillings), 'sub' => 'Stored status; no aging is computed', 'tone' => $overdueBillings > 0 ? 'danger' : 'good'],
+        ['label' => 'Billing records', 'value' => number_format($billedCount), 'sub' => 'Issued, Partially Paid, Paid, Overdue', 'tone' => ''],
+        ['label' => 'Payments recorded', 'value' => number_format($collectedCount), 'sub' => 'Each payment counted once', 'tone' => ''],
+    ];
+
+    $money = $buckets($billedTrend, $collectedTrend);
+    $charts['accTrend'] = [
+        'title' => 'Billed and collected over time', 'span' => 8, 'height' => 'tall', 'type' => 'bar', 'format' => 'peso', 'unit' => '',
+        'note' => $granularities[$granularity] . ' totals. Two independent date bases; the bars are not matched to the same invoices.',
+        'labels' => $money['labels'],
+        'datasets' => [
+            ['label' => 'Billed', 'data' => $series($money['keys'], $billedTrend, 'amount'), 'color' => '#2f6fdd'],
+            ['label' => 'Collected', 'data' => $series($money['keys'], $collectedTrend, 'amount'), 'color' => '#2f9e5b'],
+        ],
+        'method' => [
+            'Formula' => 'Billed = SUM(total_amount); Collected = SUM(amount); each per bucket',
+            'Source' => 'billings.total_amount, billings.billing_date, billings.status; collections.amount, collections.payment_date',
+            'Date basis' => 'Billed by billing date (Issued, Partially Paid, Paid, Overdue only; Draft and Cancelled excluded). Collected by payment date.',
+            'Limits' => 'Not a collection rate, receivable, cash position or profit.',
+        ],
+    ];
+    $charts['accStatus'] = [
+        'title' => 'Billed amount by status', 'span' => 4, 'height' => 'tall', 'type' => 'doughnut', 'format' => 'peso', 'unit' => '',
+        'note' => 'Eligible billings dated in ' . strtolower($periodLabel) . '.',
+        'labels' => array_map(static fn($r) => (string)$r['status'], $billingStatusRows),
+        'datasets' => [[
+            'label' => 'Billed', 'data' => array_map(static fn($r) => (float)$r['amount'], $billingStatusRows),
+            'colors' => array_map(static fn($r) => $colorOf($billingStatusColors, $r['status']), $billingStatusRows),
+        ]],
+        'method' => [
+            'Formula' => 'SUM(total_amount) grouped by billings.status',
+            'Source' => 'billings.total_amount, billings.status',
+            'Date basis' => 'Billing date in the period; the status is the stored current one.',
+            'Limits' => 'Status is as stored; due dates and payment allocation are not used.',
+        ],
+    ];
+    $topBilled = array_slice($billingClientRows, 0, 8);
+    $charts['accClients'] = [
+        'title' => 'Top clients by billed amount', 'span' => 6, 'height' => 'medium', 'type' => 'hbar', 'format' => 'peso', 'unit' => '',
+        'note' => 'Top 8 of ' . count($billingClientRows) . '.',
+        'labels' => array_map(static fn($r) => (string)$r['client_name'], $topBilled),
+        'datasets' => [['label' => 'Billed', 'data' => array_map(static fn($r) => (float)$r['amount'], $topBilled), 'color' => '#1aa5a0']],
+        'method' => [
+            'Formula' => 'SUM(total_amount) per client, highest first',
+            'Source' => 'billings.client_id → clients.client_name; billings.total_amount',
+            'Date basis' => 'Billing date; eligible statuses only.',
+            'Limits' => 'One client level only (company vs end client unconfirmed).',
+        ],
+    ];
+    $charts['accMethods'] = [
+        'title' => 'Collections by payment method', 'span' => 6, 'height' => 'medium', 'type' => 'doughnut', 'format' => 'peso', 'unit' => '',
+        'note' => 'Recorded payments dated in ' . strtolower($periodLabel) . '.',
+        'labels' => array_map(static fn($r) => (string)$r['payment_method'], $paymentMethodRows),
+        'datasets' => [[
+            'label' => 'Collected', 'data' => array_map(static fn($r) => (float)$r['amount'], $paymentMethodRows),
+            'colors' => array_map(static fn($r) => $colorOf($methodColors, $r['payment_method']), $paymentMethodRows),
+        ]],
+        'method' => [
+            'Formula' => 'SUM(amount) grouped by payment_method',
+            'Source' => 'collections.amount, collections.payment_method',
+            'Date basis' => 'Payment date in the period.',
+            'Limits' => 'Only payments entered in the system; missing payments are not treated as zero collections.',
+        ],
+    ];
+
+    $sections['accounting'] = [
+        'title' => 'Accounting', 'icon' => 'bi-cash-coin',
+        'blurb' => 'Recorded billings and collections.',
+        'kpis' => $kpis,
+        'charts' => ['accTrend', 'accStatus', 'accClients', 'accMethods'],
+        'tables' => [
+            ['title' => 'Billings and collections summary', 'headers' => ['Recorded information', 'Date basis', 'Records', 'Amount'],
+             'rows' => [
+                ['Billings (eligible statuses)', 'Billing date', $billedCount, $billedCount ? $peso($billedTotal) : 'No recorded billing'],
+                ['Collections', 'Payment date', $collectedCount, $collectedCount ? $peso($collectedTotal) : 'No recorded payment'],
+             ]],
+            ['title' => 'Billed amount by status', 'headers' => ['Status', 'Billings', 'Amount'],
+             'rows' => array_map(static fn($r) => [(string)$r['status'], (int)$r['record_count'], $peso($r['amount'])], $billingStatusRows)],
+            ['title' => 'Billed amount by client field', 'headers' => ['Client field', 'Billings', 'Amount'],
+             'rows' => array_map(static fn($r) => [(string)$r['client_name'], (int)$r['record_count'], $peso($r['amount'])], $billingClientRows)],
+            ['title' => 'Collections by payment method', 'headers' => ['Method', 'Payments', 'Amount'],
+             'rows' => array_map(static fn($r) => [(string)$r['payment_method'], (int)$r['record_count'], $peso($r['amount'])], $paymentMethodRows)],
+        ],
+        'unavailable' => 'Outstanding and overdue receivables, collection rate, expense categories and margin are not shown: payment allocation, client payment terms, waybill submission dates and approved definitions are missing or unconfirmed.',
+    ];
 }
 
-// Pass chart data to JS
-$GLOBALS['analytics_data'] = json_encode([
-    'periodLabel'      => $periodLabel,
-    'rangeStart'       => $rangeStart->format('Y-m-d'),
-    'rangeEnd'         => $rangeEnd->format('Y-m-d'),
-    'granularityLabel' => $granularityLabel,
-    'revCostTrend'     => ['labels' => $trendLabels, 'revenue' => $revTrend, 'cost' => $costTrend],
-    'profitTrend'      => $profitTrend,
-    'tripStatus'       => ['labels' => $statusLabels, 'data' => $statusData, 'colors' => $statusColors],
-    'maintType'        => ['labels' => $maintTypeLabels, 'data' => $maintTypeData, 'colors' => $maintTypeColors],
-    'incTrend'         => ['labels' => $trendLabels, 'data' => $incTrend],
-    'tripVolumeTrend'  => $role === ROLE_DISPATCHER  ? ['labels' => $trendLabels, 'data' => $tripVolumeTrend] : null,
-    'maintCostTrend'   => $role === ROLE_MAINTENANCE ? ['labels' => $trendLabels, 'data' => $costTrend]       : null,
-    'billedCollected'  => $role === ROLE_ACCOUNTING  ? ['labels' => $trendLabels, 'revenue' => $revTrend, 'collected' => $collTrend] : null,
-]);
+// ════════════════════════════════════════════════════════════════════════════
+// MAINTENANCE
+// ════════════════════════════════════════════════════════════════════════════
+if ($canMaintenance) {
+    $maintenanceDate = maintenanceRecordDateSql('mr');
+    $maintBucket = bucketExpr($maintenanceDate, $granularity);
+
+    $maintenanceRows = qRange($pdo, "
+        SELECT COALESCE(NULLIF(TRIM(tr.plate_number), ''), 'Unassigned') AS plate_number,
+               COUNT(*) AS record_count, SUM(mr.total_cost) AS recorded_cost
+        FROM maintenance_records mr
+        LEFT JOIN trucks tr ON tr.truck_id = mr.truck_id
+        WHERE mr.status <> 'Cancelled'
+          AND $maintenanceDate >= :rangeStart AND $maintenanceDate < :rangeEnd
+        GROUP BY plate_number
+        ORDER BY plate_number
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
+
+    $maintTrend = qRange($pdo, "
+        SELECT $maintBucket AS bucket, SUM(mr.total_cost) AS cost
+        FROM maintenance_records mr
+        WHERE mr.status <> 'Cancelled'
+          AND $maintenanceDate >= :rangeStart AND $maintenanceDate < :rangeEnd
+        GROUP BY bucket
+        ORDER BY bucket
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
+
+    $maintTypeRows = qRange($pdo, "
+        SELECT mr.maintenance_type, COUNT(*) AS record_count, SUM(mr.total_cost) AS cost
+        FROM maintenance_records mr
+        WHERE mr.status <> 'Cancelled'
+          AND $maintenanceDate >= :rangeStart AND $maintenanceDate < :rangeEnd
+        GROUP BY mr.maintenance_type
+        ORDER BY cost DESC
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC);
+
+    $maintStatusRows = $orderBy(qRange($pdo, "
+        SELECT mr.status, COUNT(*) AS record_count
+        FROM maintenance_records mr
+        WHERE $maintenanceDate >= :rangeStart AND $maintenanceDate < :rangeEnd
+        GROUP BY mr.status
+    ", $rangeStartSql, $rangeEndSql)->fetchAll(PDO::FETCH_ASSOC), 'status', $maintStatusOrder);
+
+    $withCost = array_values(array_filter($maintenanceRows, static fn($r) => $r['recorded_cost'] !== null));
+    $maintTotal = $sumField($withCost, 'recorded_cost');
+    $maintRecords = (int)$sumField($maintenanceRows, 'record_count');
+    $inProgress = $countOf($maintStatusRows, 'status', 'In Progress', 'record_count');
+    $waitingParts = $countOf($maintStatusRows, 'status', 'Waiting for Parts', 'record_count');
+
+    $kpis = [
+        ['label' => 'Recorded maintenance cost', 'value' => $withCost ? $peso($maintTotal) : '—', 'sub' => 'Non-cancelled records, ' . $periodLabel, 'tone' => 'primary', 'hero' => true],
+        ['label' => 'Maintenance records', 'value' => number_format($maintRecords), 'sub' => 'Excludes cancelled', 'tone' => ''],
+        ['label' => 'Trucks with records', 'value' => number_format(count($maintenanceRows)), 'sub' => 'Distinct plates in the period', 'tone' => ''],
+        ['label' => 'Waiting for parts', 'value' => number_format($waitingParts), 'sub' => 'Records at this status now', 'tone' => $waitingParts > 0 ? 'warn' : 'good'],
+        ['label' => 'In progress', 'value' => number_format($inProgress), 'sub' => 'Records at this status now', 'tone' => ''],
+    ];
+
+    $mt = $buckets($maintTrend);
+    $charts['mntTrend'] = [
+        'title' => 'Recorded maintenance cost over time', 'span' => 8, 'height' => 'tall', 'type' => 'bar', 'format' => 'peso', 'unit' => '',
+        'note' => $granularities[$granularity] . ' totals of recorded cost.',
+        'labels' => $mt['labels'],
+        'datasets' => [['label' => 'Recorded cost', 'data' => $series($mt['keys'], $maintTrend, 'cost'), 'color' => '#d99a00']],
+        'method' => [
+            'Formula' => 'SUM(total_cost) per bucket, excluding Cancelled',
+            'Source' => 'maintenance_records.total_cost, status, actual_completion_date, start_date, scheduled_date, created_at',
+            'Date basis' => 'Completion date, else start date, else scheduled date, else record creation date.',
+            'Limits' => 'System-entered cost only; may not be all company maintenance spending. Parts are not added again (they are already part of the record total).',
+        ],
+    ];
+    $charts['mntType'] = [
+        'title' => 'Cost by maintenance type', 'span' => 4, 'height' => 'tall', 'type' => 'doughnut', 'format' => 'peso', 'unit' => '',
+        'note' => 'Share of recorded cost in ' . strtolower($periodLabel) . '.',
+        'labels' => array_map(static fn($r) => (string)$r['maintenance_type'], $maintTypeRows),
+        'datasets' => [[
+            'label' => 'Cost', 'data' => array_map(static fn($r) => (float)$r['cost'], $maintTypeRows),
+            'colors' => array_map(static fn($r) => $colorOf($maintTypeColors, $r['maintenance_type']), $maintTypeRows),
+        ]],
+        'method' => [
+            'Formula' => 'SUM(total_cost) grouped by maintenance_type, excluding Cancelled',
+            'Source' => 'maintenance_records.maintenance_type, total_cost',
+            'Date basis' => 'Same maintenance date rule as the trend.',
+            'Limits' => 'Types are as entered (Preventive, Repair, Inspection, Other).',
+        ],
+    ];
+    $topMaint = array_slice($sortDesc($withCost, 'recorded_cost'), 0, 8);
+    $charts['mntTrucks'] = [
+        'title' => 'Top trucks by recorded cost', 'span' => 6, 'height' => 'medium', 'type' => 'hbar', 'format' => 'peso', 'unit' => '',
+        'note' => 'Top 8 of ' . count($withCost) . ' trucks with a recorded amount.',
+        'labels' => array_map(static fn($r) => (string)$r['plate_number'], $topMaint),
+        'datasets' => [['label' => 'Recorded cost', 'data' => array_map(static fn($r) => (float)$r['recorded_cost'], $topMaint), 'color' => '#d6403f']],
+        'method' => [
+            'Formula' => 'SUM(total_cost) per truck, highest first',
+            'Source' => 'maintenance_records.truck_id → trucks.plate_number; total_cost',
+            'Date basis' => 'Same maintenance date rule; Cancelled excluded.',
+            'Limits' => 'Records without an amount are not plotted and not treated as zero.',
+        ],
+    ];
+    $charts['mntStatus'] = [
+        'title' => 'Records by current status', 'span' => 6, 'height' => 'medium', 'type' => 'doughnut', 'format' => 'count', 'unit' => 'record',
+        'note' => 'Records dated in ' . strtolower($periodLabel) . ', including cancelled as its own slice.',
+        'labels' => array_map(static fn($r) => (string)$r['status'], $maintStatusRows),
+        'datasets' => [[
+            'label' => 'Records', 'data' => array_map(static fn($r) => (int)$r['record_count'], $maintStatusRows),
+            'colors' => array_map(static fn($r) => $colorOf($maintStatusColors, $r['status']), $maintStatusRows),
+        ]],
+        'method' => [
+            'Formula' => 'COUNT(record) grouped by status',
+            'Source' => 'maintenance_records.status',
+            'Date basis' => 'Same maintenance date rule; status is the current one.',
+            'Limits' => 'Which statuses count as “open” is unconfirmed, so none are merged.',
+        ],
+    ];
+
+    $sections['maintenance'] = [
+        'title' => 'Maintenance', 'icon' => 'bi-tools',
+        'blurb' => 'Recorded maintenance cost and work status.',
+        'kpis' => $kpis,
+        'charts' => ['mntTrend', 'mntType', 'mntTrucks', 'mntStatus'],
+        'tables' => [
+            ['title' => 'Recorded cost by truck', 'headers' => ['Truck', 'Records', 'Recorded cost'],
+             'rows' => array_map(static fn($r) => [(string)$r['plate_number'], (int)$r['record_count'], $r['recorded_cost'] === null ? 'No recorded amount' : $peso($r['recorded_cost'])], $maintenanceRows)],
+            ['title' => 'Recorded cost by type', 'headers' => ['Type', 'Records', 'Recorded cost'],
+             'rows' => array_map(static fn($r) => [(string)$r['maintenance_type'], (int)$r['record_count'], $peso($r['cost'])], $maintTypeRows)],
+            ['title' => 'Records by status', 'headers' => ['Status', 'Records'],
+             'rows' => array_map(static fn($r) => [(string)$r['status'], (int)$r['record_count']], $maintStatusRows)],
+        ],
+        'unavailable' => 'Downtime and repair duration are not shown: no reliable down-start / return-to-service dates or daily truck status history exist.',
+    ];
+}
+
+// Only plain chart definitions go to the browser; method text stays server-side.
+$chartJson = [];
+foreach ($charts as $id => $chart) {
+    $chartJson[$id] = [
+        'type' => $chart['type'], 'format' => $chart['format'], 'unit' => $chart['unit'],
+        'labels' => $chart['labels'], 'datasets' => $chart['datasets'],
+    ];
+}
+
+$GLOBALS['page_needs_chart'] = true;
+$GLOBALS['page_js'] = APP_BASE . '/assets/js/analytics.js';
+layoutHead('Analytics', APP_BASE . '/assets/css/analytics.css');
+?>
+<?php
+function anHasData(array $chart): bool {
+    foreach ($chart['datasets'] as $dataset) {
+        foreach ($dataset['data'] as $value) {
+            if ($value !== null && (float)$value > 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+function anKpi(array $kpi): string {
+    $tone = $kpi['tone'] !== '' ? ' an-kpi-' . $kpi['tone'] : '';
+    $hero = !empty($kpi['hero']) ? ' an-kpi-hero' : '';
+    return '<div class="an-kpi' . $tone . $hero . '">'
+        . '<div class="an-kpi-label">' . htmlspecialchars($kpi['label']) . '</div>'
+        . '<div class="an-kpi-value">' . htmlspecialchars($kpi['value']) . '</div>'
+        . '<div class="an-kpi-sub">' . htmlspecialchars($kpi['sub']) . '</div></div>';
+}
+
+function anChartCard(string $id, array $chart): void { ?>
+  <article class="an-card an-span-<?= (int)$chart['span'] ?>">
+    <header class="an-card-head">
+      <h3><?= htmlspecialchars($chart['title']) ?></h3>
+      <p><?= htmlspecialchars($chart['note']) ?></p>
+    </header>
+    <?php if (anHasData($chart)): ?>
+      <div class="an-chart an-chart-<?= htmlspecialchars($chart['height']) ?>">
+        <canvas id="<?= htmlspecialchars($id) ?>" role="img" aria-label="<?= htmlspecialchars($chart['title'] . ' — values are listed in the detailed records below') ?>"></canvas>
+      </div>
+    <?php else: ?>
+      <div class="an-chart-empty"><i class="bi bi-bar-chart" aria-hidden="true"></i> No recorded data for this period.</div>
+    <?php endif; ?>
+    <details class="an-method">
+      <summary>How this is calculated</summary>
+      <dl>
+        <?php foreach ($chart['method'] as $term => $text): ?>
+          <dt><?= htmlspecialchars($term) ?></dt><dd><?= htmlspecialchars($text) ?></dd>
+        <?php endforeach; ?>
+      </dl>
+    </details>
+  </article>
+<?php }
+
+function anTable(array $table): void { ?>
+  <div class="an-table-card">
+    <h4><?= htmlspecialchars($table['title']) ?></h4>
+    <?php if (!$table['rows']): ?>
+      <p class="an-muted">No records in this period.</p>
+    <?php else: ?>
+    <div class="an-table-wrap">
+      <table class="table align-middle mb-0">
+        <thead><tr><?php foreach ($table['headers'] as $i => $header): ?>
+          <th class="<?= $i > 0 ? 'text-end' : '' ?>"><?= htmlspecialchars($header) ?></th>
+        <?php endforeach; ?></tr></thead>
+        <tbody><?php foreach ($table['rows'] as $row): ?>
+          <tr><?php foreach ($row as $i => $cell): ?>
+            <td class="<?= $i > 0 ? 'text-end' : '' ?>"><?= htmlspecialchars(is_int($cell) ? number_format($cell) : (string)$cell) ?></td>
+          <?php endforeach; ?></tr>
+        <?php endforeach; ?></tbody>
+      </table>
+    </div>
+    <?php endif; ?>
+  </div>
+<?php }
 ?>
 <div class="an-page">
-
-  <?php if ($isHead && $payrollTableMissing): ?>
-  <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="alert">
-    <i class="bi bi-exclamation-triangle-fill mt-1"></i>
-    <div>
-      <strong>Payroll data is not available.</strong> The <code>payroll_records</code> table hasn't been created yet,
-      so the Net Profit Trend chart below does not include payroll. Run <code>db/payroll_migration.sql</code>
-      against the database to fix this.
-    </div>
-  </div>
-  <?php endif; ?>
-
-  <?php if ($isHead && $tripPayTableMissing): ?>
-  <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="alert">
-    <i class="bi bi-exclamation-triangle-fill mt-1"></i>
-    <div>
-      <strong>Crew pay data is not available.</strong> The <code>trip_pay</code> table hasn't been created yet,
-      so the Net Profit Trend chart below does not include Driver/Helper pay. Run <code>db/trip_pay_migration.sql</code>
-      against the database to fix this.
-    </div>
-  </div>
-  <?php endif; ?>
-
-  <!-- Header -->
-  <div class="an-header">
+  <header class="an-header">
     <div>
       <h1 class="an-title">Analytics</h1>
-      <p class="an-subtitle">
-        <?php if ($isHead): ?>
-        Cross-functional performance across Operations, Maintenance, and Accounting
-        <?php elseif ($role === ROLE_DISPATCHER): ?>
-        Your operations performance — trips, fleet utilization, and on-time delivery
-        <?php elseif ($role === ROLE_MAINTENANCE): ?>
-        Your maintenance performance — costs, incidents, and fleet health
-        <?php elseif ($role === ROLE_ACCOUNTING): ?>
-        Your billing performance — revenue, collections, and client activity
-        <?php endif; ?>
-      </p>
+      <p class="an-subtitle">Recorded business data · <?= htmlspecialchars($periodLabel) ?> · grouped <?= htmlspecialchars(strtolower($granularities[$granularity])) ?></p>
     </div>
-    <form method="get" class="an-period-form">
-      <select name="period" class="form-select an-period-select" onchange="this.form.submit()">
-        <?php foreach ($periods as $key => $p): ?>
-        <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($p['label']) ?></option>
-        <?php endforeach; ?>
-      </select>
-      <select name="granularity" class="form-select an-period-select" onchange="this.form.submit()">
-        <?php foreach ($granularities as $key => $label):
-          $isAllowed = $granularityAllowed[$key];
-          $reason = $key === 'day'
-            ? 'Daily view needs a range of ~3 months or less'
-            : ($key === 'month' ? 'Monthly view needs a range of at least ~1 month' : '');
-        ?>
-        <option value="<?= $key ?>"
-                <?= $key === $granularity ? 'selected' : '' ?>
-                <?= $isAllowed ? '' : 'disabled' ?>
-                <?= $isAllowed ? '' : 'title="' . htmlspecialchars($reason) . '"' ?>>
-          <?= htmlspecialchars($label) ?><?= $isAllowed ? '' : ' (unavailable for this range)' ?>
-        </option>
-        <?php endforeach; ?>
-      </select>
-      <button type="button" class="btn btn-outline-secondary an-report-btn" id="anPrintReport">
-        <i class="bi bi-printer me-1"></i>Print
-      </button>
-      <button type="button" class="btn btn-outline-primary an-report-btn" id="anExportReport">
-        <i class="bi bi-download me-1"></i>Export data
-      </button>
+    <form method="get" class="an-filters">
+      <div>
+        <label for="period">Reporting period</label>
+        <select id="period" name="period" class="form-select" onchange="this.form.submit()">
+          <?php foreach ($periods as $key => $option): ?>
+            <option value="<?= htmlspecialchars($key) ?>" <?= $period === $key ? 'selected' : '' ?>><?= htmlspecialchars($option['label']) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div>
+        <label for="granularity">Group trends</label>
+        <select id="granularity" name="granularity" class="form-select" onchange="this.form.submit()">
+          <?php foreach ($granularities as $key => $label): ?>
+            <option value="<?= htmlspecialchars($key) ?>" <?= $granularity === $key ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
     </form>
-  </div>
-  <div class="an-scope-note" role="status">
-    <i class="bi bi-calendar3"></i>
-    Reporting window: <strong><?= htmlspecialchars($rangeStart->format('M d, Y')) ?></strong>
-    through <strong><?= htmlspecialchars($rangeEnd->format('M d, Y')) ?></strong>.
-    All figures and charts use this same window.
-  </div>
-  <?php if ($granularityWasAdjusted): ?>
-  <div class="an-adjust-note">
-    <i class="bi bi-info-circle"></i>
-    "<?= htmlspecialchars($granularities[$requestedGranularity]) ?>" isn't practical for "<?= htmlspecialchars($periodLabel) ?>", so this is showing <?= htmlspecialchars($granularityLabel) ?> instead.
-  </div>
-  <?php endif; ?>
+  </header>
 
-  <!-- KPI cards -->
-  <div class="an-kpis">
-    <?php if ($isHead): ?>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-cash-coin"></i> Revenue Billed</div>
-      <div class="an-kpi-value">₱<?= number_format($revenue, 2) ?></div>
-      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
-      <?= trendBadge($revenue, $revenuePrev, true, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-wallet2"></i> Collected</div>
-      <div class="an-kpi-value an-value-green">₱<?= number_format($collected, 2) ?></div>
-      <div class="an-kpi-sub"><?= $collectionRate ?>% collection rate</div>
-      <?= trendBadge($collected, $collectedPrev, true, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-tools"></i> Maintenance Cost</div>
-      <div class="an-kpi-value an-value-orange">₱<?= number_format($maintCost, 2) ?></div>
-      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
-      <?= trendBadge($maintCost, $maintCostPrev, false, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-clock-history"></i> On-Time Delivery</div>
-      <div class="an-kpi-value <?= $onTimeRate >= 85 ? 'an-value-green' : ($onTimeRate >= 60 ? 'an-value-orange' : 'an-value-red') ?>">
-        <?= $onTimeRate ?>%
-      </div>
-      <div class="an-kpi-sub"><?= $completedTrips ?> completed trip<?= $completedTrips !== 1 ? 's' : '' ?></div>
-      <?= trendBadgePts($onTimeRate, $onTimeRatePrev, true, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-speedometer2"></i> Fleet Utilization</div>
-      <div class="an-kpi-value an-value-blue"><?= $utilizationRate ?>%</div>
-      <div class="an-kpi-sub"><?= $utilizedTrucks ?> of <?= $totalTrucks ?> trucks active</div>
-      <?= trendBadgePts($utilizationRate, $utilizationRatePrev, true, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-graph-up-arrow"></i> Avg Revenue / Trip</div>
-      <div class="an-kpi-value">₱<?= number_format($avgRevenuePerTrip, 2) ?></div>
-      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
-      <?= trendBadge($avgRevenuePerTrip, $avgRevenuePerTripPrev, true, $hasComparison) ?>
-    </div>
-
-    <?php elseif ($role === ROLE_DISPATCHER): ?>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-clock-history"></i> On-Time Delivery</div>
-      <div class="an-kpi-value <?= $onTimeRate >= 85 ? 'an-value-green' : ($onTimeRate >= 60 ? 'an-value-orange' : 'an-value-red') ?>">
-        <?= $onTimeRate ?>%
-      </div>
-      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
-      <?= trendBadgePts($onTimeRate, $onTimeRatePrev, true, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-speedometer2"></i> Fleet Utilization</div>
-      <div class="an-kpi-value an-value-blue"><?= $utilizationRate ?>%</div>
-      <div class="an-kpi-sub"><?= $utilizedTrucks ?> of <?= $totalTrucks ?> trucks active</div>
-      <?= trendBadgePts($utilizationRate, $utilizationRatePrev, true, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-check-circle"></i> Completed Trips</div>
-      <div class="an-kpi-value an-value-green"><?= $completedTrips ?></div>
-      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
-      <?= trendBadge($completedTrips, $completedTripsPrev, true, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-exclamation-triangle"></i> Late Trips</div>
-      <div class="an-kpi-value <?= $lateCount === 0 ? 'an-value-green' : 'an-value-red' ?>"><?= $lateCount ?></div>
-      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
-      <?= trendBadge($lateCount, $lateCountPrev, false, $hasComparison) ?>
-    </div>
-
-    <?php elseif ($role === ROLE_MAINTENANCE): ?>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-tools"></i> Maintenance Cost</div>
-      <div class="an-kpi-value an-value-orange">₱<?= number_format($maintCost, 2) ?></div>
-      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
-      <?= trendBadge($maintCost, $maintCostPrev, false, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-clipboard-check"></i> Records Logged</div>
-      <div class="an-kpi-value"><?= $maintRecordsLoggedCount ?></div>
-      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
-      <?= trendBadge($maintRecordsLoggedCount, $maintRecordsLoggedCountPrev, true, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-exclamation-octagon"></i> Open Incidents</div>
-      <div class="an-kpi-value <?= $openIncidentsCount === 0 ? 'an-value-green' : 'an-value-red' ?>"><?= $openIncidentsCount ?></div>
-      <div class="an-kpi-sub">Currently unresolved</div>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-truck"></i> Avg Cost / Truck</div>
-      <div class="an-kpi-value">₱<?= number_format($avgCostPerTruck, 2) ?></div>
-      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
-      <?= trendBadge($avgCostPerTruck, $avgCostPerTruckPrev, false, $hasComparison) ?>
-    </div>
-
-    <?php elseif ($role === ROLE_ACCOUNTING): ?>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-cash-coin"></i> Revenue Billed</div>
-      <div class="an-kpi-value">₱<?= number_format($revenue, 2) ?></div>
-      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
-      <?= trendBadge($revenue, $revenuePrev, true, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-wallet2"></i> Collected</div>
-      <div class="an-kpi-value an-value-green">₱<?= number_format($collected, 2) ?></div>
-      <div class="an-kpi-sub"><?= $collectionRate ?>% collection rate</div>
-      <?= trendBadge($collected, $collectedPrev, true, $hasComparison) ?>
-    </div>
-    <div class="an-kpi-card">
-      <div class="an-kpi-label"><i class="bi bi-graph-up-arrow"></i> Avg Revenue / Trip</div>
-      <div class="an-kpi-value">₱<?= number_format($avgRevenuePerTrip, 2) ?></div>
-      <div class="an-kpi-sub"><?= htmlspecialchars($periodLabel) ?></div>
-      <?= trendBadge($avgRevenuePerTrip, $avgRevenuePerTripPrev, true, $hasComparison) ?>
-    </div>
-    <?php endif; ?>
-  </div>
-
-  <!-- Analytical Insights (rule-based: descriptive, comparative, diagnostic) -->
-  <?php
-  // Build metrics bag for the insights/alerts helper. Includes real
-  // period-over-period baselines (not just bucket-to-bucket trend noise)
-  // so the engine can say *why* something changed, not just flag a number.
-  $metricsForAlerts = [
-      'utilizationRate'     => $utilizationRate ?? null,
-      'utilizationRatePrev' => $utilizationRatePrev ?? null,
-      'collectionRate'      => $collectionRate ?? null,
-      'collectionRatePrev'  => $collectionRatePrev ?? null,
-      'onTimeRate'          => $onTimeRate ?? null,
-      'onTimeRatePrev'      => $onTimeRatePrev ?? null,
-      'maintCost'           => $maintCost ?? null,
-      'maintCostPrev'       => $maintCostPrev ?? null,
-      'revenue'             => $revenue ?? null,
-      'revenuePrev'         => $revenuePrev ?? null,
-      'revTrend'            => $revTrend ?? [],
-      'costTrend'           => $costTrend ?? [],
-      'hasComparison'       => $hasComparison,
-      'rangeStartSql'       => $rangeStartSql,
-      'prevRangeStartSql'   => $prevRangeStartSql ?? null,
-      'prevRangeEndSql'     => $prevRangeEndSql ?? null,
-      'periodLabel'         => $periodLabel,
-  ];
-  $alerts = getAnalyticsAlerts($pdo, $metricsForAlerts, $periodLabel);
-
-  // ── Role-scope the insights ───────────────────────────────────────────────
-  // Every insight already carries a 'source' department (Dispatch, Maintenance,
-  // Accounting, Operations, Safety). Head Management is cross-functional by
-  // design and sees everything; every other role only sees insights about
-  // their own area — mirroring the same per-role split already used for the
-  // KPI cards and charts above, so an Accounting user isn't shown a
-  // Maintenance cost spike, for example.
-  if (!$isHead) {
-      $roleAlertSources = [
-          ROLE_DISPATCHER  => ['Dispatch', 'Operations'],
-          ROLE_MAINTENANCE => ['Maintenance', 'Safety'],
-          ROLE_ACCOUNTING  => ['Accounting'],
-      ];
-      $allowedSources = $roleAlertSources[$role] ?? [];
-      $alerts = array_values(array_filter($alerts, fn($a) => in_array($a['source'], $allowedSources, true)));
-  }
-  ?>
-
-  <?php if (!empty($alerts)): ?>
-  <?php
-    $critCount = count(array_filter($alerts, fn($x) => $x['severity'] === 'Critical'));
-    $warnCount = count(array_filter($alerts, fn($x) => $x['severity'] === 'Warning'));
-    $infoCount = count(array_filter($alerts, fn($x) => $x['severity'] === 'Info'));
-    $topAlert  = $alerts[0] ?? null;
-  ?>
-
-  <div class="an-alerts-summary">
-    <div class="an-alert-summary-item"><span class="an-alert-count"><?= $critCount ?></span> Critical</div>
-    <div class="an-alert-summary-item"><span class="an-alert-count" style="background:rgba(255,193,7,0.12);color:#856404"><?= $warnCount ?></span> Warnings</div>
-    <div class="an-alert-summary-item"><span class="an-alert-count" style="background:rgba(25,135,84,0.12);color:#146c43"><?= $infoCount ?></span> Positive</div>
-    <?php if ($topAlert): ?>
-    <div class="an-alert-summary-item" style="margin-left:auto;font-weight:700;">Top: <?= htmlspecialchars($topAlert['alert']) ?></div>
-    <?php endif; ?>
-  </div>
-
-  <div class="an-alert-cards">
-    <?php foreach ($alerts as $i => $a):
-      $priorityClass = $a['priority'] ?? ($a['severity'] === 'Critical' ? 'high' : ($a['severity'] === 'Info' ? 'good' : 'medium'));
-      $prioLabel = strtoupper($a['priority'] ?? ($a['severity'] === 'Critical' ? 'HIGH' : ($a['severity'] === 'Info' ? 'GOOD' : 'MED')));
-    ?>
-    <div class="dh-rec-card an-alert-card dh-rec-<?= htmlspecialchars($priorityClass) ?>">
-      <div class="dh-rec-priority dh-rec-priority-<?= htmlspecialchars($priorityClass) ?> an-alert-priority"><?= htmlspecialchars($prioLabel) ?></div>
-      <div class="dh-rec-body an-alert-body">
-        <div class="an-alert-title"><?= htmlspecialchars($a['alert']) ?> <span style="font-size:0.78rem;color:var(--bs-secondary-color);">&mdash; <?= htmlspecialchars($a['source']) ?></span></div>
-        <div class="an-alert-summary-text" style="color:var(--bs-secondary-color);font-size:0.9rem;"><?= htmlspecialchars(substr($a['detail'],0,120)) ?><?= strlen($a['detail'])>120 ? '...' : '' ?></div>
-      </div>
-      <div class="an-alert-actions">
-        <?php if (!empty($a['action_url'])): ?>
-          <a class="dh-rec-action" href="<?= APP_BASE . $a['action_url'] ?>">Take action</a>
-        <?php endif; ?>
-        <button class="an-alert-toggle" data-title="<?= htmlspecialchars($a['alert']) ?>" data-detail="<?= htmlspecialchars($a['detail']) ?>" data-prescription="<?= htmlspecialchars(json_encode($a['prescription'] ?? []), ENT_QUOTES) ?>" data-action="<?= !empty($a['action_url']) ? (APP_BASE . $a['action_url']) : '' ?>">Show details</button>
-      </div>
-    </div>
-    <?php endforeach; ?>
-  </div>
-
-  <?php endif; ?>
-
-  <!-- ══════════════════════════════════════════════════════════════════════
-       VARIANCE ANALYSIS — actual vs. a manually-entered reference (budget),
-       by category. Only meaningful for a bounded period; a budget is tied
-       to specific calendar months, so this section is hidden for "All Time".
-       ══════════════════════════════════════════════════════════════════════ -->
-  <?php
-  $hasBudgetData = $months !== null;
-  $varianceRows  = [];
-  $periodMonths  = [];
-  if ($hasBudgetData) {
-      // Which calendar months does the selected rolling period touch?
-      $monthCursor = (clone $rangeStart)->modify('first day of this month');
-      $monthEnd    = (clone $rangeEnd)->modify('first day of this month');
-      while ($monthCursor <= $monthEnd) {
-          $periodMonths[] = $monthCursor->format('Y-m-01');
-          $monthCursor->modify('+1 month');
-      }
-
-      $placeholders = implode(',', array_fill(0, count($periodMonths), '?'));
-      $budgetStmt = $pdo->prepare("
-          SELECT category, SUM(amount) AS total
-          FROM budgets
-          WHERE period_month IN ($placeholders)
-          GROUP BY category
-      ");
-      $budgetStmt->execute($periodMonths);
-      $budgetTotals = [];
-      foreach ($budgetStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-          $budgetTotals[$row['category']] = (float)$row['total'];
-      }
-
-      // category => [actual figure already computed above, higher-is-better?]
-      // All of these are lower-is-better except Revenue — spending more than
-      // budgeted on any expense line is the unfavorable direction.
-      $varianceCandidates = [
-          'Revenue'          => ['actual' => $revenue,                                  'higherIsBetter' => true],
-          'Maintenance'      => ['actual' => $maintCost,                                'higherIsBetter' => false],
-          'Fuel'             => ['actual' => $expenseCategoryTotals['Fuel'],             'higherIsBetter' => false],
-          'Toll'             => ['actual' => $expenseCategoryTotals['Toll'],             'higherIsBetter' => false],
-          'Driver Allowance' => ['actual' => $expenseCategoryTotals['Driver Allowance'], 'higherIsBetter' => false],
-          'Other'            => ['actual' => $expenseCategoryTotals['Other'],            'higherIsBetter' => false],
-      ];
-      // Payroll only added as a candidate if the table actually exists — an
-      // unset budget for a category we can't even measure would be misleading.
-      if (!$payrollTableMissing) {
-          $varianceCandidates['Payroll'] = ['actual' => $payrollTotalForVariance, 'higherIsBetter' => false];
-      }
-
-      foreach ($varianceCandidates as $category => $c) {
-          if (!isset($budgetTotals[$category])) continue; // no budget set for these months — skip rather than show a fake ₱0 reference
-          $ref         = $budgetTotals[$category];
-          $actual      = $c['actual'];
-          $varianceAmt = $actual - $ref;
-          $variancePct = $ref > 0 ? round(($varianceAmt / $ref) * 100, 1) : null;
-          $favorable   = $c['higherIsBetter'] ? ($varianceAmt >= 0) : ($varianceAmt <= 0);
-          $varianceRows[] = [
-              'category'    => $category,
-              'reference'   => $ref,
-              'actual'      => $actual,
-              'variance'    => $varianceAmt,
-              'variancePct' => $variancePct,
-              'favorable'   => $favorable,
-          ];
-      }
-
-      // Role-scope the same way Insights are scoped above. Fuel, Toll, Driver
-      // Allowance, Other, and Payroll are all entered by Accounting (same
-      // role restriction as trip_costs_handler.php and payroll_handler.php),
-      // so Accounting sees all expense-side variance, not just Revenue.
-      if (!$isHead) {
-          $roleVarianceCategories = [
-              ROLE_ACCOUNTING  => ['Revenue', 'Fuel', 'Toll', 'Driver Allowance', 'Other', 'Payroll'],
-              ROLE_MAINTENANCE => ['Maintenance'],
-              ROLE_DISPATCHER  => [],
-          ];
-          $allowedCategories = $roleVarianceCategories[$role] ?? [];
-          $varianceRows = array_values(array_filter($varianceRows, fn($r) => in_array($r['category'], $allowedCategories, true)));
-      }
-  }
-  ?>
-
-  <?php if ($hasBudgetData && ($isHead || !empty($varianceRows))): ?>
-  <div class="an-section-header">
-    <span class="an-section-title"><i class="bi bi-clipboard-data me-2"></i>Variance Analysis</span>
-    <span class="an-section-sub">Actual vs. budget &mdash; <?= htmlspecialchars($periodLabel) ?></span>
-    <?php if ($isHead): ?>
-    <button type="button" class="btn btn-sm btn-outline-primary an-set-budgets-btn" data-bs-toggle="modal" data-bs-target="#setBudgetsModal">
-      <i class="bi bi-pencil-square me-1"></i>Set Budgets
-    </button>
-    <?php endif; ?>
-  </div>
-
-  <?php if (empty($varianceRows)): ?>
-  <div class="an-variance-empty">
-    <?= $isHead ? 'No budget has been set for ' . htmlspecialchars($periodLabel) . ' yet. Use "Set Budgets" above to add one.' : 'No budget has been set for this period yet.' ?>
-  </div>
+  <?php if (!$sections): ?>
+    <p class="an-muted">No analytics sections are available for your role.</p>
   <?php else: ?>
-  <div class="an-variance-cards">
-    <?php foreach ($varianceRows as $v): ?>
-    <div class="an-variance-card <?= $v['favorable'] ? 'an-variance-favorable' : 'an-variance-unfavorable' ?>">
-      <div class="an-variance-category"><?= htmlspecialchars($v['category']) ?></div>
-      <div class="an-variance-row"><span>Reference</span><span>₱<?= number_format($v['reference'], 2) ?></span></div>
-      <div class="an-variance-row"><span>Actual</span><span>₱<?= number_format($v['actual'], 2) ?></span></div>
-      <div class="an-variance-row an-variance-diff">
-        <span>Variance</span>
-        <span><?= $v['variance'] >= 0 ? '+' : '' ?>₱<?= number_format($v['variance'], 2) ?><?= $v['variancePct'] !== null ? ' (' . ($v['variancePct'] >= 0 ? '+' : '') . $v['variancePct'] . '%)' : '' ?></span>
-      </div>
-    </div>
+  <?php if (count($sections) > 1): ?>
+  <nav class="an-tabs" aria-label="Analytics departments">
+    <?php foreach ($sections as $key => $section): ?>
+      <a href="#an-<?= htmlspecialchars($key) ?>"><i class="bi <?= htmlspecialchars($section['icon']) ?>" aria-hidden="true"></i> <?= htmlspecialchars($section['title']) ?></a>
     <?php endforeach; ?>
-  </div>
+  </nav>
   <?php endif; ?>
+
+  <?php foreach ($sections as $key => $section): ?>
+  <section class="an-dept an-dept-<?= htmlspecialchars($key) ?>" id="an-<?= htmlspecialchars($key) ?>" aria-labelledby="an-<?= htmlspecialchars($key) ?>-h">
+    <header class="an-dept-head">
+      <span class="an-dept-icon"><i class="bi <?= htmlspecialchars($section['icon']) ?>" aria-hidden="true"></i></span>
+      <div>
+        <h2 id="an-<?= htmlspecialchars($key) ?>-h"><?= htmlspecialchars($section['title']) ?></h2>
+        <p><?= htmlspecialchars($section['blurb']) ?></p>
+      </div>
+    </header>
+
+    <div class="an-kpis">
+      <?php foreach ($section['kpis'] as $kpi) { echo anKpi($kpi); } ?>
+    </div>
+
+    <div class="an-grid">
+      <?php foreach ($section['charts'] as $chartId) { anChartCard($chartId, $charts[$chartId]); } ?>
+    </div>
+
+    <details class="an-detail">
+      <summary><i class="bi bi-table" aria-hidden="true"></i> Detailed records</summary>
+      <div class="an-table-grid">
+        <?php foreach ($section['tables'] as $table) { anTable($table); } ?>
+      </div>
+    </details>
+
+    <p class="an-unavailable"><i class="bi bi-info-circle" aria-hidden="true"></i> <strong>Not shown:</strong> <?= htmlspecialchars($section['unavailable']) ?></p>
+  </section>
+  <?php endforeach; ?>
   <?php endif; ?>
-
-  <!-- Chart grid -->
-  <div class="an-grid">
-
-    <?php if ($isHead): ?>
-    <div class="an-widget an-widget-wide">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-bar-chart-line me-2"></i>Revenue vs Maintenance Cost (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
-      </div>
-      <div class="an-chart-wrap an-chart-tall">
-        <canvas id="revCostChart"></canvas>
-      </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($isHead): ?>
-    <div class="an-widget an-widget-wide">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-graph-up me-2"></i>Net Profit Trend (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
-      </div>
-      <div class="an-chart-wrap an-chart-tall">
-        <canvas id="profitTrendChart"></canvas>
-      </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($role === ROLE_DISPATCHER): ?>
-    <div class="an-widget an-widget-wide">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-bar-chart-line me-2"></i>Completed Trips (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
-      </div>
-      <div class="an-chart-wrap an-chart-tall">
-        <canvas id="tripVolumeChart"></canvas>
-      </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($role === ROLE_MAINTENANCE): ?>
-    <div class="an-widget an-widget-wide">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-bar-chart-line me-2"></i>Maintenance Cost (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
-      </div>
-      <div class="an-chart-wrap an-chart-tall">
-        <canvas id="maintCostTrendChart"></canvas>
-      </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($role === ROLE_ACCOUNTING): ?>
-    <div class="an-widget an-widget-wide">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-bar-chart-line me-2"></i>Billed vs Collected (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
-      </div>
-      <div class="an-chart-wrap an-chart-tall">
-        <canvas id="billedCollectedChart"></canvas>
-      </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($isHead || $role === ROLE_DISPATCHER): ?>
-    <div class="an-widget">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-pie-chart-fill me-2"></i>Trip Status</span>
-      </div>
-      <div class="an-donut-wrap">
-        <div class="an-donut-canvas-wrap">
-          <canvas id="tripStatusChart"></canvas>
-          <div class="an-donut-center" aria-label="<?= array_sum($statusData) ?> total trips">
-            <span class="an-donut-total"><?= number_format(array_sum($statusData)) ?></span>
-            <span class="an-donut-label">Total Trips</span>
-          </div>
-        </div>
-        <div class="an-donut-legend">
-          <?php foreach ($statusLabels as $i => $lbl): ?>
-          <div class="an-legend-item">
-            <span class="an-legend-dot" style="background:<?= $statusColors[$i] ?>"></span>
-            <span class="an-legend-label"><?= $lbl ?></span>
-            <span class="an-legend-val"><?= $statusData[$i] ?></span>
-          </div>
-          <?php endforeach; ?>
-        </div>
-      </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($isHead || $role === ROLE_MAINTENANCE): ?>
-    <div class="an-widget">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-wrench-adjustable me-2"></i>Maintenance Cost by Type</span>
-      </div>
-      <div class="an-donut-wrap">
-        <div class="an-donut-canvas-wrap">
-          <canvas id="maintTypeChart"></canvas>
-          <div class="an-donut-center" aria-label="Total maintenance cost ₱<?= number_format(array_sum($maintTypeData), 2) ?>">
-            <span class="an-donut-total an-donut-total-cost">₱<?= number_format(array_sum($maintTypeData), 0) ?></span>
-            <span class="an-donut-label">Total Cost</span>
-          </div>
-        </div>
-        <div class="an-donut-legend">
-          <?php foreach ($maintTypeLabels as $i => $lbl): ?>
-          <div class="an-legend-item">
-            <span class="an-legend-dot" style="background:<?= $maintTypeColors[$i] ?>"></span>
-            <span class="an-legend-label"><?= $lbl ?></span>
-            <span class="an-legend-val">₱<?= number_format($maintTypeData[$i], 0) ?></span>
-          </div>
-          <?php endforeach; ?>
-        </div>
-      </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($isHead || $role === ROLE_DISPATCHER || $role === ROLE_MAINTENANCE): ?>
-    <div class="an-widget an-widget-wide">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-exclamation-triangle me-2"></i>Incident Trend (<?= htmlspecialchars($periodLabel) ?>, <?= htmlspecialchars($granularityLabel) ?>)</span>
-      </div>
-      <div class="an-chart-wrap">
-        <canvas id="incTrendChart"></canvas>
-      </div>
-    </div>
-    <?php endif; ?>
-
-  </div>
-
-  <!-- Leaderboards -->
-  <div class="an-tables-grid">
-
-    <?php if ($isHead || $role === ROLE_ACCOUNTING): ?>
-    <div class="an-widget">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-trophy me-2"></i>Top 5 Trucks by Revenue</span>
-        <button class="an-export-btn" data-export="topTrucksTable" data-filename="top-trucks">
-          <i class="bi bi-download"></i> CSV
-        </button>
-      </div>
-      <?php if (empty($topTrucks)): ?>
-      <div class="an-empty"><i class="bi bi-truck"></i><span>No completed trips in this period</span></div>
-      <?php else: ?>
-      <table class="table an-table" id="topTrucksTable">
-        <thead><tr><th>Plate No.</th><th>Truck</th><th>Trips</th><th>Revenue</th></tr></thead>
-        <tbody>
-          <?php foreach ($topTrucks as $tt): ?>
-          <tr>
-            <td class="an-mono"><?= htmlspecialchars($tt['plate_number']) ?></td>
-            <td><?= htmlspecialchars($tt['brand'] . ' ' . $tt['model']) ?></td>
-            <td><?= (int)$tt['trip_count'] ?></td>
-            <td class="an-money">₱<?= number_format((float)$tt['revenue'], 2) ?></td>
-          </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-      <?php endif; ?>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($isHead || $role === ROLE_DISPATCHER): ?>
-    <div class="an-widget">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-person-badge me-2"></i>Top 5 Drivers by Trips</span>
-        <button class="an-export-btn" data-export="topDriversTable" data-filename="top-drivers">
-          <i class="bi bi-download"></i> CSV
-        </button>
-      </div>
-      <?php if (empty($topDrivers)): ?>
-      <div class="an-empty"><i class="bi bi-person"></i><span>No completed trips in this period</span></div>
-      <?php else: ?>
-      <table class="table an-table" id="topDriversTable">
-        <thead><tr><th>Driver</th><th>Completed Trips</th><th>Late Trips</th><th>On-Time %</th></tr></thead>
-        <tbody>
-          <?php foreach ($topDrivers as $td):
-            $tCount = (int)$td['trip_count'];
-            $lCount = (int)$td['late_count'];
-            $otPct  = $tCount > 0 ? round((($tCount - $lCount) / $tCount) * 100, 1) : 0;
-          ?>
-          <tr>
-            <td><?= htmlspecialchars($td['full_name']) ?></td>
-            <td><?= $tCount ?></td>
-            <td><?= $lCount ?></td>
-            <td class="<?= $otPct >= 85 ? 'an-text-green' : ($otPct >= 60 ? 'an-text-orange' : 'an-text-red') ?>">
-              <?= $otPct ?>%
-            </td>
-          </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-      <?php endif; ?>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($role === ROLE_DISPATCHER): ?>
-    <div class="an-widget">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-truck me-2"></i>Top 5 Trucks by Trip Count</span>
-        <button class="an-export-btn" data-export="topTrucksByTripsTable" data-filename="top-trucks-by-trips">
-          <i class="bi bi-download"></i> CSV
-        </button>
-      </div>
-      <?php if (empty($topTrucksByTrips)): ?>
-      <div class="an-empty"><i class="bi bi-truck"></i><span>No completed trips in this period</span></div>
-      <?php else: ?>
-      <table class="table an-table" id="topTrucksByTripsTable">
-        <thead><tr><th>Plate No.</th><th>Truck</th><th>Trips</th><th>Late</th></tr></thead>
-        <tbody>
-          <?php foreach ($topTrucksByTrips as $tt): ?>
-          <tr>
-            <td class="an-mono"><?= htmlspecialchars($tt['plate_number']) ?></td>
-            <td><?= htmlspecialchars($tt['brand'] . ' ' . $tt['model']) ?></td>
-            <td><?= (int)$tt['trip_count'] ?></td>
-            <td><?= (int)$tt['late_count'] ?></td>
-          </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-      <?php endif; ?>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($role === ROLE_MAINTENANCE): ?>
-    <div class="an-widget an-widget-wide">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-truck me-2"></i>Top 5 Trucks by Maintenance Cost</span>
-        <button class="an-export-btn" data-export="topTrucksByMaintCostTable" data-filename="top-trucks-by-maintenance-cost">
-          <i class="bi bi-download"></i> CSV
-        </button>
-      </div>
-      <?php if (empty($topTrucksByMaintCost)): ?>
-      <div class="an-empty"><i class="bi bi-tools"></i><span>No maintenance records in this period</span></div>
-      <?php else: ?>
-      <table class="table an-table" id="topTrucksByMaintCostTable">
-        <thead><tr><th>Plate No.</th><th>Truck</th><th>Records</th><th>Total Cost</th></tr></thead>
-        <tbody>
-          <?php foreach ($topTrucksByMaintCost as $tm): ?>
-          <tr>
-            <td class="an-mono"><?= htmlspecialchars($tm['plate_number']) ?></td>
-            <td><?= htmlspecialchars($tm['brand'] . ' ' . $tm['model']) ?></td>
-            <td><?= (int)$tm['record_count'] ?></td>
-            <td class="an-money">₱<?= number_format((float)$tm['total_cost'], 2) ?></td>
-          </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-      <?php endif; ?>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($role === ROLE_ACCOUNTING): ?>
-    <div class="an-widget">
-      <div class="an-widget-header">
-        <span class="an-widget-title"><i class="bi bi-people me-2"></i>Top 5 Clients by Revenue</span>
-        <button class="an-export-btn" data-export="topClientsTable" data-filename="top-clients">
-          <i class="bi bi-download"></i> CSV
-        </button>
-      </div>
-      <?php if (empty($topClientsByRevenue)): ?>
-      <div class="an-empty"><i class="bi bi-receipt"></i><span>No billings in this period</span></div>
-      <?php else: ?>
-      <table class="table an-table" id="topClientsTable">
-        <thead><tr><th>Client</th><th>Invoices</th><th>Revenue</th></tr></thead>
-        <tbody>
-          <?php foreach ($topClientsByRevenue as $cl): ?>
-          <tr>
-            <td><?= htmlspecialchars($cl['client_label']) ?></td>
-            <td><?= (int)$cl['invoice_count'] ?></td>
-            <td class="an-money">₱<?= number_format((float)$cl['revenue'], 2) ?></td>
-          </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-      <?php endif; ?>
-    </div>
-    <?php endif; ?>
-
-  </div>
 </div>
-
-<?php if ($hasBudgetData && $isHead): ?>
-<!-- ══ Set Budgets Modal ═══════════════════════════════════════════════════ -->
-<div class="modal fade" id="setBudgetsModal" tabindex="-1" aria-labelledby="setBudgetsLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="setBudgetsLabel"><i class="bi bi-clipboard-data me-2"></i>Set Budgets</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div id="setBudgetsAlert" class="alert d-none" role="alert"></div>
-        <p class="text-secondary" style="font-size:0.85rem;">
-          Set the reference (budgeted) amount for each month in the currently selected period
-          (<?= htmlspecialchars($periodLabel) ?>). Leave a field blank to leave that month/category unbudgeted.
-        </p>
-        <input type="hidden" id="an-csrf-token" name="<?= CSRF_TOKEN_NAME ?>" value="<?= htmlspecialchars(generateCsrfToken()) ?>">
-        <div id="setBudgetsFields">
-          <?php foreach ($periodMonths as $m):
-            $mLabel = (new DateTime($m))->format('F Y');
-          ?>
-          <div class="an-budget-month-group" data-month="<?= htmlspecialchars($m) ?>">
-            <div class="an-budget-month-label"><?= htmlspecialchars($mLabel) ?></div>
-            <div class="row g-2 mb-2">
-              <div class="col-md-6">
-                <label class="form-label">Revenue Target</label>
-                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Revenue" placeholder="₱0.00">
-              </div>
-            </div>
-            <div class="an-budget-expense-label">Expense budgets</div>
-            <div class="row g-2">
-              <div class="col-md-4 col-sm-6">
-                <label class="form-label">Maintenance</label>
-                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Maintenance" placeholder="₱0.00">
-              </div>
-              <div class="col-md-4 col-sm-6">
-                <label class="form-label">Fuel</label>
-                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Fuel" placeholder="₱0.00">
-              </div>
-              <div class="col-md-4 col-sm-6">
-                <label class="form-label">Toll</label>
-                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Toll" placeholder="₱0.00">
-              </div>
-              <div class="col-md-4 col-sm-6">
-                <label class="form-label">Driver Allowance</label>
-                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Driver Allowance" placeholder="₱0.00">
-              </div>
-              <div class="col-md-4 col-sm-6">
-                <label class="form-label">Other</label>
-                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Other" placeholder="₱0.00">
-              </div>
-              <div class="col-md-4 col-sm-6">
-                <label class="form-label">Payroll</label>
-                <input type="number" min="0" step="0.01" class="form-control an-budget-input" data-category="Payroll" placeholder="₱0.00">
-              </div>
-            </div>
-          </div>
-          <?php endforeach; ?>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary btn-sm" id="saveBudgetsBtn">
-          <span id="sbBtnText"><i class="bi bi-check-lg me-1"></i>Save Budgets</span>
-          <span id="sbBtnSpinner" class="d-none"><span class="spinner-border spinner-border-sm"></span> Saving&hellip;</span>
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-<?php endif; ?>
-
 <script>
-window.ANALYTICS_DATA = <?= $GLOBALS['analytics_data'] ?>;
+window.ANALYTICS_DATA = <?= json_encode($chartJson, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT | JSON_THROW_ON_ERROR) ?>;
 </script>
 <?php layoutFoot(); ?>

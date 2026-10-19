@@ -25,10 +25,15 @@ $usersSql = "
                     NULLIF(TRIM(e.middle_name), ''),
                     NULLIF(TRIM(e.last_name), ''),
                     NULLIF(TRIM(e.suffix), '')
-                ))
+                )),
+                ''
             ),
             u.username
         ) AS full_name,
+        e.first_name,
+        e.middle_name,
+        e.last_name,
+        e.suffix,
         u.email,
         u.is_active,
         u.created_at,
@@ -49,7 +54,20 @@ $empSql = "
     SELECT
         e.employee_id,
         e.employee_code,
-        e.full_name,
+        COALESCE(
+            NULLIF(TRIM(CONCAT_WS(' ',
+                NULLIF(TRIM(e.first_name), ''),
+                NULLIF(TRIM(e.middle_name), ''),
+                NULLIF(TRIM(e.last_name), ''),
+                NULLIF(TRIM(e.suffix), '')
+            )), ''),
+            CONCAT('Employee #', e.employee_id)
+        ) AS full_name,
+        e.first_name,
+        e.middle_name,
+        e.last_name,
+        e.suffix,
+        e.employment_status,
         e.position,
         e.contact_number,
         e.license_number,
@@ -59,33 +77,65 @@ $empSql = "
         e.contractor_company,
         e.date_resigned,
         e.resignation_reason,
-        e.is_active,
+        (e.employment_status = 'Active') AS is_active,
         e.date_hired,
-        u.username AS linked_username
+        (
+            SELECT linked_user.username
+            FROM users linked_user
+            WHERE linked_user.user_id = e.user_id
+               OR linked_user.employee_id = e.employee_id
+            ORDER BY linked_user.user_id
+            LIMIT 1
+        ) AS linked_username,
+        (
+            SELECT linked_user.user_id
+            FROM users linked_user
+            WHERE linked_user.user_id = e.user_id
+               OR linked_user.employee_id = e.employee_id
+            ORDER BY linked_user.user_id
+            LIMIT 1
+        ) AS linked_user_id
     FROM employees e
-    LEFT JOIN users u ON e.user_id = u.user_id
-    ORDER BY e.is_active DESC, e.full_name ASC
+    ORDER BY (e.employment_status = 'Active') DESC, full_name ASC
 ";
 $employees = $pdo->query($empSql)->fetchAll(PDO::FETCH_ASSOC);
-$resetRequests = $pdo->query("
-    SELECT pr.request_id, pr.requested_at, u.user_id, u.username, u.full_name, u.email
-    FROM password_reset_requests pr
-    JOIN users u ON u.user_id = pr.user_id
-    WHERE pr.status = 'Pending'
-    ORDER BY pr.requested_at ASC
-")->fetchAll(PDO::FETCH_ASSOC);
-
+$unlinkedEmployees = array_values(array_filter(
+    $employees,
+    static fn(array $employee): bool => $employee['employment_status'] === 'Active'
+        && empty($employee['linked_user_id'])
+));
 // ── License expiry alerts ─────────────────────────────────────────────────────
+// Same rule as the legacy v_license_expiry_alerts view (not in the target
+// schema): active employees with a license expiring within 60 days.
 $alerts = $pdo->query("
-    SELECT full_name, license_expiry, days_until_expiry
-    FROM v_license_expiry_alerts
+    SELECT
+        COALESCE(
+            NULLIF(TRIM(CONCAT_WS(' ',
+                NULLIF(TRIM(first_name), ''),
+                NULLIF(TRIM(middle_name), ''),
+                NULLIF(TRIM(last_name), ''),
+                NULLIF(TRIM(suffix), '')
+            )), ''),
+            CONCAT('Employee #', employee_id)
+        ) AS full_name,
+        license_expiry,
+        DATEDIFF(license_expiry, CURDATE()) AS days_until_expiry
+    FROM employees
+    WHERE license_number IS NOT NULL
+      AND license_expiry IS NOT NULL
+      AND license_expiry <= DATE_ADD(CURDATE(), INTERVAL 60 DAY)
+      AND employment_status = 'Active'
     ORDER BY days_until_expiry ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Unique positions for datalist ─────────────────────────────────────────────
 $positions = array_unique(array_column($employees, 'position'));
-sort($positions);
-$crewLabel = getAppSetting($pdo, 'crew_module_label', 'Drivers & Helpers') ?? 'Drivers & Helpers';
+sort($positions, SORT_NATURAL | SORT_FLAG_CASE);
+$employmentTypes = array_values(array_unique(array_column($employees, 'employment_type')));
+sort($employmentTypes, SORT_NATURAL | SORT_FLAG_CASE);
+$crewLabel = isAdmin()
+    ? 'Employees'
+    : (getAppSetting($pdo, 'crew_module_label', 'Drivers & Helpers') ?? 'Drivers & Helpers');
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 $activeUsers = count(array_filter($users, fn($u) => $u['is_active']));
@@ -99,7 +149,7 @@ $alertCount  = count($alerts);
   <div class="usr-header d-flex align-items-center justify-content-between mb-4">
     <div>
       <h1 class="usr-title mb-0">Users &amp; Employees</h1>
-      <p class="usr-subtitle mb-0">Assign each system user a role here; Role &amp; Permission Management defines what that role can do.</p>
+      <p class="usr-subtitle mb-0">Manage user access and employee records.</p>
     </div>
   </div>
 
@@ -153,13 +203,6 @@ $alertCount  = count($alerts);
       </button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="usr-tab" id="tab-reset-requests" data-bs-toggle="tab"
-              data-bs-target="#pane-reset-requests" type="button" role="tab">
-        <i class="bi bi-key me-1"></i> Password Requests
-        <span class="usr-tab-count"><?= count($resetRequests) ?></span>
-      </button>
-    </li>
-    <li class="nav-item" role="presentation">
       <button class="usr-tab" id="tab-employees" data-bs-toggle="tab"
               data-bs-target="#pane-employees" type="button" role="tab">
       <i class="bi bi-person-lines-fill me-1"></i> <?= htmlspecialchars($crewLabel) ?>
@@ -169,31 +212,6 @@ $alertCount  = count($alerts);
   </ul>
 
   <div class="tab-content">
-    <div class="tab-pane fade" id="pane-reset-requests" role="tabpanel">
-      <div class="usr-table-wrap">
-        <?php if (!$resetRequests): ?>
-          <div class="usr-empty"><i class="bi bi-check-circle usr-empty-icon"></i><p>No pending password requests.</p></div>
-        <?php else: ?>
-        <table class="table usr-table">
-          <thead><tr><th>User</th><th>Email</th><th>Requested</th><th class="text-end">Actions</th></tr></thead>
-          <tbody>
-          <?php foreach ($resetRequests as $request): ?>
-            <tr>
-              <td><?= htmlspecialchars($request['full_name']) ?><br><span class="usr-username">@<?= htmlspecialchars($request['username']) ?></span></td>
-              <td><?= htmlspecialchars($request['email']) ?></td>
-              <td><?= date('M d, Y g:i A', strtotime($request['requested_at'])) ?></td>
-              <td class="text-end">
-                <button class="btn btn-sm btn-success js-review-reset" data-id="<?= (int)$request['request_id'] ?>" data-status="Approved">Approve</button>
-                <button class="btn btn-sm btn-danger js-review-reset" data-id="<?= (int)$request['request_id'] ?>" data-status="Rejected">Reject</button>
-              </td>
-            </tr>
-          <?php endforeach; ?>
-          </tbody>
-        </table>
-        <?php endif; ?>
-      </div>
-    </div>
-
     <!-- ── Users pane ────────────────────────────────────────────────────── -->
     <div class="tab-pane fade show active" id="pane-users" role="tabpanel">
 
@@ -208,7 +226,7 @@ $alertCount  = count($alerts);
           <input type="search" id="filterUserSearch" class="form-control usr-filter-search"
                  placeholder="Search name, username, email…">
         </div>
-        <button class="btn btn-usr-primary" data-bs-toggle="modal" data-bs-target="#addUserModal">
+        <button class="btn btn-usr-primary" data-bs-toggle="modal" data-bs-target="#addUserModal" <?= $unlinkedEmployees ? '' : 'disabled title="No active employee without an account is available."' ?>>
           <i class="bi bi-plus-lg me-1"></i> Add User
         </button>
       </div>
@@ -259,6 +277,10 @@ $alertCount  = count($alerts);
                           title="Edit"
                           data-id="<?= $usr['user_id'] ?>"
                           data-name="<?= htmlspecialchars($usr['full_name']) ?>"
+                          data-first-name="<?= htmlspecialchars($usr['first_name'] ?? '') ?>"
+                          data-middle-name="<?= htmlspecialchars($usr['middle_name'] ?? '') ?>"
+                          data-last-name="<?= htmlspecialchars($usr['last_name'] ?? '') ?>"
+                          data-suffix="<?= htmlspecialchars($usr['suffix'] ?? '') ?>"
                           data-username="<?= htmlspecialchars($usr['username']) ?>"
                           data-email="<?= htmlspecialchars($usr['email']) ?>"
                           data-role="<?= $usr['role_id'] ?>"
@@ -289,12 +311,26 @@ $alertCount  = count($alerts);
     <div class="tab-pane fade" id="pane-employees" role="tabpanel">
 
       <div class="usr-pane-toolbar d-flex justify-content-between align-items-center mb-3">
-        <div class="d-flex gap-2">
+        <div class="d-flex gap-2 flex-wrap">
           <select id="filterEmpStatus" class="form-select usr-filter-select">
             <option value="">All Statuses</option>
             <option value="1">Active</option>
             <option value="0">Inactive</option>
           </select>
+          <?php if (isAdmin()): ?>
+          <select id="filterEmpPosition" class="form-select usr-filter-select" aria-label="Filter by position">
+            <option value="">All Positions</option>
+            <?php foreach ($positions as $position): ?>
+            <option value="<?= htmlspecialchars($position) ?>"><?= htmlspecialchars($position) ?></option>
+            <?php endforeach; ?>
+          </select>
+          <select id="filterEmpEmployment" class="form-select usr-filter-select" aria-label="Filter by employment">
+            <option value="">All Employment Types</option>
+            <?php foreach ($employmentTypes as $employmentType): ?>
+            <option value="<?= htmlspecialchars($employmentType) ?>"><?= htmlspecialchars($employmentType) ?></option>
+            <?php endforeach; ?>
+          </select>
+          <?php endif; ?>
           <input type="search" id="filterEmpSearch" class="form-control usr-filter-search"
                  placeholder="Search name, code, position…">
         </div>
@@ -333,6 +369,8 @@ $alertCount  = count($alerts);
             ?>
             <tr
               data-active="<?= $emp['is_active'] ?>"
+              data-position="<?= htmlspecialchars($emp['position']) ?>"
+              data-employment-type="<?= htmlspecialchars($emp['employment_type']) ?>"
               data-search="<?= htmlspecialchars(strtolower(
                 $emp['full_name'] . ' ' . $emp['employee_code'] . ' ' . $emp['position']
               )) ?>"
@@ -391,6 +429,10 @@ $alertCount  = count($alerts);
                         data-id="<?= $emp['employee_id'] ?>"
                         data-code="<?= htmlspecialchars($emp['employee_code']) ?>"
                         data-name="<?= htmlspecialchars($emp['full_name']) ?>"
+                        data-first-name="<?= htmlspecialchars($emp['first_name'] ?? '') ?>"
+                        data-middle-name="<?= htmlspecialchars($emp['middle_name'] ?? '') ?>"
+                        data-last-name="<?= htmlspecialchars($emp['last_name'] ?? '') ?>"
+                        data-suffix="<?= htmlspecialchars($emp['suffix'] ?? '') ?>"
                         data-position="<?= htmlspecialchars($emp['position']) ?>"
                         data-contact="<?= htmlspecialchars($emp['contact_number'] ?? '') ?>"
                         data-address="<?= htmlspecialchars($emp['address'] ?? '') ?>"
@@ -435,8 +477,14 @@ $alertCount  = count($alerts);
         <div id="addUserAlert" class="alert d-none" role="alert"></div>
         <div class="row g-3">
           <div class="col-12">
-            <label class="form-label usr-label" for="auFullName">Full Name</label>
-            <input type="text" class="form-control usr-input" id="auFullName" required>
+            <label class="form-label usr-label" for="auEmployee">Employee</label>
+            <select class="form-select usr-input" id="auEmployee" required>
+              <option value="">— Select an employee without an account —</option>
+              <?php foreach ($unlinkedEmployees as $employee): ?>
+              <option value="<?= (int)$employee['employee_id'] ?>"><?= htmlspecialchars($employee['full_name'] . ' · ' . $employee['employee_code']) ?></option>
+              <?php endforeach; ?>
+            </select>
+            <div class="form-text">Employees with an existing linked account are not offered here. Add an employee record first if needed.</div>
           </div>
           <div class="col-md-6">
             <label class="form-label usr-label" for="auUsername">Username</label>
@@ -504,9 +552,21 @@ $alertCount  = count($alerts);
         <div id="editUserAlert" class="alert d-none" role="alert"></div>
         <input type="hidden" id="euId">
         <div class="row g-3">
-          <div class="col-12">
-            <label class="form-label usr-label" for="euFullName">Full Name</label>
-            <input type="text" class="form-control usr-input" id="euFullName" required>
+          <div class="col-md-6">
+            <label class="form-label usr-label" for="euFirstName">First Name</label>
+            <input type="text" class="form-control usr-input" id="euFirstName" maxlength="80" required>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label usr-label" for="euMiddleName">Middle Name</label>
+            <input type="text" class="form-control usr-input" id="euMiddleName" maxlength="80">
+          </div>
+          <div class="col-md-8">
+            <label class="form-label usr-label" for="euLastName">Last Name</label>
+            <input type="text" class="form-control usr-input" id="euLastName" maxlength="80" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label usr-label" for="euSuffix">Suffix</label>
+            <input type="text" class="form-control usr-input" id="euSuffix" maxlength="20" placeholder="e.g. Jr.">
           </div>
           <div class="col-md-6">
             <label class="form-label usr-label" for="euUsername">Username</label>
@@ -607,11 +667,24 @@ $alertCount  = count($alerts);
           <div class="col-md-4">
             <label class="form-label usr-label" for="aeCode">Employee Code</label>
             <input type="text" class="form-control usr-input" id="aeCode"
-                   placeholder="e.g. EMP-0001" required>
+                   placeholder="e.g. EMP-0001" maxlength="30" required>
           </div>
-          <div class="col-md-8">
-            <label class="form-label usr-label" for="aeName">Full Name</label>
-            <input type="text" class="form-control usr-input" id="aeName" required>
+          <div class="col-md-8"></div>
+          <div class="col-md-4">
+            <label class="form-label usr-label" for="aeFirstName">First Name</label>
+            <input type="text" class="form-control usr-input" id="aeFirstName" maxlength="80" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label usr-label" for="aeMiddleName">Middle Name</label>
+            <input type="text" class="form-control usr-input" id="aeMiddleName" maxlength="80">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label usr-label" for="aeLastName">Last Name</label>
+            <input type="text" class="form-control usr-input" id="aeLastName" maxlength="80" required>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label usr-label" for="aeSuffix">Suffix</label>
+            <input type="text" class="form-control usr-input" id="aeSuffix" maxlength="20" placeholder="e.g. Jr.">
           </div>
           <div class="col-md-6">
             <label class="form-label usr-label" for="aePosition">Position</label>
@@ -669,7 +742,7 @@ $alertCount  = count($alerts);
               License Type <span class="text-danger d-none" id="aeLicTypeReq">*</span>
             </label>
             <input type="text" class="form-control usr-input" id="aeLicenseType"
-                   placeholder="e.g. Professional">
+                   placeholder="e.g. Professional" maxlength="20">
           </div>
           <div class="col-md-4">
             <label class="form-label usr-label" for="aeDateHired">
@@ -714,11 +787,24 @@ $alertCount  = count($alerts);
         <div class="row g-3">
           <div class="col-md-4">
             <label class="form-label usr-label" for="eeCode">Employee Code</label>
-            <input type="text" class="form-control usr-input" id="eeCode" required>
+            <input type="text" class="form-control usr-input" id="eeCode" maxlength="30" required>
           </div>
-          <div class="col-md-8">
-            <label class="form-label usr-label" for="eeName">Full Name</label>
-            <input type="text" class="form-control usr-input" id="eeName" required>
+          <div class="col-md-8"></div>
+          <div class="col-md-4">
+            <label class="form-label usr-label" for="eeFirstName">First Name</label>
+            <input type="text" class="form-control usr-input" id="eeFirstName" maxlength="80" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label usr-label" for="eeMiddleName">Middle Name</label>
+            <input type="text" class="form-control usr-input" id="eeMiddleName" maxlength="80">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label usr-label" for="eeLastName">Last Name</label>
+            <input type="text" class="form-control usr-input" id="eeLastName" maxlength="80" required>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label usr-label" for="eeSuffix">Suffix</label>
+            <input type="text" class="form-control usr-input" id="eeSuffix" maxlength="20" placeholder="e.g. Jr.">
           </div>
           <div class="col-md-6">
             <label class="form-label usr-label" for="eePosition">Position</label>
@@ -766,7 +852,7 @@ $alertCount  = count($alerts);
             <label class="form-label usr-label" for="eeLicenseType">
               License Type <span class="text-danger d-none" id="eeLicTypeReq">*</span>
             </label>
-            <input type="text" class="form-control usr-input" id="eeLicenseType">
+            <input type="text" class="form-control usr-input" id="eeLicenseType" maxlength="20">
           </div>
           <div class="col-md-4">
             <label class="form-label usr-label" for="eeDateHired">
@@ -787,6 +873,14 @@ $alertCount  = count($alerts);
           <div class="col-12">
             <label class="form-label usr-label" for="eeResignationReason">Resignation Reason</label>
             <textarea class="form-control usr-input" id="eeResignationReason" rows="2" maxlength="500"></textarea>
+          </div>
+          <div class="col-12 d-none" id="eeClearResignationWrap">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="eeClearResignation">
+              <label class="form-check-label usr-label mb-0" for="eeClearResignation">
+                Clear resignation record (removes the date and reason; the old values stay in the audit log)
+              </label>
+            </div>
           </div>
         </div>
       </div>

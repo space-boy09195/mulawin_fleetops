@@ -137,13 +137,13 @@
   const apUnitCost      = document.getElementById('apUnitCost');
   const apInitialQty    = document.getElementById('apInitialQty');
   const apSupplier      = document.getElementById('apSupplier');
-  const apWarrantyExpiry = document.getElementById('apWarrantyExpiry');
+  const apWarrantyDays = document.getElementById('apWarrantyDays');
   const submitAddPartBtn = document.getElementById('submitAddPartBtn');
   const apBtnSpinner    = document.getElementById('apBtnSpinner');
   const addPartAlert    = document.getElementById('addPartAlert');
 
   addPartModal?.addEventListener('hidden.bs.modal', () => {
-    [apName, apPartNumber, apCategory, apUnit, apUnitCost, apSupplier, apWarrantyExpiry].forEach(el => {
+    [apName, apPartNumber, apCategory, apUnit, apUnitCost, apSupplier, apWarrantyDays].forEach(el => {
       if (el) el.value = el.id === 'apUnit' ? 'pcs' : '';
     });
     if (apReorderLevel) apReorderLevel.value = '5';
@@ -163,7 +163,7 @@
     const unitCost    = apUnitCost?.value           ?? '';
     const initialQty  = apInitialQty?.value         ?? '';
     const supplier    = apSupplier?.value.trim()    ?? '';
-    const warrantyExpiry = apWarrantyExpiry?.value  ?? '';
+    const warrantyDays = apWarrantyDays?.value  ?? '';
 
     if (!name || !category || !unit) {
       showAlert(addPartAlert, 'Part name, category, and unit are required.');
@@ -193,7 +193,7 @@
       unit_cost:     unitCost,
       initial_qty:   initialQty,
       supplier,
-      warranty_expiry: warrantyExpiry,
+      warranty_days: warrantyDays,
     })
       .then(res => {
         setBusy(submitAddPartBtn, apBtnSpinner, false);

@@ -1,0 +1,129 @@
+-- ============================================================
+-- P21-7M: stable role key roles.system_key (DRAFT FOR REVIEW)
+-- File: db/target_migrations/20261010_p21_roles_system_key.sql
+--
+-- STATUS: NOT EXECUTED and NOT APPROVED FOR EXECUTION.
+--   This file is a review draft only. Saving it is NOT approval to run it.
+--   Execute it only after explicit approval, against a disposable scratch
+--   copy of the target schema first, with a backup taken beforehand.
+--
+-- TARGET DATABASE: mulawin_fleetops_new ONLY.
+--   Do NOT apply to the current application database (mulawin_fleetops).
+--   This file deliberately lives outside db/*_migration.sql so the existing
+--   "apply every db/*_migration.sql" setup step never picks it up.
+--   It contains no USE statement: the operator must select the target
+--   database explicitly before running it.
+--
+-- PURPOSE:
+--   Give system roles a stable identity that does not depend on numeric
+--   role IDs. Application code (planned batch P21-7B, not yet written) will
+--   identify the Admin role by system_key = 'admin' instead of role_id 1.
+--
+-- SCOPE: one ALTER TABLE on the existing target table roles, adding:
+--   system_key VARCHAR(50) NULL, placed after role_name
+--   UNIQUE KEY uq_roles_system_key (system_key)
+--   It does not DROP, TRUNCATE, INSERT, UPDATE or DELETE anything.
+--   It does not change existing role data or assign system keys.
+--   It assigns NO key to any role. Every existing role keeps system_key NULL
+--   after this file runs.
+--
+-- DESIGN:
+--   - NULL means a custom role. Roles created through the application
+--     (ajax/permissions_handler.php, action create_role) insert only
+--     role_name, so they always stay NULL and cannot claim a system key.
+--   - Reserved system keys (for example 'admin') are assigned ONLY by a
+--     separately reviewed and approved migration or seed operation, never
+--     by this file and never by the application UI.
+--   - The canonical Admin key is 'admin'. Keys are intended to be lowercase
+--     ASCII identifiers (letters, digits, underscore). This draft does not
+--     add a CHECK constraint for the format. That can be proposed separately
+--     if wanted.
+--   - UNIQUE allows any number of NULLs in both MySQL and MariaDB, so any
+--     number of custom roles may exist, while each non-NULL key can belong
+--     to at most one role.
+--   - The roles table has no explicit charset or collation in the target
+--     reference, so key comparison follows the server default collation
+--     (typically case-insensitive). Keys must therefore differ by more than
+--     letter case. Using lowercase keys only avoids ambiguity.
+--   - No key is derived from role_id, role_name, or any assumption about
+--     live data. In particular, role_id 1 is NOT treated as Admin.
+--
+-- PREREQUISITES:
+--   - The target schema exists, including table roles as defined in
+--     db/reference/mulawin_fleetops_new.sql (lines 37-46).
+--   - Works on MySQL 8.x (target, per the reference header) and on MariaDB
+--     10.4 (local XAMPP). Uses no ADD COLUMN IF NOT EXISTS (not supported
+--     by MySQL 8). Confirm the server version (SELECT VERSION()) first.
+--   - A backup of the target database (at least the roles table) exists.
+--   - None of this has been tested on a server.
+--
+-- NOTE: SQL examples in these comments intentionally have no statement
+--   terminators, so no tool that splits on terminators can turn a comment
+--   into an executable statement.
+--
+-- READ-ONLY PRE-CHECKS (run first, expected result in brackets):
+--   a) Correct database                                  -- [mulawin_fleetops_new]
+--        SELECT DATABASE()
+--   b) Server version                                    -- [record it]
+--        SELECT VERSION()
+--   c) The column must not exist yet                     -- [no rows]
+--        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+--         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'roles'
+--           AND COLUMN_NAME = 'system_key'
+--   d) The index name must not exist yet                 -- [no rows]
+--        SELECT INDEX_NAME FROM information_schema.STATISTICS
+--         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'roles'
+--           AND INDEX_NAME = 'uq_roles_system_key'
+--   e) Review the existing roles (information only, nothing is changed)
+--        SELECT role_id, role_name, is_active, is_single_holder
+--          FROM roles ORDER BY role_id
+--   f) Active users per role (information only)
+--        SELECT r.role_id, r.role_name, COUNT(u.user_id) AS active_users
+--          FROM roles r
+--          LEFT JOIN users u ON u.role_id = r.role_id AND u.is_active = 1
+--         GROUP BY r.role_id, r.role_name
+--         ORDER BY r.role_id
+--   Duplicate keys cannot occur when this file runs, because the new column
+--   is NULL for every existing row. Duplicate checks are required later,
+--   before any key is assigned (see the next section).
+--
+-- BEFORE ANY KEY IS ASSIGNED (separate, later, approved step):
+--   - Inspect the live role data (pre-checks e and f) and decide, with the
+--     business owner, which single role is the intended Admin role. Do not
+--     assume it is role_id 1 or the role currently named 'Admin'.
+--   - Confirm the planned key list has no duplicates, including duplicates
+--     that differ only by letter case.
+--   - Confirm that each target role is active and that the Admin role has
+--     at least one active user who should hold it.
+--   - Planned application code (P21-7B) treats a missing 'admin' key as
+--     "nobody is Admin" (fail closed). Assign the key before relying on
+--     Admin-only features in that environment.
+--
+-- APPLYING THIS FILE IS A SEPARATE APPROVAL.
+--
+-- TRANSACTIONS:
+--   ALTER TABLE implicitly commits in MySQL and MariaDB. A surrounding
+--   transaction cannot undo this schema change. On a normal SQL error the
+--   statement fails without leaving a partial change. MySQL 8 atomic DDL
+--   also makes supported operations crash-safe. MariaDB before 10.6 has no
+--   general crash-safe DDL guarantee, so a server crash during the ALTER
+--   requires inspection and recovery. A rerun fails with a duplicate-column
+--   error and changes nothing. If it fails, stop and investigate.
+--
+-- ROLLBACK (only with explicit approval):
+--   ALTER TABLE roles DROP INDEX uq_roles_system_key,
+--     DROP COLUMN system_key
+--   Implications:
+--   - Dropping the column permanently deletes every assigned system key.
+--     Record them first (SELECT role_id, role_name, system_key FROM roles
+--     WHERE system_key IS NOT NULL) if they may be needed again.
+--   - Once code that reads roles.system_key is deployed (planned P21-7B),
+--     dropping the column makes the session check query fail, so every
+--     signed-in request would be refused with HTTP 503 (fail closed). Roll
+--     back that code first, or restore the column, before relying on the
+--     application again.
+-- ============================================================
+
+ALTER TABLE roles
+    ADD COLUMN system_key VARCHAR(50) NULL AFTER role_name,
+    ADD UNIQUE KEY uq_roles_system_key (system_key);

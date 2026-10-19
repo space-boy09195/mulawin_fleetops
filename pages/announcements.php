@@ -16,7 +16,7 @@ $pdo = getDBConnection();
 
 // ── Period filter (pinned announcements always show regardless of period) ────
 $periods = [
-    'today' => 'Today', '1w' => 'This Week', '1m' => 'This Month',
+    'today' => 'Today', '1w' => 'Last 7 Days', '1m' => 'Last 1 Month',
     '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months', 'all' => 'All Time',
 ];
 $period = $_GET['period'] ?? 'all';
@@ -32,22 +32,20 @@ $rangeStart = match ($period) {
 };
 $rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
 
-$audience = match (currentRoleId()) {
-    ROLE_MAINTENANCE => 'maintenance',
-    ROLE_ACCOUNTING  => 'accounting',
-    ROLE_DISPATCHER  => 'operations',
-    default          => null,
-};
+// Department audience from the role key (see includes/layout.php); Admin and
+// roles without a department audience see every announcement.
+$audience = isAdmin() ? null : currentAnnouncementAudience();
 $audienceSql = $audience === null ? '' : "AND (a.audience = 'all' OR a.audience = :audience)";
 $periodSql = $rangeStartSql ? "AND (a.is_pinned = 1 OR a.created_at >= :rangeStart)" : '';
 
 $annStmt = $pdo->prepare(
-    "SELECT a.announcement_id, a.title, a.body, a.is_pinned, a.priority,
-            a.audience, a.starts_at, a.ends_at, a.created_at,
-            u.full_name AS author
+    "SELECT a.announcement_id, a.title, a.content AS body, a.is_pinned, a.priority,
+            a.audience, a.start_date AS starts_at, a.end_date AS ends_at, a.created_at,
+            COALESCE(ue.full_name, u.username) AS author
        FROM announcements a
        JOIN users u ON a.created_by = u.user_id
-      WHERE (a.ends_at IS NULL OR a.ends_at >= NOW())
+       LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+      WHERE a.is_active = 1 AND (a.end_date IS NULL OR a.end_date >= NOW())
         {$audienceSql}
         {$periodSql}
       ORDER BY a.is_pinned DESC, FIELD(a.priority, 'high', 'medium', 'low'), a.created_at DESC"
@@ -57,7 +55,7 @@ if ($audience !== null) $annStmt->bindValue(':audience', $audience);
 $annStmt->execute();
 $announcements = $annStmt->fetchAll();
 
-$isHead = currentRoleId() === ROLE_HEAD_MANAGEMENT;
+$isHead = isAdmin(); // Admin-only controls, matching ajax/announcement_handler.php
 $minDateTime = date('Y-m-d\TH:i');
 
 layoutHead('Announcements', APP_BASE . '/assets/css/announcements.css');
@@ -182,7 +180,7 @@ layoutHead('Announcements', APP_BASE . '/assets/css/announcements.css');
       <div class="modal-body">
         <div class="mb-3">
           <label class="form-label fw-600">Title <span class="text-danger">*</span></label>
-          <input type="text" class="form-control" id="fullAnnTitle" maxlength="200" placeholder="Announcement title">
+          <input type="text" class="form-control" id="fullAnnTitle" maxlength="180" placeholder="Announcement title">
         </div>
         <div class="mb-3">
           <label class="form-label fw-600">Message <span class="text-danger">*</span></label>
@@ -254,7 +252,7 @@ layoutHead('Announcements', APP_BASE . '/assets/css/announcements.css');
         <input type="hidden" id="editAnnId">
         <div class="mb-3">
           <label class="form-label fw-600">Title <span class="text-danger">*</span></label>
-          <input type="text" class="form-control" id="editAnnTitle" maxlength="200" placeholder="Announcement title">
+          <input type="text" class="form-control" id="editAnnTitle" maxlength="180" placeholder="Announcement title">
         </div>
         <div class="mb-3">
           <label class="form-label fw-600">Message <span class="text-danger">*</span></label>

@@ -1,6 +1,7 @@
 # Mulawin FleetOps
 
-A web-based ERP system built for RP Mulawin Trucking Services — a final capstone
+A web-based Fleet Management System with Accounting and Inventory Management,
+built for RP Mulawin Trucking Services — a final capstone
 project for BSIT Business Analytics at Batangas State University (JPLPC Malvar
 Campus).
 
@@ -51,18 +52,27 @@ Quick local setup with XAMPP:
 
 1. Install PHP 8.2+ with PDO MySQL enabled, MySQL or MariaDB, and Apache. Start
    Apache and MySQL, then place the project under `C:\xampp\htdocs\mulawin_fleetops`.
-2. Create an empty `mulawin_fleetops` database in phpMyAdmin and import
-   [`db/mulawin_fleetops_db.sql`](db/mulawin_fleetops_db.sql).
-   **This SQL file is for a fresh, empty database only. Do not import it over
-   an existing installation.**
+2. **Database schema — read first.** The application code on this branch
+   targets the new schema in
+   [`db/reference/mulawin_fleetops_new.sql`](db/reference/mulawin_fleetops_new.sql)
+   plus the review-only drafts in [`db/target_migrations/`](db/target_migrations/).
+   The older [`db/mulawin_fleetops_db.sql`](db/mulawin_fleetops_db.sql) is the
+   legacy schema and does **not** match this code. Set up a separate test
+   database by following
+   [`docs/testing/database_setup_checklist.md`](docs/testing/database_setup_checklist.md);
+   none of its steps has been executed yet, and each database change needs
+   the owner's approval. Never import anything over the existing
+   `mulawin_fleetops` database.
 3. Copy `.env.example` to `.env` in the project root. Set the database
    credentials and confirm `APP_BASE=/mulawin_fleetops` matches the URL path.
    Keep `.env` private; it is excluded from Git.
 4. For disposable local development only, run `php auth/seed_users.php` from
-   the project root to create the initial admin account. The temporary
-   credentials are `admin` / `Admin@1234`; change the password after signing in
-   and remove the seed script before exposing the app to a network. Never use
-   this seeded account in production.
+   the project root to create the initial admin account. The command asks
+   for the initial password twice through a hidden prompt (at least 8
+   characters); the password is never stored in the source. Change it
+   later with Reset Password in User Management, and remove the seed script
+   before exposing the app to a network. Never use this seeded account in
+   production.
 5. Visit `http://localhost/mulawin_fleetops/login.php` and sign in with an
    account in the database.
 

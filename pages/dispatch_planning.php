@@ -2,29 +2,48 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 
 requirePermission('dispatch.instructions.manage');
 
 $pdo = getDBConnection();
 $clients = $pdo->query(
-    'SELECT client_id, client_name FROM clients WHERE is_active = 1 ORDER BY client_name'
+    "SELECT client_id, client_name FROM clients WHERE status = 'Active' ORDER BY client_name"
 )->fetchAll(PDO::FETCH_ASSOC);
+// Requested routes stay inactive until approved: active = approved.
 $routes = $pdo->query(
     "SELECT route_id, route_name, origin, destination
-     FROM routes WHERE is_active = 1 AND approval_status = 'Approved'
+     FROM routes WHERE is_active = 1
      ORDER BY route_name"
 )->fetchAll(PDO::FETCH_ASSOC);
+// Instructions are client_bookings rows (T-C1). Status shown with the
+// legacy labels: Pending = Open, Confirmed/Completed = Encoded.
 $instructions = $pdo->query(
-    "SELECT i.instruction_id, i.batch_id, i.shift_date, i.shift, i.scheduled_at, i.unit_count,
-            i.instruction_notes, i.status, c.client_name, r.route_name, u.full_name AS created_by_name,
-            dispatcher.full_name AS encoded_by_name, i.dispatch_id
-     FROM dispatch_instructions i
+    "SELECT i.booking_id AS instruction_id, NULL AS batch_id, i.booking_reference,
+            DATE(i.scheduled_departure) AS shift_date, i.shift, i.truck_type,
+            i.scheduled_departure AS scheduled_at, i.quantity AS unit_count,
+            i.notes AS instruction_notes,
+            CASE i.status WHEN 'Pending' THEN 'Open'
+                          WHEN 'Confirmed' THEN 'Encoded'
+                          WHEN 'Completed' THEN 'Encoded'
+                          ELSE i.status END AS status,
+            c.client_name, r.route_name,
+            COALESCE(ce.full_name, cu.username) AS created_by_name,
+            COALESCE(de.full_name, du.username) AS encoded_by_name,
+            dr.dispatch_request_id AS dispatch_id
+     FROM client_bookings i
      JOIN clients c ON c.client_id = i.client_id
      JOIN routes r ON r.route_id = i.route_id
-     JOIN users u ON u.user_id = i.created_by
-     LEFT JOIN users dispatcher ON dispatcher.user_id = i.encoded_by
-     ORDER BY CASE WHEN i.batch_id IS NULL THEN 1 ELSE 0 END,
-              i.batch_id DESC, i.instruction_id DESC
+     LEFT JOIN users cu ON cu.user_id = i.created_by
+     LEFT JOIN employees ce ON ce.employee_id = cu.employee_id
+     LEFT JOIN trips t ON t.trip_id = (
+         SELECT MIN(t2.trip_id) FROM trips t2 WHERE t2.booking_id = i.booking_id
+     )
+     LEFT JOIN dispatch_requests dr ON dr.trip_id = t.trip_id
+     LEFT JOIN users du ON du.user_id = dr.submitted_by
+     LEFT JOIN employees de ON de.employee_id = du.employee_id
+     WHERE i.scheduled_departure IS NOT NULL
+     ORDER BY i.booking_id DESC
      LIMIT 100"
 )->fetchAll(PDO::FETCH_ASSOC);
 
@@ -85,8 +104,17 @@ layoutHead('Dispatch Planning');
         </select>
       </div>
       <div class="col-md-4">
+        <label class="form-label" for="instructionTruckType">Truck Type</label>
+        <select class="form-select" id="instructionTruckType" required>
+          <option value="">Select a truck type</option>
+          <?php foreach (TRUCK_CATEGORIES as $truckType): ?>
+          <option value="<?= htmlspecialchars($truckType) ?>"><?= htmlspecialchars($truckType) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div class="col-md-4">
         <label class="form-label" for="instructionUnits">Unit Count (optional)</label>
-        <input class="form-control" type="number" min="0.01" max="999999.99" step="0.01" id="instructionUnits">
+        <input class="form-control" type="number" min="1" max="999999" step="1" id="instructionUnits">
       </div>
       <div class="col-12">
         <label class="form-label" for="instructionNotes">Instructions for Dispatcher (optional)</label>
@@ -163,8 +191,17 @@ layoutHead('Dispatch Planning');
         </select>
       </div>
       <div class="col-md-4">
+        <label class="form-label">Truck Type</label>
+        <select class="form-select batch-truck-type" required>
+          <option value="">Select a truck type</option>
+          <?php foreach (TRUCK_CATEGORIES as $truckType): ?>
+          <option value="<?= htmlspecialchars($truckType) ?>"><?= htmlspecialchars($truckType) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </div>
+      <div class="col-md-4">
         <label class="form-label">Unit Count (optional)</label>
-        <input class="form-control batch-unit-count" type="number" min="0.01" max="999999.99" step="0.01">
+        <input class="form-control batch-unit-count" type="number" min="1" max="999999" step="1">
       </div>
       <div class="col-12">
         <label class="form-label">Instructions for Dispatcher (optional)</label>
@@ -183,20 +220,20 @@ layoutHead('Dispatch Planning');
   <div class="table-responsive">
     <table class="table-custom">
       <thead>
-        <tr><th>Batch</th><th>Ref</th><th>Shift</th><th>Client</th><th>Route</th><th>Departure</th><th>Units</th><th>Status</th><th>Notes</th><th>Action</th></tr>
+        <tr><th>Truck Type</th><th>Ref</th><th>Shift</th><th>Client</th><th>Route</th><th>Departure</th><th>Units</th><th>Status</th><th>Notes</th><th>Action</th></tr>
       </thead>
       <tbody>
       <?php if (!$instructions): ?>
         <tr><td colspan="10" class="text-center text-muted py-4">No dispatch instructions sent yet.</td></tr>
       <?php else: foreach ($instructions as $instruction): ?>
         <tr>
-          <td><?= $instruction['batch_id'] !== null ? 'Batch #' . (int)$instruction['batch_id'] : 'Single' ?></td>
-          <td>#<?= (int)$instruction['instruction_id'] ?></td>
+          <td><?= htmlspecialchars((string)$instruction['truck_type']) ?></td>
+          <td><?= htmlspecialchars((string)$instruction['booking_reference']) ?></td>
           <td><span class="badge text-bg-<?= $instruction['shift'] === 'Day' ? 'info' : 'dark' ?>"><?= htmlspecialchars($instruction['shift']) ?></span></td>
           <td><?= htmlspecialchars($instruction['client_name']) ?></td>
           <td><?= htmlspecialchars($instruction['route_name']) ?></td>
           <td><?= date('M j, Y g:i A', strtotime($instruction['scheduled_at'])) ?></td>
-          <td><?= $instruction['unit_count'] !== null ? number_format((float)$instruction['unit_count'], 2) : '—' ?></td>
+          <td><?= $instruction['unit_count'] !== null ? number_format((int)$instruction['unit_count']) : '—' ?></td>
           <td><?= htmlspecialchars($instruction['status']) ?><?= $instruction['encoded_by_name'] ? '<br><small>' . htmlspecialchars($instruction['encoded_by_name']) . '</small>' : '' ?></td>
           <td><?= $instruction['instruction_notes'] ? htmlspecialchars($instruction['instruction_notes']) : '—' ?></td>
           <td>

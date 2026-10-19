@@ -127,11 +127,31 @@
     setBusy(submitBillingBtn, bilBtnSpinner, false);
   });
 
+  // Choosing a trip fills its client and the charge suggested by the
+  // client's rate card (both stay editable; the server re-validates).
+  bilTripId?.addEventListener('change', () => {
+    const option = bilTripId.options[bilTripId.selectedIndex];
+    if (bilClientName && !bilClientName.value && option?.dataset.client) {
+      bilClientName.value = option.dataset.client;
+    }
+    if (!bilTripId.value || !bilAmount || bilAmount.value) return;
+    postAjax({ action: 'suggest_amount', trip_id: bilTripId.value })
+      .then(res => {
+        if (res.success && res.amount !== null && res.amount !== undefined && !bilAmount.value) {
+          bilAmount.value = Number(res.amount).toFixed(2);
+        }
+      })
+      .catch(() => {});
+  });
+
   // "Create Billing" buttons on the Unbilled Trips tab pre-select a trip
   // before opening the same modal used for the header's generic button.
   document.querySelectorAll('.bil-unbilled-create-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      if (bilTripId) bilTripId.value = btn.dataset.tripId ?? '';
+      if (bilTripId) {
+        bilTripId.value = btn.dataset.tripId ?? '';
+        bilTripId.dispatchEvent(new Event('change'));
+      }
     });
   });
 
@@ -454,11 +474,6 @@
         })
         .catch(() => alert('Network error. Please try again.'));
     });
-  });
-
-  // ── Payroll: print report ─────────────────────────────────────────────────
-  document.getElementById('printPayrollReportBtn')?.addEventListener('click', () => {
-    window.print();
   });
 
   // ── Payroll: send report to Head (uploads via the existing Documents

@@ -1,0 +1,43 @@
+-- ============================================================
+-- T-M1: maintenance_records.next_due_date (DRAFT FOR REVIEW -
+-- DECISION-GATED)
+-- File: db/target_migrations/20261014_tM1_maintenance_next_due.sql
+-- Option B phase: B5c. GATED ON DECISION D11.
+--
+-- STATUS: NOT EXECUTED and NOT APPROVED FOR EXECUTION.
+--
+-- TARGET DATABASE: the Option B target only. Do NOT apply to the legacy
+--   database (the column already exists there). No USE statement.
+--
+-- PURPOSE:
+--   About 40 code references use maintenance_records.next_due_date (the
+--   maintenance-due reminder automation, dashboards, maintenance pages).
+--   The plan's recommendation for D11: legacy preventive_maintenance_schedules
+--   and repair_work_orders map to target maintenance_records rows
+--   (maintenance_type 'Preventive' / 'Repair', scheduled_date, status) in B5c
+--   CODE, so no support tables are drafted for them. Only next_due_date has
+--   no target equivalent and is added here, with an index for the
+--   "due within N days" queries.
+--
+-- DEPENDENCIES: target schema baseline (maintenance_records).
+-- COMPATIBILITY: MariaDB 10.4 / MySQL 8 syntax. Hostinger NOT verified.
+-- NOTE: SQL examples in comments have no statement terminators on purpose.
+--
+-- READ-ONLY PRE-CHECKS (expected result in brackets):
+--   a) SELECT DATABASE()                                  -- [the target db]
+--   b) SELECT COLUMN_NAME FROM information_schema.COLUMNS
+--       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'maintenance_records'
+--         AND COLUMN_NAME = 'next_due_date'                -- [no rows]
+--
+-- TRANSACTIONS: ALTER TABLE commits implicitly; a rerun fails with a
+--   duplicate-column error and changes nothing.
+--
+-- ROLLBACK (only with explicit approval, before B5c code uses the column):
+--     ALTER TABLE maintenance_records DROP INDEX idx_maintenance_next_due,
+--       DROP COLUMN next_due_date
+--   Data loss: every recorded next-due date (maintenance-due reminders stop).
+-- ============================================================
+
+ALTER TABLE maintenance_records
+    ADD COLUMN next_due_date DATE NULL AFTER actual_completion_date,
+    ADD KEY idx_maintenance_next_due (next_due_date);

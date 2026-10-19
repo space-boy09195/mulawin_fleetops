@@ -31,13 +31,28 @@ if ($employeeId !== null) {
     $where[] = 'ea.employee_id = ?';
     $params[] = $employeeId;
 }
+// Times stay HH:MM:SS (as the legacy TIME columns exported) for spreadsheets
+// that rely on that format; empty times stay empty. Column order matches the
+// CSV headers below.
 $stmt = getDBConnection()->prepare(
-    'SELECT ea.attendance_date, e.employee_code, e.full_name, e.position, ea.status,
-            ea.time_in, ea.time_out, ea.overtime_minutes, ea.overtime_reason, ea.notes
-     FROM employee_attendance ea
+    "SELECT ea.attendance_date, e.employee_code,
+            COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ',
+                    NULLIF(TRIM(e.first_name), ''),
+                    NULLIF(TRIM(e.middle_name), ''),
+                    NULLIF(TRIM(e.last_name), ''),
+                    NULLIF(TRIM(e.suffix), '')
+                )), ''),
+                CONCAT('Employee #', e.employee_id)
+            ) AS full_name,
+            e.position, ea.status,
+            DATE_FORMAT(ea.time_in, '%H:%i:%s') AS time_in,
+            DATE_FORMAT(ea.time_out, '%H:%i:%s') AS time_out,
+            ea.overtime_minutes, ea.overtime_reason, ea.remarks AS notes
+     FROM attendance_records ea
      JOIN employees e ON e.employee_id = ea.employee_id
-     ' . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . '
-     ORDER BY ea.attendance_date DESC, e.full_name'
+     " . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . "
+     ORDER BY ea.attendance_date DESC, full_name"
 );
 $stmt->execute($params);
 $rows = static function () use ($stmt): Generator {

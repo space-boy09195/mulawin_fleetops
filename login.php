@@ -4,7 +4,6 @@
 // ============================================================
 require_once __DIR__ . '/includes/session.php';
 require_once __DIR__ . '/includes/csrf.php';
-require_once __DIR__ . '/includes/env.php';
 
 $returnTo = validatedLocalReturnPath($_GET['return_to'] ?? $_SESSION['return_to'] ?? null);
 if ($returnTo !== null) {
@@ -37,64 +36,13 @@ $messages = [
     ],
 ];
 $resetMessages = [
-    'submitted' => 'If the account is eligible, the password request was sent to Head Management for approval.',
-    'invalid' => 'Enter a username and matching password with at least 8 characters.',
+    'disabled' => 'Self-service password changes are not available. Please contact your system administrator to reset your password.',
 ];
 
 $errorMsg   = $messages['error'][$_GET['error'] ?? ''] ?? '';
 $reasonMsg  = $messages['reason'][$_GET['reason'] ?? ''] ?? '';
 $resetMsg   = $resetMessages[$_GET['reset'] ?? ''] ?? '';
 
-// ---- Dynamic employee access data with safe DB fallback --------
-$systemStatus = [
-    'state' => 'ready',
-    'label' => 'Secure Access',
-    'title' => 'Employee sign-in portal',
-    'message' => 'Use your work credentials to access the Mulawin FleetOps system with secure account protection.',
-    'stats' => [
-        ['label' => 'Active departments', 'value' => 3],
-        ['label' => 'Employees logged in', 'value' => 24],
-        ['label' => 'Access roles', 'value' => 4],
-    ],
-];
-
-try {
-    loadEnv();
-
-    $dbHost = env('DB_HOST', 'localhost');
-    $dbName = env('DB_NAME', 'mulawin_fleetops');
-    $dbUser = env('DB_USER', 'root');
-    $dbPass = env('DB_PASS', '');
-    $dbCharset = env('DB_CHARSET', 'utf8mb4');
-
-    $dsn = "mysql:host={$dbHost};dbname={$dbName};charset={$dbCharset}";
-    $pdo = new PDO($dsn, $dbUser, $dbPass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-    ]);
-
-    $activeRoles = (int)$pdo->query("SELECT COUNT(*) FROM roles WHERE role_name <> 'Head Management'")->fetchColumn();
-    $activeUsers = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE is_active = 1 AND role_id <> (SELECT role_id FROM roles WHERE role_name = 'Head Management')")->fetchColumn();
-    $rolesCount = (int)$pdo->query("SELECT COUNT(*) FROM roles")->fetchColumn();
-
-    $systemStatus['stats'] = [
-        ['label' => 'Active departments', 'value' => $activeRoles],
-        ['label' => 'Employees logged in', 'value' => max(1, $activeUsers)],
-        ['label' => 'Access roles', 'value' => $rolesCount],
-    ];
-
-    if ($activeUsers === 0) {
-        $systemStatus['state'] = 'warning';
-        $systemStatus['label'] = 'Review Access';
-        $systemStatus['title'] = 'Access review required';
-        $systemStatus['message'] = 'No active department staff accounts are available right now. Please review access credentials before continuing.';
-    }
-} catch (Throwable $e) {
-    error_log('Login employee status fallback used: ' . $e->getMessage());
-}
-
-$statusClass = 'status-pill--' . $systemStatus['state'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -111,41 +59,20 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
   <!-- Custom Login CSS (separate file as required) -->
   <link rel="stylesheet" href="assets/css/login.css">
 </head>
-<body>
+<body class="login-page">
 
 <div class="login-shell">
   <aside class="login-visual" aria-label="Fleet operations overview">
-    <div class="visual-topbar">
-      <span class="status-pill <?= htmlspecialchars($statusClass) ?>"><?= htmlspecialchars($systemStatus['label']) ?></span>
-    </div>
-
-    <div class="visual-brand">
+    <span class="visual-shape visual-shape--a" aria-hidden="true"></span>
+    <span class="visual-shape visual-shape--b" aria-hidden="true"></span>
+    <div class="visual-content">
       <div class="brand-icon">
         <img src="assets/images/logo.png" alt="Logo" style="width:70%;height:70%;object-fit:contain;"
              onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';">
         <i class="bi bi-truck-front-fill" style="display:none;"></i>
       </div>
-      <div>
-        <p class="eyebrow">Employee access</p>
-        <h2>Mulawin FleetOps</h2>
-      </div>
-    </div>
-
-    <div class="visual-copy">
-      <div class="visual-message-card">
-        <span class="message-label">System status</span>
-        <h3><?= htmlspecialchars($systemStatus['title']) ?></h3>
-        <p><?= htmlspecialchars($systemStatus['message']) ?></p>
-      </div>
-    </div>
-
-    <div class="visual-stats" aria-label="Fleet metrics">
-      <?php foreach ($systemStatus['stats'] as $stat): ?>
-        <div class="stat-card">
-          <span class="stat-label"><?= htmlspecialchars($stat['label']) ?></span>
-          <strong><?= htmlspecialchars($stat['value']) ?></strong>
-        </div>
-      <?php endforeach; ?>
+      <h2>Welcome to Mulawin FleetOps</h2>
+      <p>A centralized workspace for fleet operations, trip monitoring, maintenance, and financial visibility.</p>
     </div>
   </aside>
 
@@ -158,7 +85,7 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
         <i class="bi bi-truck-front-fill" style="display:none;"></i>
       </div>
       <h1 class="brand-name">Welcome back</h1>
-      <p class="brand-sub">Sign in to your dashboard</p>
+      <p class="brand-sub">Sign in with your work credentials to continue to your dashboard.</p>
     </div>
 
     <?php if ($errorMsg): ?>
@@ -217,7 +144,7 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
             autocomplete="current-password"
             required
           >
-          <button class="btn btn-outline-secondary" type="button" id="togglePassword" tabindex="-1" aria-label="Show or hide password">
+          <button class="btn btn-outline-secondary" type="button" id="togglePassword" aria-label="Show or hide password">
             <i class="bi bi-eye-slash" id="toggleIcon"></i>
           </button>
         </div>
@@ -230,7 +157,7 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
         </span>
       </button>
       <div class="text-center mt-3">
-        <a href="#" data-bs-toggle="modal" data-bs-target="#forgotPasswordModal">Forgot password?</a>
+        <span class="text-muted small">Forgot your password? Contact your system administrator.</span>
       </div>
     </form>
 
@@ -244,32 +171,5 @@ $statusClass = 'status-pill--' . $systemStatus['state'];
 <script src="assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
 <!-- Custom Login JS (separate file as required) -->
 <script src="assets/js/login.js"></script>
-<div class="modal fade" id="forgotPasswordModal" tabindex="-1" aria-labelledby="forgotPasswordLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="forgotPasswordLabel">Request Password Change</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <form method="post" action="auth/forgot_password_request_handler.php">
-        <div class="modal-body">
-          <?= csrfInput() ?>
-          <p class="text-muted small">Your request will be reviewed by Head Management before the password changes.</p>
-          <label class="form-label" for="resetUsername">Username</label>
-          <input class="form-control mb-3" id="resetUsername" name="username" required autocomplete="username">
-          <label class="form-label" for="resetPassword">New password</label>
-          <input class="form-control mb-3" type="password" id="resetPassword" name="password" minlength="8" required autocomplete="new-password">
-          <label class="form-label" for="resetConfirmPassword">Confirm new password</label>
-          <input class="form-control" type="password" id="resetConfirmPassword" name="confirm_password" minlength="8" required autocomplete="new-password">
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="submit" class="btn btn-primary">Submit Request</button>
-        </div>
-      </form>
-    </div>
-  </div>
-</div>
-
 </body>
 </html>

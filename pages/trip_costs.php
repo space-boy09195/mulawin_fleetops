@@ -2,96 +2,93 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/finance_records.php';
 
 requireAnyPermission(['finance.view', 'finance.manage']);
-layoutHead('Trip Costs & Fuel Analysis', APP_BASE . '/assets/css/billing.css');
+layoutHead('Trip Costs & Crew Pay', APP_BASE . '/assets/css/billing.css');
 $pdo = getDBConnection();
 
+// Target: trip expenses and separately recorded Driver/Helper Trip Pay.
 $trips = $pdo->query("
-    SELECT t.trip_id, t.trip_number, r.distance_km, t.cargo_weight_tons,
-           tr.plate_number, tr.fuel_efficiency_km_per_liter, tr.capacity_tons
+    SELECT t.trip_id, t.trip_number, tr.plate_number
     FROM trips t
-    JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
-    JOIN routes r ON r.route_id = dr.route_id
-    JOIN trucks tr ON tr.truck_id = dr.truck_id
-    WHERE t.status <> 'Cancelled'
+    JOIN trucks tr ON tr.truck_id = t.truck_id
+    WHERE t.status NOT IN ('Cancelled', 'Pending Approval')
     ORDER BY t.created_at DESC
+    LIMIT 500
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $rows = $pdo->query("
-    SELECT t.trip_number, t.trip_id, tr.plate_number, r.distance_km,
-           tr.fuel_efficiency_km_per_liter, tr.capacity_tons, t.cargo_weight_tons,
-           COALESCE(SUM(e.amount), 0) AS total_expense,
-           COALESCE(SUM(CASE WHEN e.expense_type = 'Fuel' THEN e.quantity ELSE 0 END), 0) AS fuel_liters,
-           COALESCE((SELECT SUM(b.amount) FROM billings b WHERE b.trip_id = t.trip_id), 0) AS revenue,
-           dr.driver_id, drv.full_name AS driver_name,
-           dr.helper_id, hlp.full_name AS helper_name
+    SELECT t.trip_number, t.trip_id, tr.plate_number,
+           COALESCE(ex.total_expense, 0) AS total_expense,
+           t.driver_id, drv.full_name AS driver_name,
+           t.second_driver_id, sdrv.full_name AS second_driver_name,
+           t.helper_id, hlp.full_name AS helper_name
     FROM trips t
-    JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
-    JOIN routes r ON r.route_id = dr.route_id
-    JOIN trucks tr ON tr.truck_id = dr.truck_id
-    LEFT JOIN trip_expenses e ON e.trip_id = t.trip_id
-    LEFT JOIN employees drv ON drv.employee_id = dr.driver_id
-    LEFT JOIN employees hlp ON hlp.employee_id = dr.helper_id
-    WHERE t.status <> 'Cancelled'
-    GROUP BY t.trip_id
+    JOIN trucks tr ON tr.truck_id = t.truck_id
+    LEFT JOIN (
+        SELECT reference_id AS trip_id, SUM(amount) AS total_expense
+        FROM expense_records
+        WHERE reference_type = 'trip'
+        GROUP BY reference_id
+    ) ex ON ex.trip_id = t.trip_id
+    LEFT JOIN employees drv  ON drv.employee_id  = t.driver_id
+    LEFT JOIN employees sdrv ON sdrv.employee_id = t.second_driver_id
+    LEFT JOIN employees hlp  ON hlp.employee_id  = t.helper_id
+    WHERE t.status NOT IN ('Cancelled', 'Pending Approval')
     ORDER BY t.created_at DESC
     LIMIT 100
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $expenseStmt = $pdo->query("
-    SELECT e.expense_id, e.trip_id, e.expense_type, e.amount, e.quantity, e.other_description, e.expense_date,
-           e.notes, u.full_name AS recorded_by
-    FROM trip_expenses e
+    SELECT e.expense_id, e.reference_id AS trip_id, e.expense_type, e.amount, e.quantity,
+           IF(e.expense_type = 'Other', e.description, NULL) AS other_description, e.expense_date,
+           IF(e.expense_type = 'Other' OR e.description = e.expense_type, NULL, e.description) AS notes,
+           COALESCE(ue.full_name, u.username) AS recorded_by
+    FROM expense_records e
     JOIN users u ON u.user_id = e.recorded_by
-    JOIN trips t ON t.trip_id = e.trip_id
-    WHERE t.status <> 'Cancelled'
+    LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+    JOIN trips t ON t.trip_id = e.reference_id
+    WHERE e.reference_type = 'trip' AND t.status <> 'Cancelled'
     ORDER BY e.expense_date DESC, e.created_at DESC
+    LIMIT 2000
 ");
 $expensesByTrip = [];
 foreach ($expenseStmt->fetchAll(PDO::FETCH_ASSOC) as $expense) {
     $expensesByTrip[(int)$expense['trip_id']][] = $expense;
 }
 
-// ── Crew pay: per-trip Driver/Helper wages ────────────────────────────────────
-// Wrapped defensively: if trip_pay hasn't been created yet (migration not
-// run), degrade to "no crew pay data" instead of a fatal crash.
+// ── Crew pay: per-trip Driver/Helper wages (trip_pay_records) ─────────────────
 $tripPayTableMissing = false;
 $tripPayByTrip = [];
-try {
-    $tripPayStmt = $pdo->query("
-        SELECT tp.trip_pay_id, tp.trip_id, tp.employee_id, tp.crew_role, tp.amount, tp.paid_date,
-               tp.notes, e.full_name AS employee_name, u.full_name AS recorded_by
-        FROM trip_pay tp
-        JOIN employees e ON e.employee_id = tp.employee_id
-        JOIN users u     ON u.user_id     = tp.recorded_by
-        JOIN trips t     ON t.trip_id     = tp.trip_id
-        WHERE t.status <> 'Cancelled'
-        ORDER BY tp.paid_date DESC, tp.created_at DESC
-    ");
-    foreach ($tripPayStmt->fetchAll(PDO::FETCH_ASSOC) as $pay) {
-        $tripPayByTrip[(int)$pay['trip_id']][] = $pay;
-    }
-} catch (PDOException $e) {
-    if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
-        $tripPayTableMissing = true;
-    } else {
-        throw $e;
-    }
+$tripPayStmt = $pdo->query("
+    SELECT tp.trip_pay_id, tp.trip_id, tp.employee_id,
+           IF(tp.pay_type = 'Helper Trip Pay', 'Helper', 'Driver') AS crew_role,
+           tp.amount, tp.notes AS stored_notes, e.full_name AS employee_name,
+           COALESCE(ue.full_name, u.username, '—') AS recorded_by
+    FROM trip_pay_records tp
+    JOIN employees e  ON e.employee_id = tp.employee_id
+    LEFT JOIN users u ON u.user_id     = tp.recorded_by
+    LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+    JOIN trips t      ON t.trip_id     = tp.trip_id
+    WHERE t.status <> 'Cancelled' AND tp.status <> 'Cancelled'
+    ORDER BY tp.trip_pay_id DESC
+");
+foreach ($tripPayStmt->fetchAll(PDO::FETCH_ASSOC) as $pay) {
+    $split = tripPaySplitNotes($pay['stored_notes']);
+    unset($pay['stored_notes']);
+    $pay['paid_date'] = $split['paid_date'] ?? '';
+    $pay['notes'] = $split['notes'];
+    $tripPayByTrip[(int)$pay['trip_id']][] = $pay;
 }
 
-$isHead = currentRoleId() === ROLE_HEAD_MANAGEMENT;
+$isHead = isAdmin();
+$isFinance = currentRoleKey() === 'finance';
+// Trip Pay is managed by Payroll: ajax/trip_pay_handler.php requires
+// payroll.manage (Admin passes). Finance sees the Trip Pay column on this page
+// but gets no Manage Trip Pay button it cannot use.
+$canManageTripPay = currentUserHasAnyPermission(['payroll.manage']);
 
-function expectedFuel(array $row): float {
-    $distance = (float)($row['distance_km'] ?? 0);
-    $efficiency = (float)($row['fuel_efficiency_km_per_liter'] ?? 0);
-    if ($distance <= 0 || $efficiency <= 0) return 0;
-    $loadFactor = 0;
-    if ((float)$row['capacity_tons'] > 0) {
-        $loadFactor = min(1, max(0, (float)$row['cargo_weight_tons'] / (float)$row['capacity_tons']));
-    }
-    return $distance / $efficiency * (1 + ($loadFactor * 0.10));
-}
 ?>
 <div class="bil-page">
 
@@ -107,8 +104,8 @@ function expectedFuel(array $row): float {
 
   <div class="bil-header d-flex align-items-center justify-content-between mb-4">
     <div>
-      <h1 class="bil-title mb-0">Trip Costs &amp; Fuel Analysis</h1>
-      <p class="bil-subtitle mb-0">Record operating expenses and review fuel variance. Driver Allowance is a trip expense reimbursement; Trip Pay is the assigned crew's per-trip wage. They are separate payments and may both be recorded for the same trip and crew member.</p>
+      <h1 class="bil-title mb-0">Trip Costs &amp; Crew Pay</h1>
+      <p class="bil-subtitle mb-0">Record operating expenses and review crew compensation. Driver Allowance is an expense reimbursement; Trip Pay is the assigned crew's per-trip wage. They are separate payments and may both be recorded for the same trip and crew member.</p>
     </div>
     <button class="btn btn-bil-primary" data-bs-toggle="modal" data-bs-target="#expenseModal">
       <i class="bi bi-plus-lg me-1"></i> Record Expense
@@ -116,27 +113,24 @@ function expectedFuel(array $row): float {
   </div>
   <div class="bil-table-wrap">
     <table class="table bil-table">
-      <thead><tr><th>Trip</th><th>Truck</th><th>Crew</th><th>Revenue</th><th>Trip Expenses</th><th>Trip Pay</th><th>Net Profit</th><th>CPK</th><th>Fuel Analysis</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Trip</th><th>Truck</th><th>Crew</th><th>Recorded Expenses</th><th>Recorded Trip Pay</th><?php if (!$isFinance): ?><th>Actions</th><?php endif; ?></tr></thead>
       <tbody>
       <?php foreach ($rows as $row):
-        $expected = expectedFuel($row);
-        $actual = (float)$row['fuel_liters'];
-        $variance = $expected > 0 ? (($actual - $expected) / $expected) * 100 : null;
         $tripPayEntries = $tripPayByTrip[(int)$row['trip_id']] ?? [];
         $tripPayTotal   = array_sum(array_column($tripPayEntries, 'amount'));
-        $profit = (float)$row['revenue'] - (float)$row['total_expense'] - $tripPayTotal;
-        $cpk = (float)$row['distance_km'] > 0 ? (float)$row['total_expense'] / (float)$row['distance_km'] : 0;
       ?>
       <tr>
         <td><?= htmlspecialchars($row['trip_number']) ?></td>
         <td><?= htmlspecialchars($row['plate_number']) ?></td>
         <td>
           <div><?= htmlspecialchars($row['driver_name'] ?? '—') ?> <span class="text-muted">(Driver)</span></div>
+          <?php if (!empty($row['second_driver_name'])): ?>
+          <div><?= htmlspecialchars($row['second_driver_name']) ?> <span class="text-muted">(Second driver)</span></div>
+          <?php endif; ?>
           <?php if (!empty($row['helper_name'])): ?>
           <div><?= htmlspecialchars($row['helper_name']) ?> <span class="text-muted">(Helper)</span></div>
           <?php endif; ?>
         </td>
-        <td>₱<?= number_format((float)$row['revenue'], 2) ?></td>
         <td>
           <button type="button" class="btn btn-sm btn-outline-secondary expense-breakdown-btn"
                   data-trip="<?= htmlspecialchars($row['trip_number']) ?>"
@@ -151,26 +145,16 @@ function expectedFuel(array $row): float {
             ₱<?= number_format($tripPayTotal, 2) ?>
           <?php endif; ?>
         </td>
-        <td class="<?= $profit >= 0 ? 'text-success' : 'text-danger' ?>">₱<?= number_format($profit, 2) ?></td>
-        <td>₱<?= number_format($cpk, 2) ?>/km</td>
-        <td>
-          <?php if ($variance === null): ?>
-            <span class="text-muted">No fuel baseline</span>
-          <?php elseif ($variance > 15): ?>
-            <span class="badge bg-danger">Anomaly +<?= number_format($variance, 1) ?>%</span>
-            <small class="d-block text-muted"><?= number_format($actual, 1) ?>L actual / <?= number_format($expected, 1) ?>L expected</small>
-          <?php else: ?>
-            <span class="badge bg-success">Normal</span>
-            <small class="d-block text-muted"><?= number_format($variance, 1) ?>% variance</small>
-          <?php endif; ?>
-        </td>
+        <?php if (!$isFinance): ?>
         <td class="text-end">
-          <?php if (!$tripPayTableMissing): ?>
+          <?php if (!$tripPayTableMissing && $canManageTripPay): ?>
           <button type="button" class="btn btn-sm btn-outline-secondary crew-pay-btn"
                   data-trip-id="<?= $row['trip_id'] ?>"
                   data-trip="<?= htmlspecialchars($row['trip_number']) ?>"
                   data-driver-id="<?= (int)$row['driver_id'] ?>"
                   data-driver-name="<?= htmlspecialchars($row['driver_name'] ?? '') ?>"
+                  data-second-driver-id="<?= $row['second_driver_id'] !== null ? (int)$row['second_driver_id'] : '' ?>"
+                  data-second-driver-name="<?= htmlspecialchars($row['second_driver_name'] ?? '') ?>"
                   data-helper-id="<?= $row['helper_id'] !== null ? (int)$row['helper_id'] : '' ?>"
                   data-helper-name="<?= htmlspecialchars($row['helper_name'] ?? '') ?>"
                   data-existing="<?= htmlspecialchars(json_encode($tripPayEntries), ENT_QUOTES, 'UTF-8') ?>">
@@ -178,6 +162,7 @@ function expectedFuel(array $row): float {
           </button>
           <?php endif; ?>
         </td>
+        <?php endif; ?>
       </tr>
       <?php endforeach; ?>
       </tbody>
@@ -487,6 +472,10 @@ document.querySelectorAll('.crew-pay-btn').forEach((button) => {
     if (button.dataset.driverId) {
       const existingPay = existingByEmployee[button.dataset.driverId];
       crewPayRows.appendChild(buildCrewPayRow(button.dataset.driverId, button.dataset.driverName, 'Driver', existingPay?.amount));
+    }
+    if (button.dataset.secondDriverId) {
+      const existingPay = existingByEmployee[button.dataset.secondDriverId];
+      crewPayRows.appendChild(buildCrewPayRow(button.dataset.secondDriverId, button.dataset.secondDriverName, 'Driver', existingPay?.amount));
     }
     if (button.dataset.helperId) {
       const existingPay = existingByEmployee[button.dataset.helperId];

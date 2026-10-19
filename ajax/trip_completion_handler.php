@@ -6,11 +6,13 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/notifications.php';
 require_once __DIR__ . '/../includes/trip_completion.php';
+require_once __DIR__ . '/../includes/workflow_events.php';
 
 header('Content-Type: application/json');
 requireLogin();
 requirePostMethod();
 enforceCsrf();
+requirePermission('trips.complete');
 
 $tripId = requiredInt('trip_id', 'Trip', 1);
 if (isset($_POST['driver_note']) && !is_string($_POST['driver_note'])) {
@@ -22,7 +24,7 @@ $pdo = getDBConnection();
 $employeeQuery = $pdo->prepare(
     'SELECT employee_id, position
      FROM employees
-     WHERE user_id = ? AND is_active = 1
+     WHERE user_id = ? AND employment_status = \'Active\'
      ORDER BY employee_id'
 );
 $employeeQuery->execute([currentUserId()]);
@@ -45,7 +47,7 @@ try {
     $employeeLock = $pdo->prepare(
         'SELECT employee_id
          FROM employees
-         WHERE employee_id = ? AND user_id = ? AND is_active = 1
+         WHERE employee_id = ? AND user_id = ? AND employment_status = \'Active\'
          FOR UPDATE'
     );
     $employeeLock->execute([(int)$employee['employee_id'], currentUserId()]);
@@ -55,10 +57,11 @@ try {
     }
 
     $tripQuery = $pdo->prepare(
-        'SELECT t.trip_id, t.trip_number, t.status, dr.dispatch_id, dr.requested_by,
-                dr.driver_id, dr.second_driver_id
+        'SELECT t.trip_id, t.trip_number, t.status,
+                dr.dispatch_request_id AS dispatch_id, dr.submitted_by AS requested_by,
+                t.driver_id, t.second_driver_id
          FROM trips t
-         JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
+         LEFT JOIN dispatch_requests dr ON dr.trip_id = t.trip_id
          WHERE t.trip_id = ?
          FOR UPDATE'
     );
@@ -73,7 +76,10 @@ try {
         $pdo->rollBack();
         jsonFail('You are not assigned as a driver on this trip.', 403);
     }
-    if (in_array($trip['status'], ['Completed', 'Cancelled'], true)) {
+    // Same rule as before the target schema: an approved trip that is not
+    // finished. (Legacy trips existed only after approval, so 'Pending
+    // Approval' is excluded too.)
+    if (in_array($trip['status'], ['Pending Approval', 'Completed', 'Cancelled'], true)) {
         $pdo->rollBack();
         jsonFail('This trip is no longer active and cannot receive a completion report.', 409);
     }
@@ -85,30 +91,60 @@ try {
 
     $insert = $pdo->prepare(
         'INSERT INTO trip_completion_reports
-            (trip_id, dispatch_id, reported_by, driver_note)
-         VALUES (?, ?, ?, ?)'
+            (trip_id, reported_by, driver_note)
+         VALUES (?, ?, ?)'
     );
-    $insert->execute([
-        $tripId,
-        (int)$trip['dispatch_id'],
-        (int)$employee['employee_id'],
-        $driverNote,
-    ]);
+    try {
+        $insert->execute([
+            $tripId,
+            (int)$employee['employee_id'],
+            $driverNote,
+        ]);
+    } catch (PDOException $e) {
+        // uq_trip_completion_active (T-T2): one Pending report per trip.
+        if ((int)($e->errorInfo[1] ?? 0) === 1062) {
+            $pdo->rollBack();
+            jsonFail('A completion report has already been submitted for this trip.', 409);
+        }
+        throw $e;
+    }
     $reportId = (int)$pdo->lastInsertId();
+    recordWorkflowEvent($pdo, 'trip', $tripId, 'driver-completion-reported', null, null, $driverNote, currentUserId());
 
+    // Recipients: every active Admin (active role with system_key 'admin',
+    // regardless of explicit grants), plus the requesting dispatcher when
+    // they hold both trips.update and trips.view. The reporting driver is
+    // never a recipient. DISTINCT keeps one row per user.
     $recipientQuery = $pdo->prepare(
-        "SELECT u.user_id
+        "SELECT DISTINCT u.user_id
          FROM users u
-         JOIN role_permissions rp ON rp.role_id = u.role_id
-         JOIN permissions p ON p.permission_id = rp.permission_id
+         JOIN roles r ON r.role_id = u.role_id
          WHERE u.is_active = 1
-           AND p.permission_key IN ('trips.update', 'trips.view')
+           AND r.is_active = 1
            AND u.user_id <> ?
-           AND (u.role_id = ? OR u.user_id = ?)
-         GROUP BY u.user_id
-         HAVING COUNT(DISTINCT p.permission_key) = 2"
+           AND (
+               r.system_key = 'admin'
+               OR (
+                   u.user_id = ?
+                   AND EXISTS (
+                       SELECT 1 FROM role_permissions rp
+                       JOIN permissions p ON p.permission_id = rp.permission_id
+                       WHERE rp.role_id = u.role_id AND p.permission_key = ?
+                   )
+                   AND EXISTS (
+                       SELECT 1 FROM role_permissions rp
+                       JOIN permissions p ON p.permission_id = rp.permission_id
+                       WHERE rp.role_id = u.role_id AND p.permission_key = ?
+                   )
+               )
+           )"
     );
-    $recipientQuery->execute([currentUserId(), ROLE_ADMIN, (int)$trip['requested_by']]);
+    $recipientQuery->execute([
+        currentUserId(),
+        (int)$trip['requested_by'],
+        'trips.update',
+        'trips.view',
+    ]);
     $recipients = array_map('intval', $recipientQuery->fetchAll(PDO::FETCH_COLUMN));
     if (!$recipients) {
         $pdo->rollBack();
@@ -122,7 +158,9 @@ try {
             $recipientId,
             'Driver reported trip completion',
             $message,
-            APP_BASE . '/pages/trip_workflow.php?trip_id=' . $tripId
+            'trip_completion',
+            'trip',
+            $tripId
         );
     }
 

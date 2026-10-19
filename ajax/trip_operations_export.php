@@ -2,8 +2,13 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/reporting.php';
+require_once __DIR__ . '/../includes/crew_trip_access.php';
+require_once __DIR__ . '/../includes/trip_queries.php';
+require_once __DIR__ . '/../config/enums.php';
 
-requirePermission('reports.export');
+// Exporting trip operations needs trips.export (not the generic reports.export).
+requirePermission('trips.export');
+refuseHelpers(); // the export covers every trip
 
 try {
     $range = reportDateRange($_GET);
@@ -23,7 +28,7 @@ if ($shift !== '' && !in_array($shift, $shifts, true)) {
     echo 'Trip shift filter is invalid.';
     exit;
 }
-$statuses = ['Loading', 'In Transit', 'Unloading', 'Completed', 'Cancelled'];
+$statuses = TRIP_STATUSES;
 if ($status !== '' && !in_array($status, $statuses, true)) {
     http_response_code(400);
     header('Content-Type: text/plain; charset=utf-8');
@@ -43,14 +48,14 @@ if ($clientIdRaw !== '') {
     }
 }
 
-$conditions = [];
+$conditions = [tripOperationalSql('t', 'dr')];
 $params = [];
 if ($range['from'] !== null) {
-    $conditions[] = 'dr.scheduled_at >= ?';
+    $conditions[] = 't.scheduled_departure >= ?';
     $params[] = $range['from'] . ' 00:00:00';
 }
 if ($range['to'] !== null) {
-    $conditions[] = 'dr.scheduled_at < DATE_ADD(?, INTERVAL 1 DAY)';
+    $conditions[] = 't.scheduled_departure < DATE_ADD(?, INTERVAL 1 DAY)';
     $params[] = $range['to'] . ' 00:00:00';
 }
 if ($status !== '') {
@@ -62,36 +67,37 @@ if ($shift !== '') {
     $params[] = $shift;
 }
 if ($clientId !== null) {
-    $conditions[] = 'dr.client_id = ?';
+    $conditions[] = 't.client_id = ?';
     $params[] = $clientId;
 }
-$where = $conditions ? 'WHERE ' . implode(' AND ', $conditions) : '';
+$where = 'WHERE ' . implode(' AND ', $conditions);
 
+// Target columns. The billing client and per-dispatch rate columns of the
+// legacy export have no target counterpart (rates are looked up from
+// client_rates when billing) and are no longer exported.
 $pdo = getDBConnection();
 $stmt = $pdo->prepare(
-    "SELECT t.trip_number, t.status, t.shift, dr.client_name,
-            billing.client_name AS billing_client,
+    "SELECT t.trip_number, t.status, t.shift, c.client_name,
             tr.plate_number, e_d.full_name AS driver,
             e_sd.full_name AS second_driver, e_h.full_name AS helper,
             route.origin, route.destination,
-            origin.location_name AS pickup_location,
-            destination.location_name AS delivery_location,
-            dr.booking_reference, dr.waybill_reference, dr.unit_count,
-            dr.client_rate_amount, dr.client_rate_currency, dr.client_rate_basis,
-            dr.scheduled_at, t.expected_arrival,
-            t.actual_departure_at, t.actual_arrival, t.is_late
+            t.origin AS pickup_location, t.destination AS delivery_location,
+            cb.booking_reference, td.waybill_number, cb.quantity,
+            t.scheduled_departure, t.scheduled_arrival,
+            t.departure_time, " . tripArrivalSql('t') . " AS actual_arrival,
+            CASE WHEN " . tripLateSql('t') . " OR " . tripOverdueSql('t') . " THEN 1 ELSE 0 END AS is_late
      FROM trips t
-     JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
-     JOIN trucks tr ON tr.truck_id = dr.truck_id
-     JOIN employees e_d ON e_d.employee_id = dr.driver_id
-     LEFT JOIN employees e_sd ON e_sd.employee_id = dr.second_driver_id
-     LEFT JOIN employees e_h ON e_h.employee_id = dr.helper_id
-     JOIN routes route ON route.route_id = dr.route_id
-     LEFT JOIN clients billing ON billing.client_id = dr.billing_client_id
-     LEFT JOIN client_locations origin ON origin.location_id = dr.origin_location_id
-     LEFT JOIN client_locations destination ON destination.location_id = dr.destination_location_id
+     LEFT JOIN dispatch_requests dr ON dr.trip_id = t.trip_id
+     JOIN clients c ON c.client_id = t.client_id
+     LEFT JOIN trucks tr ON tr.truck_id = t.truck_id
+     LEFT JOIN employees e_d ON e_d.employee_id = t.driver_id
+     LEFT JOIN employees e_sd ON e_sd.employee_id = t.second_driver_id
+     LEFT JOIN employees e_h ON e_h.employee_id = t.helper_id
+     LEFT JOIN routes route ON route.route_id = t.route_id
+     LEFT JOIN client_bookings cb ON cb.booking_id = t.booking_id
+     LEFT JOIN trip_deliveries td ON td.trip_id = t.trip_id
      $where
-     ORDER BY dr.scheduled_at DESC, t.trip_id DESC"
+     ORDER BY t.scheduled_departure DESC, t.trip_id DESC"
 );
 $stmt->execute($params);
 
@@ -103,11 +109,11 @@ $rows = static function () use ($stmt): Generator {
 streamCsvReport(
     'fleetops-trip-operations.csv',
     [
-        'Trip Number', 'Status', 'Shift', 'Client', 'Billing Client', 'Truck',
+        'Trip Number', 'Status', 'Shift', 'Client', 'Truck',
         'Driver', 'Second Driver', 'Helper', 'Route Origin', 'Route Destination',
-        'Pickup Location', 'Delivery Location', 'Booking Reference', 'Waybill Reference',
-        'Unit Count', 'Rate Amount', 'Rate Currency', 'Rate Basis', 'Scheduled Departure',
-        'Expected Arrival', 'Actual Departure', 'Actual Arrival', 'Late',
+        'Pickup Location', 'Delivery Location', 'Booking Reference', 'Waybill Number',
+        'Unit Count', 'Scheduled Departure', 'Expected Arrival', 'Actual Departure',
+        'Actual Arrival', 'Late',
     ],
     $rows()
 );

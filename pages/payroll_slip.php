@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/finance_records.php';
 
 requirePermission('payroll.view');
 $payrollId = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
@@ -9,13 +10,23 @@ if ($payrollId === false) {
     exit('Invalid payroll record.');
 }
 $stmt = getDBConnection()->prepare(
-    'SELECT pr.payroll_id, pr.pay_period_start, pr.pay_period_end, pr.base_amount,
-            pr.allowance_amount, pr.deduction_amount, pr.amount_paid, pr.paid_date,
-            pr.notes, e.full_name, e.position, e.employee_code, u.full_name AS recorded_by
+    "SELECT pr.payroll_record_id AS payroll_id, pp.period_start AS pay_period_start,
+            pp.period_end AS pay_period_end, pr.base_amount,
+            pr.allowance_amount, pr.deduction_amount, pr.net_amount AS amount_paid,
+            " . payrollPaidDateSql('pr') . " AS paid_date, " . payrollNotesSql('pr') . " AS notes,
+            e.full_name, e.position, e.employee_code,
+            (SELECT COALESCE(ue.full_name, u.username)
+               FROM payroll_disbursements pd
+               JOIN users u ON u.user_id = pd.processed_by
+               LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+              WHERE pd.payroll_period_id = pr.payroll_period_id
+                AND (pd.reference_number = CONCAT('" . PAYROLL_DISBURSEMENT_PREFIX . "', pr.payroll_record_id)
+                     OR pd.reference_number LIKE CONCAT('" . PAYROLL_DISBURSEMENT_PREFIX . "', pr.payroll_record_id, ' %'))
+              ORDER BY pd.payroll_disbursement_id LIMIT 1) AS recorded_by
      FROM payroll_records pr
+     JOIN payroll_periods pp ON pp.payroll_period_id = pr.payroll_period_id
      JOIN employees e ON e.employee_id = pr.employee_id
-     JOIN users u ON u.user_id = pr.recorded_by
-     WHERE pr.payroll_id = ?'
+     WHERE pr.payroll_record_id = ?"
 );
 $stmt->execute([$payrollId]);
 $slip = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -24,7 +35,7 @@ if (!$slip) {
     exit('Payslip not found.');
 }
 $deductionStmt = getDBConnection()->prepare(
-    'SELECT deduction_name, amount FROM payroll_deductions WHERE payroll_id = ? ORDER BY deduction_id'
+    'SELECT deduction_type AS deduction_name, amount FROM payroll_deductions WHERE payroll_record_id = ? ORDER BY deduction_id'
 );
 $deductionStmt->execute([$payrollId]);
 $deductions = $deductionStmt->fetchAll(PDO::FETCH_ASSOC);

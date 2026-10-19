@@ -1,4 +1,7 @@
 <?php
+http_response_code(404);
+exit;
+
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../includes/app_settings.php';
@@ -9,20 +12,24 @@ requirePermission('permissions.manage');
 $pdo = getDBConnection();
 $roles = $pdo->query('SELECT role_id, role_name FROM roles ORDER BY role_name')->fetchAll();
 $permissions = $pdo->query(
-    'SELECT permission_id, permission_key, module_name, action_name, description
+    'SELECT permission_id, permission_key, module, permission_name, description
      FROM permissions
-     ORDER BY module_name, action_name, permission_key'
+     ORDER BY module, permission_name, permission_key'
 )->fetchAll();
+// Approval chains: target approval_workflows + approval_workflow_steps
+// (T-A1), aliased to the request_type / display_name / step_order names the
+// form below uses.
 $approvalTypes = $pdo->query(
-    'SELECT request_type, display_name
-     FROM approval_request_types
+    'SELECT workflow_key AS request_type, workflow_name AS display_name
+     FROM approval_workflows
      WHERE is_active = 1
-     ORDER BY display_name'
+     ORDER BY workflow_name'
 )->fetchAll();
 $approvalRoleRows = $pdo->query(
-    'SELECT request_type, step_order, approver_role_id
-     FROM approval_role_steps
-     ORDER BY request_type, step_order'
+    'SELECT w.workflow_key AS request_type, s.step_number AS step_order, s.approver_role_id
+     FROM approval_workflow_steps s
+     JOIN approval_workflows w ON w.workflow_id = s.workflow_id
+     ORDER BY w.workflow_key, s.step_number'
 )->fetchAll(PDO::FETCH_ASSOC);
 $approvalRoles = [];
 foreach ($approvalRoleRows as $approvalRoleRow) {
@@ -89,6 +96,7 @@ $permissionLabels = [
     'maintenance.view' => 'View Maintenance Records',
     'maintenance.manage' => 'Manage Maintenance Records',
     'maintenance.reports.view' => 'View Maintenance Reports',
+    'maintenance.reports.operations.view' => 'View Limited Operations Maintenance Report',
     'parts.view' => 'View Parts Inventory',
     'parts.manage' => 'Manage Parts Inventory',
     'billing.view' => 'View Billing & Collections',
@@ -112,6 +120,8 @@ $permissionLabels = [
     'operations.dashboard.view' => 'View Operations Head Dashboard',
     'company.dashboard.view' => 'View Company Dashboard',
     'operations.reports.view' => 'View Operations Performance Reports',
+    'dispatch.reports.view' => 'View My Scoped Operational Reports',
+    'finance.trip_allowance.request' => 'Submit Trip Allowance Requests',
     'audit.view' => 'View Audit History',
     'messages.view' => 'View Authorized Conversations',
     'messages.send' => 'Send Authorized Messages',
@@ -163,6 +173,7 @@ $specialCategories = [
     'operations.dashboard.view' => 'Dashboard',
     'operations.reports.view' => 'Analytics & Reports',
     'maintenance.reports.view' => 'Analytics & Reports',
+    'maintenance.reports.operations.view' => 'Analytics & Reports',
     'hr.attendance.view' => 'Attendance',
     'hr.attendance.manage' => 'Attendance',
     'hr.attendance.report' => 'Attendance',
@@ -178,6 +189,7 @@ $permissionWarnings = [
     'billing.manage' => 'Sensitive financial access — can change billing and collection records.',
     'finance.manage' => 'Sensitive financial access — can change finance records.',
     'finance.funds.manage' => 'Sensitive financial access — can create and manage fund requests and cash advances.',
+    'finance.trip_allowance.request' => 'Limited access — can submit Trip Allowance requests only for a dispatcher-owned confirmed trip.',
     'finance.disbursements.manage' => 'Sensitive financial access — can record approved disbursements.',
     'finance.ap.manage' => 'Sensitive financial access — can create accounts payable and payment vouchers.',
     'payroll.manage' => 'Sensitive payroll access — can prepare and manage payroll.',
@@ -187,9 +199,14 @@ $permissionsByModule = [];
 foreach ($permissions as $permission) {
     $permissionKey = (string)$permission['permission_key'];
     $category = $specialCategories[$permissionKey]
-        ?? $moduleLabels[$permission['module_name']]
-        ?? ucwords(str_replace('_', ' ', (string)$permission['module_name']));
+        ?? $moduleLabels[$permission['module']]
+        ?? ucwords(str_replace('_', ' ', (string)$permission['module']));
+    // description is optional in the target schema; fall back to the
+    // required permission_name so every permission keeps a readable label.
     $description = trim((string)$permission['description']);
+    if ($description === '') {
+        $description = trim((string)$permission['permission_name']);
+    }
 
     if (preg_match('/^legacy\\.role\\.(\\d+)$/', $permissionKey, $legacyMatch)) {
         $legacyRoleNames = [1 => 'Admin', 2 => 'Dispatcher', 3 => 'Maintenance', 4 => 'Accounting'];

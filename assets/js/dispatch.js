@@ -37,20 +37,46 @@ document.addEventListener('DOMContentLoaded', () => {
     return request;
   }
 
+  // Admin override reason for HTTP 422 replies. Returns the trimmed reason,
+  // or null when cancelled or invalid (the server validates it again).
+  function askOverrideReason(serverMessage) {
+    const value = window.prompt(
+      `${serverMessage || 'This action needs an Admin override reason.'}\n\nAdmin override reason (required, up to 500 characters):`
+    );
+    if (value === null) return null;
+    const reason = value.trim();
+    if (!reason || Array.from(reason).length > 500) {
+      alert('An Admin override reason of 1 to 500 characters is required. Nothing was saved.');
+      return null;
+    }
+    return reason;
+  }
+
   function postForm(url, formData) {
     formData.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
     const scope = `${url}:${formData.get('dispatch_id') ?? formData.get('route_id') ?? 'create'}`;
-    return fetch(url, {
+    const send = () => fetch(url, {
       method: 'POST',
+      // Same scope, so a reason retry reuses the same idempotency key.
       headers: window.fleetOpsIdempotencyHeaders(scope),
       body: formData,
     }).then(async response => {
       const result = await response.json();
+      // HTTP 422: Admin override reason required. Ask once and retry once.
+      if (response.status === 422 && !formData.has('override_reason')) {
+        const reason = askOverrideReason(result.message);
+        if (reason === null) {
+          return { success: false, message: 'Cancelled: no Admin override reason was given. Nothing was saved.' };
+        }
+        formData.append('override_reason', reason);
+        return send();
+      }
       if (result.success || response.status === 409) {
         window.fleetOpsCompleteIdempotency(scope);
       }
       return result;
     });
+    return send();
   }
 
   function showAlert(el, msg, type = 'danger') {
@@ -206,9 +232,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const shift = document.getElementById('d_shift');
     if (shift && !shift.disabled) shift.value = 'Day';
     if (expectedArrival) expectedArrival.value = '';
-    if (bookingReference) bookingReference.value = '';
+    if (bookingReference && !bookingReference.readOnly) bookingReference.value = '';
     if (waybillReference) waybillReference.value = '';
-    if (unitCount) unitCount.value = '';
+    if (unitCount && !unitCount.readOnly) unitCount.value = '';
     if (remarks) remarks.value = '';
   }
 
@@ -231,16 +257,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const secondDriver = secondDriverIdInput?.value                  ?? '';
     const helper    = helperIdInput?.value                           ?? '';
     const client    = clientSelect?.value                             ?? '';
-    const billingClient = document.getElementById('d_billing_client')?.value ?? '';
     const originLocation = originLocationSelect?.value                ?? '';
     const destinationLocation = destinationLocationSelect?.value      ?? '';
     const scheduled = document.getElementById('d_scheduled')?.value  ?? '';
     const shift = document.getElementById('d_shift')?.value ?? '';
     const instructionId = document.getElementById('d_instruction_id')?.value ?? '';
     const expectedArrival = document.getElementById('d_expected_arrival')?.value ?? '';
-    const bookingReference = document.getElementById('d_booking_reference')?.value.trim() ?? '';
-    const waybillReference = document.getElementById('d_waybill_reference')?.value.trim() ?? '';
-    const unitCount = document.getElementById('d_unit_count')?.value ?? '';
     const remarks   = document.getElementById('d_remarks')?.value.trim() ?? '';
 
     if (!truck || !route || !driver || !scheduled || !shift || !client || !originLocation || !destinationLocation) {
@@ -269,16 +291,12 @@ document.addEventListener('DOMContentLoaded', () => {
       fd.append('second_driver_id', secondDriver);
       fd.append('helper_id',    helper);
       fd.append('client_id',    client);
-      fd.append('billing_client_id', billingClient);
       fd.append('origin_location_id', originLocation);
       fd.append('destination_location_id', destinationLocation);
       fd.append('scheduled_at', scheduled);
       fd.append('shift', shift);
       fd.append('instruction_id', instructionId);
       fd.append('expected_arrival', expectedArrival);
-      fd.append('booking_reference', bookingReference);
-      fd.append('waybill_reference', waybillReference);
-      fd.append('unit_count', unitCount);
       fd.append('remarks',      remarks);
 
       const result = await postForm(DISPATCH_URL, fd);

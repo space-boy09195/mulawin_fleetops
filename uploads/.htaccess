@@ -1,2 +1,16 @@
-Options -Indexes
+# Uploaded documents are never served directly; they are downloaded only
+# through ajax/document_download.php, which checks permissions and visibility.
+Options -Indexes -ExecCGI
 Require all denied
+
+# Defence in depth in case access is ever opened: nothing here may run as code.
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule php_module>
+    php_flag engine off
+</IfModule>
+<FilesMatch "(?i)\.(php\d?|phtml|pht|phar|phps|cgi|pl|py|rb|sh|asp|aspx|jsp|shtml|svg|html?)(\.|$)">
+    SetHandler none
+    Require all denied
+</FilesMatch>

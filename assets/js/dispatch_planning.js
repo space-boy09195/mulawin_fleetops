@@ -42,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
         route_id: document.getElementById('instructionRoute').value,
         scheduled_at: document.getElementById('instructionScheduledAt').value,
         shift: document.getElementById('instructionShift').value,
+        truck_type: document.getElementById('instructionTruckType').value,
         unit_count: document.getElementById('instructionUnits').value,
         instruction_notes: document.getElementById('instructionNotes').value.trim(),
       }, window.fleetOpsIdempotencyHeaders(scope));
@@ -111,6 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
       route_id: row.querySelector('.batch-route').value,
       scheduled_at: row.querySelector('.batch-scheduled-at').value,
       shift: row.querySelector('.batch-shift').value,
+      truck_type: row.querySelector('.batch-truck-type').value,
       unit_count: row.querySelector('.batch-unit-count').value,
       instruction_notes: row.querySelector('.batch-instruction-notes').value.trim(),
     }));

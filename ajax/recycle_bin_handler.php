@@ -15,7 +15,18 @@ require_once __DIR__ . '/../includes/document_storage.php';
 
 header('Content-Type: application/json');
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+// Admin only, by the validated role key (isAdmin), not a legacy role grant.
+// Unauthorized responses match requireRole(): login check first, then a 403
+// JSON reply for JSON/AJAX requests, otherwise the 403 page.
+requireLogin();
+if (!isAdmin()) {
+    if (isJsonRequest()) {
+        sendJsonAccessResponse(403, 'You do not have permission to perform this action.');
+    }
+    http_response_code(403);
+    include __DIR__ . '/../pages/403.php';
+    exit;
+}
 requirePostMethod();
 enforceCsrf();
 
@@ -40,60 +51,68 @@ if ($action === 'restore') {
 if ($action === 'purge') {
     $archiveId = requiredInt('archive_id', 'Archive ID', 1);
 
-    $stmt = $pdo->prepare("SELECT * FROM deleted_records WHERE archive_id = ? AND restored_at IS NULL");
-    $stmt->execute([$archiveId]);
-    $archived = $stmt->fetch(PDO::FETCH_ASSOC);
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("SELECT * FROM deleted_records WHERE archive_id = ? AND restored_at IS NULL FOR UPDATE");
+        $stmt->execute([$archiveId]);
+        $archived = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$archived) {
-        jsonFail('Archive record not found, or it was already restored.', 404);
-    }
-
-    $documentData = null;
-    $physicalPath = null;
-    if ($archived['original_table'] === 'documents') {
-        $documentData = json_decode($archived['record_data'], true);
-        if (is_array($documentData) && !empty($documentData['stored_name'])) {
-            $physicalPath = documentStorageFile(
-                (string)$documentData['stored_name'],
-                $documentData['file_path'] ?? null
-            );
+        if (!$archived) {
+            $pdo->rollBack();
+            jsonFail('Archive record not found, or it was already restored.', 404);
         }
-    }
 
-    $ok = permanentlyDeleteArchive($pdo, $archiveId);
-
-    if ($ok) {
-        $fileCleanupFailed = false;
-        if ($archived['original_table'] === 'payroll_records') {
-            try {
-                $pdo->prepare('DELETE FROM payroll_deductions WHERE payroll_id = ?')
-                    ->execute([(int)$archived['original_id']]);
-            } catch (PDOException $e) {
-                $fileCleanupFailed = true;
-                error_log('recycle_bin_handler: could not purge payroll deduction details: ' . $e->getMessage());
-            }
-        }
+        // A purged document no longer needs its files row or stored file,
+        // unless another document still points at the same file.
+        $physicalPath = null;
         if ($archived['original_table'] === 'documents') {
-            $pdo->prepare('DELETE FROM attachment_versions WHERE document_id = ?')
-                ->execute([(int)$archived['original_id']]);
-            $pdo->exec(
-                'DELETE a FROM attachments a
-                 LEFT JOIN attachment_versions av ON av.attachment_id = a.attachment_id
-                 WHERE av.attachment_id IS NULL'
-            );
-            if ($physicalPath !== null && is_file($physicalPath) && !unlink($physicalPath)) {
-                $fileCleanupFailed = true;
-                error_log('recycle_bin_handler: could not purge document file ' . $physicalPath);
+            $payload = softDeletePayload((string)$archived['record_data']);
+            $fileId = (int)($payload['row']['file_id'] ?? 0);
+            if ($fileId > 0) {
+                $fileQuery = $pdo->prepare(
+                    'SELECT f.file_id, f.stored_name, f.storage_path,
+                            (SELECT COUNT(*) FROM documents d WHERE d.file_id = f.file_id) AS live_documents
+                     FROM files f WHERE f.file_id = ? FOR UPDATE'
+                );
+                $fileQuery->execute([$fileId]);
+                $fileRow = $fileQuery->fetch(PDO::FETCH_ASSOC);
+                if ($fileRow && (int)$fileRow['live_documents'] === 0) {
+                    $physicalPath = documentStorageFile((string)$fileRow['stored_name'], $fileRow['storage_path']);
+                    // Other target tables (expenses, receipts, inspection
+                    // photos, ...) can also reference a file; RESTRICT / SET
+                    // NULL keys decide. A RESTRICT failure keeps the file.
+                    try {
+                        $pdo->exec('SAVEPOINT purge_file');
+                        $pdo->prepare('DELETE FROM files WHERE file_id = ?')->execute([$fileId]);
+                    } catch (PDOException $e) {
+                        $pdo->exec('ROLLBACK TO SAVEPOINT purge_file');
+                        $physicalPath = null;
+                    }
+                }
             }
         }
-        auditLog('PURGE', 'deleted_records', $archiveId);
-        if ($fileCleanupFailed) {
-            jsonFail('The record was purged, but related data could not be fully removed. Contact an administrator.', 500);
+
+        if (!permanentlyDeleteArchive($pdo, $archiveId)) {
+            $pdo->rollBack();
+            jsonFail('Could not permanently delete this record.');
         }
-        jsonOk([], 'Permanently deleted.');
+        auditLog('PURGE', 'deleted_records', $archiveId, ['original_table' => $archived['original_table'], 'original_id' => (int)$archived['original_id']], null);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('recycle_bin_handler/purge: ' . $e->getMessage());
+        jsonFail('Could not permanently delete this record.', 500);
     }
 
-    jsonFail('Could not permanently delete this record.');
+    // The database change is committed; remove the stored file last so a
+    // failed transaction never loses a file that is still referenced.
+    if ($physicalPath !== null && is_file($physicalPath) && !unlink($physicalPath)) {
+        error_log('recycle_bin_handler: could not purge a document file from storage');
+        jsonFail('The record was purged, but its stored file could not be removed. Contact an administrator.', 500);
+    }
+    jsonOk([], 'Permanently deleted.');
 }
 
 jsonFail('Unknown action.');

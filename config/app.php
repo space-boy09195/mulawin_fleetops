@@ -39,6 +39,7 @@ define('ROLE_DRIVER',        13); // position in employees, may have multiple ac
 define('ROLE_HELPER',       14); // position in employees, may have multiple active users
 
 define('ROLE_HEAD_MANAGEMENT', ROLE_ADMIN); // Legacy alias for existing Admin-only routes.
+define('ROLE_ACCOUNTING', ROLE_FINANCE); // Legacy alias: Accounting is merged into Finance; keeps existing references from failing.
 
 // ---- Role labels (for display) ----------------------------
 define('ROLE_LABELS', [
@@ -55,21 +56,4 @@ define('ROLE_LABELS', [
     ROLE_AUDIT             => 'Audit',
     ROLE_DRIVER            => 'Driver',
     ROLE_HELPER            => 'Helper',
-]);
-
-// ---- Redirect targets per role after login ----------------
-define('ROLE_DASHBOARDS', [
-    ROLE_ADMIN           => APP_BASE . '/pages/dashboard_head.php',
-    ROLE_OPERATIONS_HEAD => APP_BASE . '/pages/dashboard_head.php',
-    ROLE_DISPATCHER      => APP_BASE . '/pages/dashboard.php',
-    ROLE_CARRIER_DISPATCHER => APP_BASE . '/pages/dashboard.php',
-    ROLE_CONTAINER_WING_DISPATCHER => APP_BASE . '/pages/dashboard.php',
-    ROLE_PURCHASING_OFFICER => APP_BASE . '/pages/purchasing.php',
-    ROLE_MAINTENANCE     => APP_BASE . '/pages/dashboard.php',
-    ROLE_FINANCE         => APP_BASE . '/pages/finance.php',
-    ROLE_BILLING         => APP_BASE . '/pages/billing.php',
-    ROLE_PAYROLL         => APP_BASE . '/pages/payroll.php',
-    ROLE_AUDIT           => APP_BASE . '/pages/permissions.php',
-    ROLE_DRIVER          => APP_BASE . '/pages/dashboard.php',
-    ROLE_HELPER          => APP_BASE . '/pages/dashboard.php',
 ]);

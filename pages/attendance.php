@@ -11,10 +11,19 @@ $canViewAll = currentUserHasAnyPermission(['hr.attendance.view']);
 $canManage = currentUserHasAnyPermission(['hr.attendance.manage']);
 $canReport = currentUserHasAnyPermission(['hr.attendance.report']);
 $linkedEmployee = $pdo->prepare(
-    'SELECT employee_id, full_name
+    "SELECT employee_id,
+            COALESCE(
+                NULLIF(TRIM(CONCAT_WS(' ',
+                    NULLIF(TRIM(first_name), ''),
+                    NULLIF(TRIM(middle_name), ''),
+                    NULLIF(TRIM(last_name), ''),
+                    NULLIF(TRIM(suffix), '')
+                )), ''),
+                CONCAT('Employee #', employee_id)
+            ) AS full_name
      FROM employees
-     WHERE user_id = ? AND is_active = 1
-     ORDER BY employee_id'
+     WHERE user_id = ? AND employment_status = 'Active'
+     ORDER BY employee_id"
 );
 $linkedEmployee->execute([currentUserId()]);
 $linkedEmployees = $linkedEmployee->fetchAll(PDO::FETCH_ASSOC);
@@ -29,34 +38,32 @@ if (!$canViewAll && !$linkedEmployee) {
         . 'Ask HR or an administrator to correct the employee link.'
     );
 }
-$clock = null;
-$clockStale = false;
-if ($linkedEmployee) {
-    $clockStmt = $pdo->prepare(
-        'SELECT attendance_date, time_in, time_out, overtime_minutes, overtime_reason
-         FROM employee_attendance
-         WHERE employee_id = ? AND (
-             attendance_date = ? OR
-             (time_in IS NOT NULL AND time_out IS NULL)
-         )
-         ORDER BY (time_in IS NOT NULL AND time_out IS NULL) DESC, attendance_date DESC LIMIT 1'
-    );
-    $clockStmt->execute([
-        (int)$linkedEmployee['employee_id'],
-        date('Y-m-d'),
-    ]);
-    $clock = $clockStmt->fetch(PDO::FETCH_ASSOC) ?: null;
-    $clockStale = $clock && $clock['time_in'] && !$clock['time_out']
-        && (time() - strtotime($clock['attendance_date'] . ' ' . $clock['time_in'])) > 16 * 3600;
-}
+// Historical clock values remain visible, but attendance is now entered
+// manually by authorized users.
+$attendanceHm = static fn(?string $value): string => ($value !== null && $value !== '')
+    ? date('H:i', strtotime($value))
+    : '';
 $date = $_GET['date'] ?? date('Y-m-d');
 if (!is_string($date) || !isValidDate($date)) {
     $date = date('Y-m-d');
 }
 $employees = $canViewAll
     ? $pdo->query(
-        "SELECT employee_id, employee_code, full_name, position
-         FROM employees WHERE is_active = 1 ORDER BY full_name"
+        // employee_code is added to the target by
+        // db/target_migrations/20261010_s36_employee_fields.sql.
+        "SELECT employee_id,
+                employee_code,
+                COALESCE(
+                    NULLIF(TRIM(CONCAT_WS(' ',
+                        NULLIF(TRIM(first_name), ''),
+                        NULLIF(TRIM(middle_name), ''),
+                        NULLIF(TRIM(last_name), ''),
+                        NULLIF(TRIM(suffix), '')
+                    )), ''),
+                    CONCAT('Employee #', employee_id)
+                ) AS full_name,
+                position
+         FROM employees WHERE employment_status = 'Active' ORDER BY full_name"
     )->fetchAll(PDO::FETCH_ASSOC)
     : ($linkedEmployee ? [[
         'employee_id' => $linkedEmployee['employee_id'],
@@ -65,8 +72,8 @@ $employees = $canViewAll
         'position' => '',
     ]] : []);
 $attendance = $pdo->prepare(
-    'SELECT ea.employee_id, ea.status, ea.time_in, ea.time_out, ea.notes, ea.overtime_reason
-     FROM employee_attendance ea
+    'SELECT ea.employee_id, ea.status, ea.time_in, ea.time_out, ea.remarks AS notes, ea.overtime_reason
+     FROM attendance_records ea
      WHERE ea.attendance_date = ?' . (!$canViewAll ? ' AND ea.employee_id = ?' : '')
 );
 $attendance->execute($canViewAll
@@ -93,18 +100,31 @@ if ($canReport) {
         $reportParams[] = $reportEmployeeId;
     }
     $reportStmt = $pdo->prepare(
-        'SELECT e.employee_id, e.employee_code, e.full_name, e.position,
+        // Every selected employee column is listed in GROUP BY so the query
+        // is valid under ONLY_FULL_GROUP_BY on MySQL 8 and MariaDB 10.4.
+        "SELECT e.employee_id, e.employee_code,
+                COALESCE(
+                    NULLIF(TRIM(CONCAT_WS(' ',
+                        NULLIF(TRIM(e.first_name), ''),
+                        NULLIF(TRIM(e.middle_name), ''),
+                        NULLIF(TRIM(e.last_name), ''),
+                        NULLIF(TRIM(e.suffix), '')
+                    )), ''),
+                    CONCAT('Employee #', e.employee_id)
+                ) AS full_name,
+                e.position,
                 COUNT(*) AS recorded_days,
-                SUM(ea.status = \'Present\') AS present_days,
-                SUM(ea.status = \'Absent\') AS absent_days,
-                SUM(ea.status = \'Leave\') AS leave_days,
-                SUM(ea.status = \'On Duty\') AS on_duty_days,
+                SUM(ea.status = 'Present') AS present_days,
+                SUM(ea.status = 'Absent') AS absent_days,
+                SUM(ea.status = 'Leave') AS leave_days,
+                SUM(ea.status = 'On Duty') AS on_duty_days,
                 SUM(ea.overtime_minutes) AS overtime_minutes
-         FROM employee_attendance ea
+         FROM attendance_records ea
          JOIN employees e ON e.employee_id = ea.employee_id
-         WHERE ' . implode(' AND ', $reportConditions) . '
-         GROUP BY e.employee_id, e.employee_code, e.full_name, e.position
-         ORDER BY e.full_name'
+         WHERE " . implode(' AND ', $reportConditions) . "
+         GROUP BY e.employee_id, e.employee_code, e.first_name, e.middle_name,
+                  e.last_name, e.suffix, e.position
+         ORDER BY full_name"
     );
     $reportStmt->execute($reportParams);
     $reportRows = $reportStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -112,7 +132,7 @@ if ($canReport) {
 layoutHead('Attendance');
 ?>
 <div class="page-header d-flex justify-content-between align-items-start flex-wrap gap-3">
-  <div><h1 class="page-title">Attendance &amp; Timekeeping</h1><p class="page-subtitle">Record employee attendance, time in/out, and leave status.</p></div>
+  <div><h1 class="page-title">Attendance Records</h1><p class="page-subtitle">Review attendance and maintain employee status records.</p></div>
   <form method="get" class="d-flex gap-2"><input class="form-control" type="date" name="date" value="<?= htmlspecialchars($date) ?>"><button class="btn btn-outline-secondary">View date</button></form>
 </div>
 <div id="attendanceFeedback" class="alert d-none" role="alert"></div>
@@ -122,16 +142,6 @@ layoutHead('Attendance');
   Link its existing employee record before using personal timekeeping.
 </div>
 <?php endif; ?>
-<?php if ($linkedEmployee): ?>
-<div class="card mb-4"><div class="card-header-custom"><h2 class="card-title-custom">My time clock</h2></div><div class="card-body-custom d-flex align-items-center gap-3 flex-wrap">
-<span><?= htmlspecialchars($linkedEmployee['full_name']) ?></span>
-<?php if ($clockStale): ?><span class="text-danger">Earlier attendance record (<?= htmlspecialchars($clock['attendance_date']) ?>, Time In <?= htmlspecialchars(substr($clock['time_in'], 0, 5)) ?>) is still open and past the 16-hour limit. Clock in is blocked until HR or an administrator adds its Time Out.</span>
-<?php elseif (!$clock || !$clock['time_in']): ?><button type="button" class="btn btn-primary" id="clockInButton">Clock in</button>
-<?php elseif (!$clock['time_out']): ?><button type="button" class="btn btn-outline-primary" id="clockOutButton">Clock out</button>
-<?php else: ?><span class="text-muted">Clocked in <?= htmlspecialchars(substr($clock['time_in'], 0, 5)) ?> and out <?= htmlspecialchars(substr($clock['time_out'], 0, 5)) ?>.</span><?php endif; ?>
-<span class="small text-muted">Regular shift: 8 hours. Maximum recorded shift: 16 hours. Overtime requires a reason.</span>
-</div></div>
-<?php endif; ?>
 <div class="card"><div class="card-header-custom"><h2 class="card-title-custom"><?= $canViewAll ? 'Attendance for ' : 'My attendance for ' ?><?= htmlspecialchars($date) ?></h2></div><div class="table-responsive">
 <table class="table align-middle mb-0"><thead><tr><th>Employee</th><th>Position</th><th>Status</th><th>Time in</th><th>Time out</th><th>Notes</th><?php if ($canManage): ?><th>Action</th><?php endif; ?></tr></thead><tbody>
 <?php foreach ($employees as $employee): $row = $attendanceByEmployee[(int)$employee['employee_id']] ?? ['status' => 'Present', 'time_in' => '', 'time_out' => '', 'notes' => '']; ?>
@@ -139,12 +149,19 @@ layoutHead('Attendance');
 <td><?= htmlspecialchars($employee['full_name']) ?><br><span class="text-muted small"><?= htmlspecialchars($employee['employee_code']) ?></span></td>
 <td><?= htmlspecialchars($employee['position']) ?></td>
 <?php if ($canManage): ?>
-<td><select class="form-select form-select-sm attendance-status"><option <?= $row['status'] === 'Present' ? 'selected' : '' ?>>Present</option><option <?= $row['status'] === 'Absent' ? 'selected' : '' ?>>Absent</option><option <?= $row['status'] === 'Leave' ? 'selected' : '' ?>>Leave</option><option <?= $row['status'] === 'On Duty' ? 'selected' : '' ?>>On Duty</option></select></td>
-<td><input class="form-control form-control-sm attendance-in" type="time" value="<?= htmlspecialchars((string)($row['time_in'] ?? '')) ?>"></td>
-<td><input class="form-control form-control-sm attendance-out" type="time" value="<?= htmlspecialchars((string)($row['time_out'] ?? '')) ?>"></td>
-<td><input class="form-control form-control-sm attendance-notes" maxlength="500" value="<?= htmlspecialchars((string)($row['notes'] ?? '')) ?>"><input class="form-control form-control-sm mt-1 attendance-overtime-reason" maxlength="255" placeholder="Overtime reason (if needed)" value="<?= htmlspecialchars((string)($row['overtime_reason'] ?? '')) ?>"></td>
+<?php
+// A stored status outside the editable list (e.g. Late or Half Day) is shown
+// as a disabled, selected option so the row never defaults to Present. Saving
+// it unchanged is rejected by the handler, so it cannot be overwritten silently.
+$editableStatuses = ['Present', 'Absent', 'Leave', 'On Duty'];
+$currentStatus = (string)$row['status'];
+?>
+<td><select class="form-select form-select-sm attendance-status"><?php if (!in_array($currentStatus, $editableStatuses, true)): ?><option value="<?= htmlspecialchars($currentStatus) ?>" selected disabled><?= htmlspecialchars($currentStatus !== '' ? $currentStatus : '(no status)') ?></option><?php endif; ?><?php foreach ($editableStatuses as $statusOption): ?><option <?= $currentStatus === $statusOption ? 'selected' : '' ?>><?= htmlspecialchars($statusOption) ?></option><?php endforeach; ?></select></td>
+<td><?= htmlspecialchars($attendanceHm($row['time_in'] ?? null) ?: '—') ?></td>
+<td><?= htmlspecialchars($attendanceHm($row['time_out'] ?? null) ?: '—') ?></td>
+<td><input class="form-control form-control-sm attendance-notes" maxlength="500" value="<?= htmlspecialchars((string)($row['notes'] ?? '')) ?>"></td>
 <td><button type="button" class="btn btn-sm btn-primary save-attendance">Save</button></td>
-<?php else: ?><td><?= htmlspecialchars($row['status']) ?></td><td><?= htmlspecialchars($row['time_in'] ?? '—') ?></td><td><?= htmlspecialchars($row['time_out'] ?? '—') ?></td><td><?= htmlspecialchars($row['notes'] ?? '') ?></td><?php endif; ?>
+<?php else: ?><td><?= htmlspecialchars($row['status']) ?></td><td><?= htmlspecialchars($attendanceHm($row['time_in'] ?? null) ?: '—') ?></td><td><?= htmlspecialchars($attendanceHm($row['time_out'] ?? null) ?: '—') ?></td><td><?= htmlspecialchars($row['notes'] ?? '') ?></td><?php endif; ?>
 </tr>
 <?php endforeach; ?>
 <?php if (!$employees): ?><tr><td colspan="7" class="text-center text-muted py-4">No active employees found.</td></tr><?php endif; ?></tbody></table></div></div>
@@ -171,7 +188,7 @@ layoutHead('Attendance');
   </div>
 </div>
 <?php endif; ?>
-<?php if ($canManage || $linkedEmployee): ?><script>
+<?php if ($canManage): ?><script>
 const sendAttendance = async (data) => {
   const feedback = document.getElementById('attendanceFeedback');
   try {
@@ -192,17 +209,10 @@ const sendAttendance = async (data) => {
     feedback.className = 'alert alert-danger';
   }
 };
-document.getElementById('clockInButton')?.addEventListener('click', () => sendAttendance(new URLSearchParams({action:'clock_in', [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN})));
-document.getElementById('clockOutButton')?.addEventListener('click', () => {
-  const reason = prompt('If this shift is over 8 hours, enter the overtime reason. Otherwise leave blank.') || '';
-  sendAttendance(new URLSearchParams({action:'clock_out', overtime:reason !== '', overtime_reason:reason, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN}));
-});
-<?php if ($canManage): ?>
 document.querySelectorAll('.save-attendance').forEach(button => button.addEventListener('click', async () => {
   const row = button.closest('tr');
-  const data = new URLSearchParams({action:'save', employee_id:row.dataset.employee, attendance_date:'<?= htmlspecialchars($date, ENT_QUOTES) ?>', status:row.querySelector('.attendance-status').value, time_in:row.querySelector('.attendance-in').value, time_out:row.querySelector('.attendance-out').value, overtime:row.querySelector('.attendance-overtime-reason').value !== '', overtime_reason:row.querySelector('.attendance-overtime-reason').value, notes:row.querySelector('.attendance-notes').value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN});
+  const data = new URLSearchParams({action:'save', employee_id:row.dataset.employee, attendance_date:'<?= htmlspecialchars($date, ENT_QUOTES) ?>', status:row.querySelector('.attendance-status').value, notes:row.querySelector('.attendance-notes').value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN});
   sendAttendance(data);
 }));
-<?php endif; ?>
 </script><?php endif; ?>
 <?php layoutFoot(); ?>

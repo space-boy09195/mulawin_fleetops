@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
+require_once __DIR__ . '/../includes/finance_records.php';
 
 header('Content-Type: application/json');
 requirePermission('finance.manage');
@@ -14,13 +15,14 @@ enforceCsrf();
 
 $action = $_POST['action'] ?? '';
 
-// Driver Allowance is recorded in trip_expenses as a reimbursement expense,
-// separate from trip_pay wages; both may exist for the same trip and crew member.
+// Driver Allowance is recorded in expense_records as a reimbursement expense,
+// separate from Trip Pay wages; both may exist for the same trip and crew member.
 if (!in_array($action, ['create_expense', 'update_expense'], true)) {
     jsonFail('Unknown action.');
 }
-if ($action === 'update_expense' && currentRoleId() !== ROLE_HEAD_MANAGEMENT) {
-    jsonFail('Only Head Management can edit expenses.', 403);
+// finance.expenses.edit: Admin and, per the reviewed seed, Finance.
+if ($action === 'update_expense' && !currentUserHasAnyPermission(['finance.expenses.edit'])) {
+    jsonFail('You are not allowed to edit recorded expenses.', 403);
 }
 
 $tripId            = requiredInt('trip_id', 'Trip', 1);
@@ -86,46 +88,72 @@ if ($action === 'update_expense') {
 $pdo = getDBConnection();
 findOrFail($pdo, 'trips', 'trip_id', $tripId, 'Trip not found.');
 
+// Target: expense_records with reference_type 'trip' (T-F1 adds the Toll and
+// Driver Allowance types and the fuel quantity). The "other" description and
+// notes share the NOT NULL description column.
 try {
+    $pdo->beginTransaction();
     if ($action === 'create_expense') {
         $insertStmt = $pdo->prepare("
-            INSERT INTO trip_expenses
-                (trip_id, recorded_by, expense_type, amount, quantity, other_description, expense_date, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO expense_records
+                (expense_type, reference_type, reference_id, description, amount, quantity,
+                 expense_date, recorded_by)
+            VALUES (?, 'trip', ?, ?, ?, ?, ?, ?)
         ");
         $createdIds = [];
         foreach ($expenseEntries as $entry) {
             $entryType = $entry['expense_type'];
-            $entryAmount = (float)$entry['amount'];
-            $entryQuantity = $entry['quantity'];
-            $entryOther = $entry['other_description'];
-            $entryNotes = $entry['notes'];
-            $insertStmt->execute([$tripId, currentUserId(), $entryType, $entryAmount, $entryQuantity, $entryOther, $date, $entryNotes]);
-            $createdIds[] = (int)$pdo->lastInsertId();
-            auditLog('CREATE_TRIP_EXPENSE', 'trip_expenses', (int)$pdo->lastInsertId(), null, [
+            $entryAmount = round((float)$entry['amount'], 2);
+            $insertStmt->execute([
+                $entryType,
+                $tripId,
+                tripExpenseDescription($entryType, $entry['other_description'], $entry['notes']),
+                $entryAmount,
+                $entry['quantity'],
+                $date,
+                currentUserId(),
+            ]);
+            $newId = (int)$pdo->lastInsertId();
+            $createdIds[] = $newId;
+            auditLog('CREATE_TRIP_EXPENSE', 'expense_records', $newId, null, [
                 'trip_id' => $tripId,
                 'expense_type' => $entryType,
                 'amount' => $entryAmount,
             ]);
         }
+        $pdo->commit();
         $message = count($createdIds) === 1 ? 'Trip expense recorded.' : count($createdIds) . ' trip expenses recorded.';
         jsonOk([], $message);
     } else {
-        findOrFail($pdo, 'trip_expenses', 'expense_id', $expenseId, 'Expense not found.');
-        $stmt = $pdo->prepare("
-            UPDATE trip_expenses
-            SET trip_id = ?, expense_type = ?, amount = ?, quantity = ?, other_description = ?, expense_date = ?, notes = ?
-            WHERE expense_id = ?
-        ");
-        $stmt->execute([$tripId, $type, $amount, $quantity, $otherDescription, $date, $notes, $expenseId]);
-        auditLog('UPDATE_TRIP_EXPENSE', 'trip_expenses', $expenseId, null, [
+        $old = $pdo->prepare(
+            "SELECT expense_type, reference_id, amount, quantity, description, expense_date
+             FROM expense_records
+             WHERE expense_id = ? AND reference_type = 'trip' FOR UPDATE"
+        );
+        $old->execute([$expenseId]);
+        $oldData = $old->fetch(PDO::FETCH_ASSOC);
+        if (!$oldData) {
+            $pdo->rollBack();
+            jsonFail('Expense not found.', 404);
+        }
+        $pdo->prepare("
+            UPDATE expense_records
+            SET reference_id = ?, expense_type = ?, amount = ?, quantity = ?, description = ?, expense_date = ?
+            WHERE expense_id = ? AND reference_type = 'trip'
+        ")->execute([
+            $tripId, $type, round($amount, 2), $quantity,
+            tripExpenseDescription($type, $otherDescription, $notes), $date, $expenseId,
+        ]);
+        auditLog('UPDATE_TRIP_EXPENSE', 'expense_records', $expenseId, $oldData, [
             'trip_id' => $tripId,
             'expense_type' => $type,
             'amount' => $amount,
         ]);
+        $pdo->commit();
         jsonOk([], 'Trip expense updated.');
     }
 } catch (PDOException $e) {
-    error_log('trip_costs_handler/create: ' . $e->getMessage());
+    if ($pdo->inTransaction()) $pdo->rollBack();
+    error_log('trip_costs_handler/' . $action . ': ' . $e->getMessage());
     jsonFail('A database error occurred. Please try again.', 500);
 }

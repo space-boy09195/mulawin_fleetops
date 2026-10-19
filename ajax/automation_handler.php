@@ -11,7 +11,18 @@ require_once __DIR__ . '/../includes/audit.php';
 
 header('Content-Type: application/json');
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+// Admin only, by the validated role key (isAdmin), not a legacy role grant.
+// Unauthorized responses match requireRole(): login check first, then a 403
+// JSON reply for JSON/AJAX requests, otherwise the 403 page.
+requireLogin();
+if (!isAdmin()) {
+    if (isJsonRequest()) {
+        sendJsonAccessResponse(403, 'You do not have permission to perform this action.');
+    }
+    http_response_code(403);
+    include __DIR__ . '/../pages/403.php';
+    exit;
+}
 requirePostMethod();
 enforceCsrf();
 

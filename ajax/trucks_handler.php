@@ -7,10 +7,25 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
 require_once __DIR__ . '/../includes/truck_status_history.php';
+require_once __DIR__ . '/../includes/upload_validation.php';
+require_once __DIR__ . '/../includes/truck_records.php';
 
 header('Content-Type: application/json');
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+// Truck master records (add/edit) need Admin (validated role key) or the
+// fleet.manage permission (Operations Head). Truck status is not changed
+// here; it changes only through ajax/update_truck_status.php. Unauthorized
+// responses match requireRole(): login check first, then a 403 JSON reply
+// for JSON/AJAX requests, otherwise the 403 page.
+requireLogin();
+if (!isAdmin() && !currentUserHasAnyPermission(['fleet.manage'])) {
+    if (isJsonRequest()) {
+        sendJsonAccessResponse(403, 'You do not have permission to perform this action.');
+    }
+    http_response_code(403);
+    include __DIR__ . '/../pages/403.php';
+    exit;
+}
 requirePostMethod();
 enforceCsrf();
 
@@ -22,21 +37,21 @@ $action = $_POST['action'] ?? '';
 // (same JSON shape, same trimming/casting rules) as every other handler.
 function extractTruckFields(): array {
     return [
-        'plate_number'   => strtoupper(requiredString('plate_number', 'Plate number', 20)),
-        'brand'          => requiredString('brand', 'Brand', 100),
-        'model'          => requiredString('model', 'Model', 100),
+        'plate_number'   => strtoupper(requiredString('plate_number', 'Plate number', 30)),
+        'brand'          => requiredString('brand', 'Brand', 80),
+        'model'          => requiredString('model', 'Model', 80),
         'year_model'     => requiredInt('year_model', 'Year model', 1990, (int)date('Y') + 1),
         'body_type'      => optionalString('body_type'),
         'fuel_type'      => requiredEnum('fuel_type', TRUCK_FUEL_TYPES, 'Fuel type'),
         'capacity_tons'  => optionalFloat('capacity_tons'),
-        'chassis_number' => optionalString('chassis_number'),
-        'engine_number'  => optionalString('engine_number'),
-        'unit_number'    => optionalString('unit_number', null, 30),
+        'chassis_number' => optionalString('chassis_number', null, 100),
+        'engine_number'  => optionalString('engine_number', null, 100),
+        'unit_number'    => optionalString('unit_number', null, 50),
         'truck_type'     => requiredEnum('truck_type', TRUCK_CATEGORIES, 'Truck category'),
-        'mv_file_number' => optionalString('mv_file_number', null, 50),
+        'mv_file_number' => optionalString('mv_file_number', null, 100),
         'registration_expiry' => optionalString('registration_expiry', null, 10),
         'insurance_provider' => optionalString('insurance_provider', null, 150),
-        'insurance_policy_number' => optionalString('insurance_policy_number', null, 80),
+        'insurance_policy_number' => optionalString('insurance_policy_number', null, 100),
         'insurance_expiry' => optionalString('insurance_expiry', null, 10),
         'warranty_expiry' => optionalString('warranty_expiry', null, 10),
     ];
@@ -60,30 +75,67 @@ function validateUniqueTruckIdentifiers(PDO $pdo, array $fields, ?int $truckId =
     }
 }
 
-function storeTruckImage(?array $file, ?string $existingPath = null): ?string {
-    if (!$file || ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
-        return $existingPath;
+// Validates the submitted view images without moving them. The form posts
+// truck_images[front] etc., which PHP delivers as
+// $_FILES['truck_images']['name']['front'], so each view is regrouped here.
+function inspectTruckViewImages(array $files): array {
+    $uploads = [];
+    foreach (['front', 'side', 'rear', 'top'] as $view) {
+        $file = [];
+        foreach (['name', 'tmp_name', 'error', 'size'] as $key) {
+            $file[$key] = $files[$key][$view] ?? null;
+        }
+        if ($file['error'] === null || $file['error'] === UPLOAD_ERR_NO_FILE) {
+            continue;
+        }
+        try {
+            $uploads[$view] = inspectTruckImageUpload($file) + ['tmp_name' => $file['tmp_name']];
+        } catch (InvalidArgumentException $e) {
+            jsonFail(ucfirst($view) . ' view: ' . $e->getMessage());
+        }
     }
+    return $uploads;
+}
 
-    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || (int)$file['size'] > 10 * 1024 * 1024) {
-        jsonFail('Truck image must be a valid file no larger than 10 MB.');
-    }
-    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']);
-    $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
-    if (!isset($extensions[$mime])) {
-        jsonFail('Truck image must be a JPG, PNG, or WebP file.');
+// Moves already-inspected images into uploads/trucks/ under generated names.
+// Returns [view => path, view => ['path','original_name','mime_type','size']]
+// for the images stored by this request; on failure removes what it moved.
+function storeTruckViewImages(array $uploads): array {
+    if (!$uploads) {
+        return [[], []];
     }
     $directory = dirname(__DIR__) . '/uploads/trucks/';
     if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
         jsonFail('Truck image directory could not be created.', 500);
     }
-    $name = bin2hex(random_bytes(16)) . '.' . $extensions[$mime];
-    $destPath = $directory . $name;
-    if (!move_uploaded_file($file['tmp_name'], $destPath)) {
-        jsonFail('Truck image could not be saved.', 500);
+    $paths = [];
+    $stored = [];
+    foreach ($uploads as $view => $upload) {
+        $name = bin2hex(random_bytes(16)) . '.' . $upload['extension'];
+        if (!move_uploaded_file($upload['tmp_name'], $directory . $name)) {
+            discardTruckImages(array_column($stored, 'path'));
+            jsonFail('Truck image could not be saved.', 500);
+        }
+        resizeTruckImage($directory . $name, $upload['mime_type']);
+        $paths[$view] = 'uploads/trucks/' . $name;
+        $stored[$view] = [
+            'path'          => $paths[$view],
+            'original_name' => $upload['original_name'],
+            'mime_type'     => $upload['mime_type'],
+            'size'          => $upload['size'],
+        ];
     }
-    resizeTruckImage($destPath, $mime);
-    return 'uploads/trucks/' . $name;
+    return [$paths, $stored];
+}
+
+// Removes images stored by this request when the truck record is not saved.
+function discardTruckImages(array $paths): void {
+    foreach ($paths as $path) {
+        if (is_string($path) && preg_match('~^uploads/trucks/[0-9a-f]{32}\.(?:jpg|png|webp)$~', $path)) {
+            $file = dirname(__DIR__) . '/' . $path;
+            if (is_file($file)) unlink($file);
+        }
+    }
 }
 
 // Cap the longest side and re-encode so a phone photo (often 3000px+, several
@@ -141,21 +193,14 @@ function resizeTruckImage(string $path, string $mime): void {
     imagedestroy($image);
 }
 
-function storeTruckViewImages(array $files, array $existing = []): array {
-    $paths = $existing;
-    foreach (['front', 'side', 'rear', 'top'] as $view) {
-        if (isset($files[$view])) {
-            $paths[$view] = storeTruckImage($files[$view], $paths[$view] ?? null);
-        }
-    }
-    return $paths;
-}
-
 // ── Add truck ─────────────────────────────────────────────────────────────────
+// Target columns: vehicle_year, body_details, capacity; registration,
+// insurance and warranty go to truck_documents and photos to files /
+// documents / document_links (includes/truck_records.php).
 if ($action === 'add') {
     $f = extractTruckFields();
     validateTruckExpiryDates($f);
-    $images = storeTruckViewImages($_FILES['truck_images'] ?? []);
+    $imageUploads = inspectTruckViewImages($_FILES['truck_images'] ?? []);
 
     if ($f['capacity_tons'] !== null && $f['capacity_tons'] < 0) {
         jsonFail('Capacity cannot be negative.');
@@ -167,29 +212,30 @@ if ($action === 'add') {
     if ($f['chassis_number'] && existsWhere($pdo, 'trucks', 'chassis_number', $f['chassis_number'])) {
         jsonFail('A truck with that chassis number already exists.');
     }
+    if ($f['engine_number'] && existsWhere($pdo, 'trucks', 'engine_number', $f['engine_number'])) {
+        jsonFail('A truck with that engine number already exists.');
+    }
     validateUniqueTruckIdentifiers($pdo, $f);
+    [$images, $storedUploads] = storeTruckViewImages($imageUploads);
 
     try {
         $pdo->beginTransaction();
         $stmt = $pdo->prepare("
             INSERT INTO trucks
                 (plate_number, chassis_number, engine_number, brand, model,
-                 year_model, body_type, fuel_type, capacity_tons, image_path,
-                 image_front_path, image_side_path, image_rear_path, image_top_path, status,
-                 unit_number, truck_type, mv_file_number, registration_expiry,
-                 insurance_provider, insurance_policy_number, insurance_expiry, warranty_expiry)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Available', ?, ?, ?, ?, ?, ?, ?, ?)
+                 vehicle_year, body_details, fuel_type, capacity, status,
+                 availability_status, unit_number, truck_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Available', 'Available', ?, ?)
         ");
         $stmt->execute([
             $f['plate_number'], $f['chassis_number'], $f['engine_number'],
             $f['brand'], $f['model'], $f['year_model'],
             $f['body_type'], $f['fuel_type'], $f['capacity_tons'],
-            $images['front'] ?? null, $images['front'] ?? null, $images['side'] ?? null,
-            $images['rear'] ?? null, $images['top'] ?? null,
-            $f['unit_number'], $f['truck_type'], $f['mv_file_number'], $f['registration_expiry'],
-            $f['insurance_provider'], $f['insurance_policy_number'], $f['insurance_expiry'], $f['warranty_expiry'],
+            $f['unit_number'], $f['truck_type'],
         ]);
         $newId = (int)$pdo->lastInsertId();
+        saveTruckDocuments($pdo, $newId, $f);
+        saveTruckPhotos($pdo, $newId, $storedUploads, currentUserId());
         recordTruckStatusHistory(
             $pdo,
             $newId,
@@ -197,21 +243,17 @@ if ($action === 'add') {
             'Available',
             'Truck registered and added to fleet.'
         );
-        $pdo->commit();
-
         auditLog('ADD_TRUCK', 'trucks', $newId, null, [
             'plate_number' => $f['plate_number'],
             'brand'        => $f['brand'],
             'model'        => $f['model'],
         ]);
+        $pdo->commit();
 
         jsonOk(['id' => $newId], 'Truck added successfully.');
-    } catch (PDOException $e) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
-        error_log('trucks_handler/add: ' . $e->getMessage());
-        jsonFail('A database error occurred. Please try again.', 500);
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
+        discardTruckImages(array_column($storedUploads, 'path'));
         error_log('trucks_handler/add: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
     }
@@ -220,8 +262,11 @@ if ($action === 'add') {
 // ── Edit truck ────────────────────────────────────────────────────────────────
 if ($action === 'edit') {
     $truckId = requiredInt('truck_id', 'Truck ID', 1);
-    $status  = requiredEnum('status', TRUCK_STATUSES, 'Status');
-    $statusReason = optionalString('status_reason', null, 500);
+    // Editing master fields never changes truck status. Status changes go only
+    // through ajax/update_truck_status.php (fleet.status.update, active-trip
+    // guard). A submitted status must equal the current one, so a changed or
+    // stale form value is refused instead of being silently ignored.
+    $requestedStatus = optionalString('status', null, 50);
     $f       = extractTruckFields();
     validateTruckExpiryDates($f);
 
@@ -230,12 +275,7 @@ if ($action === 'edit') {
     }
 
     $oldData = findOrFail($pdo, 'trucks', 'truck_id', $truckId, 'Truck not found.');
-    $images = storeTruckViewImages($_FILES['truck_images'] ?? [], [
-        'front' => $oldData['image_front_path'] ?? $oldData['image_path'] ?? null,
-        'side'  => $oldData['image_side_path'] ?? null,
-        'rear'  => $oldData['image_rear_path'] ?? null,
-        'top'   => $oldData['image_top_path'] ?? null,
-    ]);
+    $imageUploads = inspectTruckViewImages($_FILES['truck_images'] ?? []);
 
     if (existsWhere($pdo, 'trucks', 'plate_number', $f['plate_number'], $truckId, 'truck_id')) {
         jsonFail('Another truck already has that plate number.');
@@ -243,62 +283,60 @@ if ($action === 'edit') {
     if ($f['chassis_number'] && existsWhere($pdo, 'trucks', 'chassis_number', $f['chassis_number'], $truckId, 'truck_id')) {
         jsonFail('Another truck already has that chassis number.');
     }
+    if ($f['engine_number'] && existsWhere($pdo, 'trucks', 'engine_number', $f['engine_number'], $truckId, 'truck_id')) {
+        jsonFail('Another truck already has that engine number.');
+    }
     validateUniqueTruckIdentifiers($pdo, $f, $truckId);
+    [$images, $storedUploads] = storeTruckViewImages($imageUploads);
 
     try {
         $pdo->beginTransaction();
-        $statusLock = $pdo->prepare('SELECT status FROM trucks WHERE truck_id = ? FOR UPDATE');
+        $statusLock = $pdo->prepare('SELECT status, truck_type FROM trucks WHERE truck_id = ? FOR UPDATE');
         $statusLock->execute([$truckId]);
-        $lockedStatus = $statusLock->fetchColumn();
-        if ($lockedStatus === false) {
+        $locked = $statusLock->fetch(PDO::FETCH_ASSOC);
+        if ($locked === false) {
             $pdo->rollBack();
+            discardTruckImages(array_column($storedUploads, 'path'));
             jsonFail('Truck not found.', 404);
         }
-        if ($lockedStatus !== $status && $statusReason === null) {
+        $lockedStatus = (string)$locked['status'];
+        if ($requestedStatus !== null && $requestedStatus !== $lockedStatus) {
             $pdo->rollBack();
-            jsonFail('Explain why the truck status is changing.');
+            discardTruckImages(array_column($storedUploads, 'path'));
+            jsonFail('Truck status cannot be changed while editing truck details. Use the status action on the Fleet Status page instead.');
+        }
+        // The truck type decides trip type and dispatcher scope; it cannot
+        // change while the truck is held by a trip.
+        if ($locked['truck_type'] !== $f['truck_type'] && in_array($lockedStatus, ['Assigned', 'On Trip'], true)) {
+            $pdo->rollBack();
+            discardTruckImages(array_column($storedUploads, 'path'));
+            jsonFail('The truck category cannot change while the truck is assigned to a trip.', 409);
         }
         $pdo->prepare("
             UPDATE trucks SET
                 plate_number   = ?, chassis_number = ?, engine_number  = ?,
-                brand          = ?, model          = ?, year_model     = ?,
-                body_type      = ?, fuel_type      = ?, capacity_tons  = ?, image_path = ?,
-                image_front_path = ?, image_side_path = ?, image_rear_path = ?, image_top_path = ?,
-                status         = ?, unit_number = ?, truck_type = ?, mv_file_number = ?,
-                registration_expiry = ?, insurance_provider = ?, insurance_policy_number = ?,
-                insurance_expiry = ?, warranty_expiry = ?
+                brand          = ?, model          = ?, vehicle_year   = ?,
+                body_details   = ?, fuel_type      = ?, capacity       = ?,
+                unit_number    = ?, truck_type     = ?
             WHERE truck_id     = ?
         ")->execute([
             $f['plate_number'], $f['chassis_number'], $f['engine_number'],
             $f['brand'], $f['model'], $f['year_model'],
-            $f['body_type'], $f['fuel_type'], $f['capacity_tons'], $images['front'] ?? null,
-            $images['front'] ?? null, $images['side'] ?? null, $images['rear'] ?? null, $images['top'] ?? null,
-            $status, $f['unit_number'], $f['truck_type'], $f['mv_file_number'], $f['registration_expiry'],
-            $f['insurance_provider'], $f['insurance_policy_number'], $f['insurance_expiry'], $f['warranty_expiry'], $truckId,
+            $f['body_type'], $f['fuel_type'], $f['capacity_tons'],
+            $f['unit_number'], $f['truck_type'], $truckId,
         ]);
-        if ($lockedStatus !== $status) {
-            recordTruckStatusHistory(
-                $pdo,
-                $truckId,
-                (string)$lockedStatus,
-                $status,
-                $statusReason
-            );
-        }
-        $pdo->commit();
-
+        saveTruckDocuments($pdo, $truckId, $f);
+        saveTruckPhotos($pdo, $truckId, $storedUploads, currentUserId());
         auditLog('EDIT_TRUCK', 'trucks', $truckId,
             ['plate_number' => $oldData['plate_number'], 'status' => $oldData['status']],
-            ['plate_number' => $f['plate_number'], 'status' => $status, 'status_reason' => $statusReason]
+            ['plate_number' => $f['plate_number'], 'status' => $lockedStatus, 'new_photos' => array_keys($storedUploads)]
         );
+        $pdo->commit();
 
         jsonOk([], 'Truck updated successfully.');
-    } catch (PDOException $e) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
-        error_log('trucks_handler/edit: ' . $e->getMessage());
-        jsonFail('A database error occurred. Please try again.', 500);
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
+        discardTruckImages(array_column($storedUploads, 'path'));
         error_log('trucks_handler/edit: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
     }

@@ -22,7 +22,16 @@ Bootstrap Icons, and Chart.js are already included under `assets/vendor/`.
    a different folder or URL path, update `APP_BASE` in `.env` to match it.
 3. In phpMyAdmin, create an empty database named `mulawin_fleetops` using
    `utf8mb4` (or choose another name and use that name in `.env`).
-4. Select the empty database in phpMyAdmin and import
+4. > **Schema note (2026-10-14):** the application code on the
+   > `system-hardening` branch targets the new schema
+   > [`../db/reference/mulawin_fleetops_new.sql`](../db/reference/mulawin_fleetops_new.sql)
+   > plus the review-only drafts in `../db/target_migrations/`. The legacy file
+   > below does not match that code. For a test installation follow
+   > [`../docs/testing/database_setup_checklist.md`](../docs/testing/database_setup_checklist.md)
+   > (not yet executed; each database change needs owner approval). The
+   > legacy steps below are kept for the legacy installation only.
+
+   Select the empty database in phpMyAdmin and import
    [`../db/mulawin_fleetops_db.sql`](../db/mulawin_fleetops_db.sql). This file
    contains the complete schema and bundled database additions. It does not
    create the database or any login accounts.
@@ -63,14 +72,23 @@ Bootstrap Icons, and Chart.js are already included under `assets/vendor/`.
    php auth/seed_users.php
    ```
 
-   The current seed script inserts `admin` with the temporary password
-   `Admin@1234` and does not replace an existing account. Sign in at
-   `http://localhost/mulawin_fleetops/login.php` and change the password using
-   the application's password-change flow; requested changes require
-   Head Management approval. Remove `auth/seed_users.php` before exposing the
-   application to a network. Never use this seeded account or password in
-   production. If PHP is not on your command path, run the command using the
-   full path to XAMPP's `php.exe`.
+   The script asks twice for the initial Admin password without showing what
+   you type (at least 8 characters; both entries must match). Run it from an
+   interactive PowerShell or terminal window: it refuses to run when the
+   password cannot be read through a hidden prompt, for example when input is
+   piped or redirected, or in a Git Bash window that has no hidden prompt.
+   On Linux or macOS, if the terminal stops showing what you type after the
+   script was interrupted, run `stty sane` to restore it.
+   The password is never stored in the source. The script creates the
+   initial Admin account only if it does not exist yet and never changes an
+   existing account's password. Sign in at
+   `http://localhost/mulawin_fleetops/login.php`. To change a password later, an Admin
+   opens User Management and uses Reset Password on the account; this also
+   signs the user out of existing sessions. There is no self-service
+   password change: users who forget a password must ask an Admin. Remove
+   `auth/seed_users.php` before exposing the application to a network. Never
+   use this seeded account in production. If PHP is not on your command path,
+   run the command using the full path to XAMPP's `php.exe`.
 7. Open the login page in a browser. Sign in with an account that exists in the
    `users` table.
 

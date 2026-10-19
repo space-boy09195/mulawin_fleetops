@@ -2,19 +2,24 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/finance_records.php';
 
 requirePermission('payroll.view');
 
 $pdo = getDBConnection();
+// Target payroll (see ajax/payroll_handler.php): period dates from
+// payroll_periods, paid date and notes from the record's disbursement.
 $records = $pdo->query(
-    "SELECT pr.payroll_id, pr.pay_period_start, pr.pay_period_end, pr.base_amount,
-            pr.allowance_amount, pr.deduction_amount, pr.amount_paid,
-            pr.paid_date, pr.notes, e.full_name AS employee_name, e.position,
-            u.full_name AS recorded_by_name
+    "SELECT pr.payroll_record_id AS payroll_id, pp.period_start AS pay_period_start,
+            pp.period_end AS pay_period_end, pr.base_amount,
+            pr.allowance_amount, pr.deduction_amount, pr.net_amount AS amount_paid,
+            " . payrollPaidDateSql('pr') . " AS paid_date, " . payrollNotesSql('pr') . " AS notes,
+            e.full_name AS employee_name, e.position,
+            '—' AS recorded_by_name
      FROM payroll_records pr
+     JOIN payroll_periods pp ON pp.payroll_period_id = pr.payroll_period_id
      JOIN employees e ON e.employee_id = pr.employee_id
-     JOIN users u ON u.user_id = pr.recorded_by
-     ORDER BY pr.paid_date DESC, pr.created_at DESC
+     ORDER BY pp.period_end DESC, pr.created_at DESC
      LIMIT 200"
 )->fetchAll(PDO::FETCH_ASSOC);
 $employees = [];
@@ -22,7 +27,7 @@ if (currentUserHasAnyPermission(['payroll.manage'])) {
     $employees = $pdo->query(
         "SELECT employee_id, full_name, position
          FROM employees
-         WHERE is_active = 1 AND LOWER(position) NOT IN ('driver', 'helper')
+         WHERE employment_status = 'Active' AND (position IS NULL OR LOWER(position) NOT IN ('driver', 'helper'))
          ORDER BY full_name"
     )->fetchAll(PDO::FETCH_ASSOC);
 }

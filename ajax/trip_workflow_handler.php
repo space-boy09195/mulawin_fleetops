@@ -1,4 +1,18 @@
 <?php
+// ============================================================
+// ajax/trip_workflow_handler.php
+// Trip workflow steps 5-11 on the target schema (step map in
+// includes/trip_workflow.php):
+//   confirm_assignment   Approved -> Assigned; truck assignment 'Assigned'
+//   prepare_departure    documents + allowance recorded (step 6); may move
+//                        to Ready for Dispatch when departure checks passed
+//   departure_clearance  Ready for Dispatch -> Dispatched; dispatch_clearances
+//   record_progress      trip_updates 'In Transit' (step 10)
+//   save_delivery_return trip_deliveries + trip_returns (step 11)
+//   reassign_resources   truck / crew / schedule change before confirmation
+// The trip row is locked first, so all workflow writes for one trip are
+// serialized; every status change is conditional (transitionTripStatus).
+// ============================================================
 
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/audit.php';
@@ -7,7 +21,10 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 require_once __DIR__ . '/../includes/trip_workflow.php';
+require_once __DIR__ . '/../includes/trip_queries.php';
 require_once __DIR__ . '/../includes/dispatch_assignment.php';
+require_once __DIR__ . '/../includes/dispatcher_scope.php';
+require_once __DIR__ . '/../includes/truck_status_history.php';
 
 header('Content-Type: application/json');
 
@@ -36,6 +53,18 @@ if ($requestKey === null) {
     jsonFail('Missing or invalid request idempotency key.', 400);
 }
 
+// Pre-departure statuses: the legacy single 'Loading' status.
+const TRIP_PRE_DEPARTURE_STATUSES = ['Approved', 'Assigned', 'Ready for Dispatch'];
+
+function workflowDateTime(string $raw, string $label): DateTimeImmutable {
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i', $raw);
+    $errors = DateTimeImmutable::getLastErrors();
+    if (!$date || ($errors !== false && ($errors['warning_count'] || $errors['error_count']))) {
+        throw new InvalidArgumentException($label . ' must be a valid date and time.');
+    }
+    return $date;
+}
+
 try {
     $pdo->beginTransaction();
     if (!claimIdempotencyKey($pdo, 'trip.workflow.' . $action . '.' . $tripId, $requestKey)) {
@@ -43,110 +72,139 @@ try {
         jsonFail('This trip workflow action has already been processed.', 409);
     }
 
-    $tripQuery = $pdo->prepare(
-        'SELECT t.trip_id, t.dispatch_id, t.trip_number, t.status,
-                dr.requested_by, dr.truck_id, dr.driver_id, dr.second_driver_id,
-                dr.helper_id, dr.scheduled_at, dr.expected_arrival
-         FROM trips t
-         JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
-         WHERE t.trip_id = ?
-         FOR UPDATE'
-    );
-    $tripQuery->execute([$tripId]);
-    $trip = $tripQuery->fetch(PDO::FETCH_ASSOC);
+    $trip = lockTripForWorkflow($pdo, $tripId);
     if (!$trip) {
         $pdo->rollBack();
         jsonFail('Trip not found.', 404);
     }
-
-    $stateQuery = $pdo->prepare(
-        'SELECT * FROM trip_workflow_state WHERE dispatch_id = ? FOR UPDATE'
-    );
-    $stateQuery->execute([(int)$trip['dispatch_id']]);
-    $state = $stateQuery->fetch(PDO::FETCH_ASSOC);
-    if (!$state) {
+    if ($trip['dispatch_id'] === null) {
         $pdo->rollBack();
-        jsonFail('This trip predates the tracked workflow and cannot use these workflow actions.', 409);
+        jsonFail('This trip has no dispatch request and cannot use these workflow actions.', 409);
     }
-    if ($action !== 'departure_clearance'
-        && currentRoleId() !== ROLE_ADMIN
-        && (int)$trip['requested_by'] !== currentUserId()) {
+    $currentStep = tripWorkflowCurrentStep($pdo, $tripId);
+
+    // Departure clearance has no owner check (it is the Operations Head's
+    // step, granted by dispatch.clear) and is never an Admin override.
+    $notTripOwner = $action !== 'departure_clearance'
+        && (int)$trip['requested_by'] !== currentUserId();
+    if ($notTripOwner && !isAdmin()) {
         $pdo->rollBack();
         jsonFail('Only the dispatcher who submitted this trip can complete this workflow action.', 403);
     }
-    if ($trip['status'] !== 'Loading' && in_array($action, ['confirm_assignment', 'prepare_departure', 'departure_clearance', 'reassign_resources'], true)) {
+    // Dispatcher scope (truck category and shift) applies to every workflow
+    // action on this trip, so a trip ID outside the scope is refused.
+    // reassign_resources also checks the destination truck below.
+    $scopeViolation = dispatcherScopeViolation(
+        (string)($trip['shift'] ?? ''),
+        (string)($trip['truck_type'] ?? '')
+    );
+    if ($scopeViolation !== null) {
+        $pdo->rollBack();
+        jsonFail($scopeViolation, 403);
+    }
+    $ownerOverride = $notTripOwner;
+    if (in_array($action, ['confirm_assignment', 'prepare_departure', 'departure_clearance', 'reassign_resources'], true)
+        && !in_array($trip['status'], TRIP_PRE_DEPARTURE_STATUSES, true)) {
         $pdo->rollBack();
         jsonFail('This trip is no longer awaiting departure preparation.', 409);
     }
-    if ($action === 'reassign_resources' && $state['assignment_confirmed_at'] !== null) {
+    if ($action === 'reassign_resources' && tripWorkflowEventExists($pdo, $tripId, 'assignment-confirmed')) {
         $pdo->rollBack();
         jsonFail('The assignment is already confirmed and can no longer be changed here.', 409);
     }
+    // Admin acting on another dispatcher's trip is an override. Tracking
+    // starts after the shared state checks above. Per-action input checks
+    // below still end a tracked request (recorded as ADMIN_OVERRIDE_FAILED).
+    if ($ownerOverride) {
+        $overrideBypassed = [
+            'restriction'   => 'trip_owner',
+            'owner_user_id' => (int)$trip['requested_by'],
+        ];
+        $overrideReason = adminOverrideReason();
+        if ($overrideReason === null) {
+            adminOverrideRefused('trips', $tripId, $overrideBypassed);
+            jsonFail('An Admin override reason (1-500 characters) is required to act on a trip submitted by another dispatcher.', 422);
+        }
+        adminOverrideBegin('trips', $tripId, $overrideBypassed, $overrideReason);
+    }
 
     if ($action === 'reassign_resources') {
+        if ($trip['status'] !== 'Approved') {
+            throw new DomainException('Resources can be changed only after approval and before the assignment is confirmed.');
+        }
         $newTruckId = requiredInt('truck_id', 'Truck', 1);
         $newDriverId = requiredInt('driver_id', 'Driver', 1);
         $newSecondDriverId = filter_input(INPUT_POST, 'second_driver_id', FILTER_VALIDATE_INT) ?: null;
         $newHelperId = filter_input(INPUT_POST, 'helper_id', FILTER_VALIDATE_INT) ?: null;
-        $scheduledAtRaw = requiredString('scheduled_at', 'Scheduled date/time');
+        $scheduledDate = workflowDateTime(requiredString('scheduled_at', 'Scheduled date/time'), 'Scheduled date');
         $expectedArrivalRaw = trim($_POST['expected_arrival'] ?? '');
         $reassignReason = requiredString('reassign_reason', 'Reason for the change', 500);
-
-        $scheduledDate = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i', $scheduledAtRaw);
-        $dateErrors = DateTimeImmutable::getLastErrors();
-        if (!$scheduledDate || ($dateErrors !== false && ($dateErrors['warning_count'] || $dateErrors['error_count']))) {
-            $pdo->rollBack();
-            jsonFail('Invalid scheduled date.');
-        }
         $expectedArrival = null;
         if ($expectedArrivalRaw !== '') {
-            $expectedArrivalDate = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i', $expectedArrivalRaw);
-            $arrivalErrors = DateTimeImmutable::getLastErrors();
-            if (!$expectedArrivalDate || ($arrivalErrors !== false && ($arrivalErrors['warning_count'] || $arrivalErrors['error_count']))) {
-                $pdo->rollBack();
-                jsonFail('Expected arrival must be a valid date and time.');
-            }
+            $expectedArrivalDate = workflowDateTime($expectedArrivalRaw, 'Expected arrival');
             if ($expectedArrivalDate <= $scheduledDate) {
-                $pdo->rollBack();
-                jsonFail('Expected arrival must be later than scheduled departure.');
+                throw new InvalidArgumentException('Expected arrival must be later than scheduled departure.');
             }
             $expectedArrival = $expectedArrivalDate->format('Y-m-d H:i:s');
         }
 
-        $oldTruckId = (int)$trip['truck_id'];
-        $truckChanged = $newTruckId !== $oldTruckId;
-        $crewIds = array_filter([$newDriverId, $newSecondDriverId, $newHelperId]);
-
-        if ($truckChanged) {
-            lockDispatchResources($pdo, $newTruckId, $crewIds);
-        } else {
-            // Re-validate crew even when the truck is unchanged.
-            $employeeCheck = $pdo->prepare(
-                'SELECT employee_id, is_active FROM employees WHERE employee_id = ? FOR UPDATE'
-            );
-            foreach (array_unique(array_map('intval', $crewIds)) as $employeeId) {
-                $employeeCheck->execute([$employeeId]);
-                $row = $employeeCheck->fetch(PDO::FETCH_ASSOC);
-                if (!$row || !(int)$row['is_active']) {
-                    $pdo->rollBack();
-                    jsonFail('A selected crew member is no longer active.', 409);
-                }
-            }
+        // Dispatcher scope applies to the destination truck, the trip's shift
+        // and the new scheduled date, before any resource is locked or
+        // changed. Admin and Operations Head have no dispatcher scope.
+        $truckTypeQuery = $pdo->prepare('SELECT truck_type FROM trucks WHERE truck_id = ?');
+        $truckTypeQuery->execute([$newTruckId]);
+        $newTruckType = $truckTypeQuery->fetchColumn();
+        if ($newTruckType === false) {
+            throw new DomainException('Selected truck is no longer available.');
+        }
+        if ($newTruckType !== $trip['trip_type']) {
+            throw new DomainException('The replacement truck must be a ' . $trip['trip_type'] . '.');
+        }
+        $scopeViolation = dispatcherScopeViolation(
+            (string)($trip['shift'] ?? ''),
+            (string)$newTruckType,
+            $scheduledDate->format('Y-m-d')
+        );
+        if ($scopeViolation !== null) {
+            $pdo->rollBack();
+            jsonFail($scopeViolation, 403);
         }
 
+        $oldTruckId = (int)$trip['truck_id'];
+        $truckChanged = $newTruckId !== $oldTruckId;
+        $crewIds = array_values(array_filter([$newDriverId, $newSecondDriverId, $newHelperId]));
+        if (count($crewIds) !== count(array_unique($crewIds))) {
+            throw new InvalidArgumentException('Each assigned crew member must be different.');
+        }
+        // A new truck must be Available; the current truck is already held
+        // ('Assigned') by this trip, so only its lock is taken.
+        lockDispatchResources($pdo, $newTruckId, $crewIds, $truckChanged ? 'Available' : null);
+        $license = $pdo->prepare('SELECT license_number FROM employees WHERE employee_id = ?');
+        foreach (array_filter([$newDriverId, $newSecondDriverId]) as $driverCheckId) {
+            $license->execute([$driverCheckId]);
+            if (!$license->fetchColumn()) {
+                throw new DomainException('Every driver on the trip needs a valid license.');
+            }
+        }
         assertDispatchResourcesAvailable(
             $pdo,
             $newTruckId,
             $crewIds,
             $scheduledDate->format('Y-m-d H:i:s'),
-            (int)$trip['dispatch_id']
+            $tripId
         );
 
+        if ($truckChanged) {
+            $previous = releaseTruckForTrip($pdo, $oldTruckId, $tripId, 'Cancelled');
+            if ($previous !== null) {
+                recordTruckStatusHistory($pdo, $oldTruckId, $previous, 'Available', "Trip {$trip['trip_number']} reassigned to another truck.");
+            }
+        }
         $pdo->prepare(
-            'UPDATE dispatch_requests
+            'UPDATE trips
              SET truck_id = ?, driver_id = ?, second_driver_id = ?, helper_id = ?,
-                 scheduled_at = ?, expected_arrival = ?
-             WHERE dispatch_id = ?'
+                 scheduled_departure = ?, scheduled_arrival = ?
+             WHERE trip_id = ?'
         )->execute([
             $newTruckId,
             $newDriverId,
@@ -154,17 +212,16 @@ try {
             $newHelperId,
             $scheduledDate->format('Y-m-d H:i:s'),
             $expectedArrival,
-            (int)$trip['dispatch_id'],
+            $tripId,
         ]);
-
-        $pdo->prepare('UPDATE trips SET expected_arrival = ? WHERE trip_id = ?')
-            ->execute([$expectedArrival, $tripId]);
-
         if ($truckChanged) {
-            $pdo->prepare("UPDATE trucks SET status = 'Available' WHERE truck_id = ? AND status = 'Deployed'")
-                ->execute([$oldTruckId]);
-            $pdo->prepare("UPDATE trucks SET status = 'Deployed' WHERE truck_id = ?")
-                ->execute([$newTruckId]);
+            reserveTruckForTrip($pdo, $newTruckId, $tripId, $scheduledDate->format('Y-m-d H:i:s'), $expectedArrival);
+            recordTruckStatusHistory($pdo, $newTruckId, 'Available', 'Assigned', "Truck reserved for {$trip['trip_number']} (reassignment).");
+        } else {
+            $pdo->prepare(
+                "UPDATE truck_assignments SET assigned_from = ?, assigned_until = ?
+                 WHERE trip_id = ? AND truck_id = ? AND assignment_status IN ('Reserved', 'Assigned')"
+            )->execute([$scheduledDate->format('Y-m-d H:i:s'), $expectedArrival, $tripId, $newTruckId]);
         }
 
         $changeSummary = [];
@@ -173,62 +230,80 @@ try {
         if ((int)($trip['second_driver_id'] ?? 0) !== (int)($newSecondDriverId ?? 0)) $changeSummary[] = 'second driver changed';
         if ((int)($trip['helper_id'] ?? 0) !== (int)($newHelperId ?? 0)) $changeSummary[] = 'helper changed';
         if ($trip['scheduled_at'] !== $scheduledDate->format('Y-m-d H:i:s')) $changeSummary[] = 'schedule changed';
+        recordWorkflowEvent($pdo, 'trip', $tripId, 'resources-reassigned', null, null,
+            implode('; ', $changeSummary) . ' — ' . $reassignReason, currentUserId());
 
         $message = 'Assignment and schedule updated.';
         $auditAction = 'REASSIGN_TRIP_RESOURCES';
         $auditDetails = [
             'dispatch_id' => (int)$trip['dispatch_id'],
-            'changes' => $changeSummary,
-            'reason' => $reassignReason,
+            'changes'     => $changeSummary,
+            'reason'      => $reassignReason,
         ];
     } elseif ($action === 'confirm_assignment') {
-        if ((int)$state['current_step'] !== 4 || $state['assignment_confirmed_at'] !== null) {
-            $pdo->rollBack();
-            jsonFail('The assignment can only be confirmed once after Operations Head approval.', 409);
+        if ($trip['status'] !== 'Approved' || $currentStep !== 4) {
+            throw new DomainException('The assignment can only be confirmed once after Operations Head approval.');
         }
+        transitionTripStatus($pdo, $tripId, ['Approved'], 'Assigned');
         $pdo->prepare(
-            'UPDATE trip_workflow_state
-             SET assignment_confirmed_by = ?, assignment_confirmed_at = NOW()
-             WHERE dispatch_id = ?'
-        )->execute([currentUserId(), (int)$trip['dispatch_id']]);
+            "UPDATE truck_assignments SET assignment_status = 'Assigned'
+             WHERE trip_id = ? AND truck_id = ? AND assignment_status = 'Reserved'"
+        )->execute([$tripId, (int)$trip['truck_id']]);
         recordTripWorkflowEvent(
             $pdo,
-            (int)$trip['dispatch_id'],
             $tripId,
             5,
             'assignment-confirmed',
             currentUserId(),
-            'Dispatcher confirmed the truck and driver assignment after approval.'
+            'Dispatcher confirmed the truck and driver assignment after approval.',
+            'Approved',
+            'Assigned'
         );
         $message = 'Truck and driver assignment confirmed.';
         $auditAction = 'CONFIRM_TRIP_ASSIGNMENT';
         $auditDetails = ['dispatch_id' => (int)$trip['dispatch_id']];
     } elseif ($action === 'prepare_departure') {
-        if ((int)$state['current_step'] !== 5 || $state['assignment_confirmed_at'] === null) {
-            $pdo->rollBack();
-            jsonFail('Confirm the approved truck and driver assignment before preparing departure.', 409);
+        if ($trip['status'] !== 'Assigned' || $currentStep !== 5) {
+            throw new DomainException('Confirm the approved truck and driver assignment before preparing departure.');
         }
 
         $documentsStatus = requiredEnum('documents_status', ['Prepared', 'Not Required'], 'Document packet status');
         $documentsNotes = optionalString('documents_notes', null, 2000);
         if ($documentsStatus === 'Prepared') {
             $documentCount = $pdo->prepare(
-                "SELECT COUNT(*) FROM documents
-                 WHERE trip_id = ? AND visibility_scope IN ('all', 'operations')"
+                "SELECT COUNT(*)
+                 FROM document_links dl
+                 JOIN documents d ON d.document_id = dl.document_id
+                 WHERE dl.entity_type = 'trip' AND dl.entity_id = ?
+                   AND COALESCE(d.visibility_scope, 'all') IN ('all', 'operations')"
             );
             $documentCount->execute([$tripId]);
             if ((int)$documentCount->fetchColumn() < 1) {
-                $pdo->rollBack();
-                jsonFail('Upload at least one trip document before marking the packet prepared.');
+                throw new InvalidArgumentException('Upload at least one trip document before marking the packet prepared.');
             }
         } elseif ($documentsNotes === null || trim($documentsNotes) === '') {
-            $pdo->rollBack();
-            jsonFail('State why no additional trip documents are required.');
+            throw new InvalidArgumentException('State why no additional trip documents are required.');
         }
 
+        // Driver Allowance stays a fund request (Trip Allowance), separate
+        // from Trip Pay (trip_pay_records).
         $allowanceStatus = requiredEnum('allowance_status', ['Approved', 'Not Required'], 'Allowance status');
         $allowanceNotes = optionalString('allowance_notes', null, 2000);
         $fundRequestId = null;
+        if ($allowanceStatus === 'Not Required') {
+            $activeAllowance = $pdo->prepare(
+                "SELECT fund_request_id
+                 FROM fund_requests
+                 WHERE trip_id = ? AND request_type = 'Trip Allowance'
+                   AND status IN ('Pending Approval', 'Approved', 'Processing', 'Disbursed', 'Settled')
+                 LIMIT 1
+                 FOR UPDATE"
+            );
+            $activeAllowance->execute([$tripId]);
+            if ($activeAllowance->fetchColumn()) {
+                throw new DomainException('An active Trip Allowance request is linked to this trip. Wait for its decision and record the approved request, or have it rejected before marking an allowance as not required.');
+            }
+        }
         if ($allowanceStatus === 'Approved') {
             $fundRequestId = requiredInt('fund_request_id', 'Approved Trip Allowance request', 1);
             $fundRequest = $pdo->prepare(
@@ -237,119 +312,91 @@ try {
                  WHERE fund_request_id = ?
                    AND trip_id = ?
                    AND request_type = 'Trip Allowance'
-                   AND status IN ('Approved', 'Disbursed')
+                   AND status IN ('Approved', 'Processing', 'Disbursed', 'Settled')
                  FOR UPDATE"
             );
             $fundRequest->execute([$fundRequestId, $tripId]);
             if (!$fundRequest->fetchColumn()) {
-                $pdo->rollBack();
-                jsonFail('Select an approved or disbursed Trip Allowance request linked to this trip.');
+                throw new InvalidArgumentException('Select an approved or disbursed Trip Allowance request linked to this trip.');
             }
         } elseif ($allowanceNotes === null || trim($allowanceNotes) === '') {
-            $pdo->rollBack();
-            jsonFail('State why a trip allowance is not required.');
+            throw new InvalidArgumentException('State why a trip allowance is not required.');
         }
 
-        $pdo->prepare(
-            'UPDATE trip_workflow_state
-             SET documents_status = ?, documents_notes = ?,
-                 allowance_status = ?, allowance_fund_request_id = ?,
-                 allowance_notes = ?, prepared_by = ?, prepared_at = NOW()
-             WHERE dispatch_id = ?'
-        )->execute([
-            $documentsStatus,
-            $documentsNotes,
-            $allowanceStatus,
-            $fundRequestId,
-            $allowanceNotes,
-            currentUserId(),
-            (int)$trip['dispatch_id'],
-        ]);
+        // The packet details are kept on the step-6 event as JSON so the
+        // workflow page can show them (no trip_workflow_state table).
+        $packet = json_encode([
+            'documents_status'          => $documentsStatus,
+            'documents_notes'           => $documentsNotes,
+            'allowance_status'          => $allowanceStatus,
+            'allowance_fund_request_id' => $fundRequestId,
+            'allowance_notes'           => $allowanceNotes,
+        ], JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
         recordTripWorkflowEvent(
             $pdo,
-            (int)$trip['dispatch_id'],
             $tripId,
             6,
             'departure-packet-prepared',
             currentUserId(),
-            'Documents: ' . $documentsStatus
-                . ($documentsNotes ? ' — ' . $documentsNotes : '')
-                . '. Allowance: ' . $allowanceStatus
-                . ($allowanceNotes ? ' — ' . $allowanceNotes : '')
-                . '.'
+            $packet
         );
+        recordPreDepartureReadyIfComplete($pdo, $tripId, currentUserId());
         $message = 'Trip documents and allowance requirements recorded.';
         $auditAction = 'PREPARE_TRIP_DEPARTURE';
         $auditDetails = [
             'documents_status' => $documentsStatus,
             'allowance_status' => $allowanceStatus,
-            'fund_request_id' => $fundRequestId,
+            'fund_request_id'  => $fundRequestId,
         ];
     } elseif ($action === 'departure_clearance') {
-        if ((int)$state['current_step'] < 7 || $state['prepared_at'] === null) {
-            $pdo->rollBack();
-            jsonFail('A passed pre-departure checklist and complete departure inspection are required before clearance.', 409);
-        }
-
-        $checklist = $pdo->prepare(
-            "SELECT 1 FROM maintenance_checklists
-             WHERE dispatch_id = ? AND result = 'Passed' LIMIT 1"
-        );
-        $checklist->execute([(int)$trip['dispatch_id']]);
-        $inspection = $pdo->prepare(
-            "SELECT COUNT(*) AS finding_count,
-                    SUM(vif.`condition` <> 'Good') AS non_good_count
-             FROM vehicle_inspections vi
-             JOIN vehicle_inspection_findings vif ON vif.inspection_id = vi.inspection_id
-             WHERE vi.trip_id = ? AND vi.inspection_stage = 'Departure'"
-        );
-        $inspection->execute([$tripId]);
-        $inspectionResult = $inspection->fetch(PDO::FETCH_ASSOC);
-        if (!$checklist->fetchColumn() || !$inspectionResult
-            || (int)$inspectionResult['finding_count'] < 24
-            || (int)($inspectionResult['non_good_count'] ?? 0) !== 0) {
-            $pdo->rollBack();
-            jsonFail('Dispatch clearance is blocked until both required departure checks pass.', 409);
+        if ($trip['status'] !== 'Ready for Dispatch' || $currentStep < 7 || !tripDepartureChecksPassed($pdo, $tripId)) {
+            throw new DomainException('Dispatch clearance is blocked until the departure packet is prepared and every required departure check passes.');
         }
 
         $clearanceNotes = optionalString('clearance_notes', null, 2000);
-        $pdo->prepare(
-            'UPDATE trip_workflow_state
-             SET clearance_by = ?, clearance_at = NOW(), clearance_notes = ?
-             WHERE dispatch_id = ?'
-        )->execute([currentUserId(), $clearanceNotes, (int)$trip['dispatch_id']]);
+        try {
+            $pdo->prepare(
+                "INSERT INTO dispatch_clearances (trip_id, cleared_by, status, remarks)
+                 VALUES (?, ?, 'Cleared', ?)"
+            )->execute([$tripId, currentUserId(), $clearanceNotes]);
+        } catch (PDOException $e) {
+            // uq_dispatch_clearance_trip: one clearance per trip.
+            if ((int)($e->errorInfo[1] ?? 0) === 1062) {
+                throw new DomainException('Dispatch clearance was already recorded for this trip.');
+            }
+            throw $e;
+        }
+        transitionTripStatus($pdo, $tripId, ['Ready for Dispatch'], 'Dispatched');
         recordTripWorkflowEvent(
             $pdo,
-            (int)$trip['dispatch_id'],
             $tripId,
             8,
             'operations-dispatch-clearance',
             currentUserId(),
-            $clearanceNotes ?: 'Operations Head provided dispatch clearance.'
+            $clearanceNotes ?: 'Operations Head provided dispatch clearance.',
+            'Ready for Dispatch',
+            'Dispatched'
         );
         $message = 'Dispatch clearance recorded.';
         $auditAction = 'CLEAR_TRIP_FOR_DISPATCH';
         $auditDetails = ['dispatch_id' => (int)$trip['dispatch_id']];
     } elseif ($action === 'record_progress') {
-        if ($trip['status'] !== 'In Transit' || (int)$state['current_step'] < 9) {
-            $pdo->rollBack();
-            jsonFail('Progress updates can be recorded after the truck has been dispatched.', 409);
+        if ($trip['status'] !== 'In Progress' || $currentStep < 9) {
+            throw new DomainException('Progress updates can be recorded after the truck has been dispatched.');
         }
         $location = optionalString('location_note', null, 255);
         $notes = optionalString('notes', null, 4000);
         if (($location === null || trim($location) === '')
             && ($notes === null || trim($notes) === '')) {
-            $pdo->rollBack();
-            jsonFail('Enter a current location or progress update.');
+            throw new InvalidArgumentException('Enter a current location or progress update.');
         }
         $pdo->prepare(
-            "INSERT INTO trip_updates (trip_id, updated_by, status, location_note, notes)
-             VALUES (?, ?, 'In Transit', ?, ?)"
-        )->execute([$tripId, currentUserId(), $location, $notes]);
+            "INSERT INTO trip_updates (trip_id, update_type, description, location_text, reported_by)
+             VALUES (?, 'In Transit', ?, ?, ?)"
+        )->execute([$tripId, $notes, $location, currentUserId()]);
         $updateId = (int)$pdo->lastInsertId();
         recordTripWorkflowEvent(
             $pdo,
-            (int)$trip['dispatch_id'],
             $tripId,
             10,
             'progress-update-' . $updateId,
@@ -362,23 +409,14 @@ try {
         $auditAction = 'RECORD_TRIP_PROGRESS';
         $auditDetails = ['update_id' => $updateId];
     } else {
-        if ($trip['status'] !== 'In Transit' || (int)$state['current_step'] < 10) {
-            $pdo->rollBack();
-            jsonFail('Enter at least one trip progress update before recording delivery and return details.', 409);
-        }
-        $progress = $pdo->prepare(
-            'SELECT 1 FROM trip_workflow_events
-             WHERE dispatch_id = ? AND step_number = 10 LIMIT 1'
-        );
-        $progress->execute([(int)$trip['dispatch_id']]);
-        if (!$progress->fetchColumn()) {
-            $pdo->rollBack();
-            jsonFail('Enter at least one trip progress update before recording delivery and return details.', 409);
+        if ($trip['status'] !== 'In Progress' || $currentStep < 10) {
+            throw new DomainException('Enter at least one trip progress update before recording delivery and return details.');
         }
 
         $deliveryNotes = requiredString('delivery_notes', 'Delivery details', 4000);
         $returnNotes = requiredString('return_notes', 'Return details', 4000);
         $returnLocation = optionalString('return_location', null, 255);
+        $receivedBy = optionalString('received_by', null, 150);
         $receiptNumber = optionalString('delivery_receipt_number', null, 100);
         $sharedWaybill = optionalString('shared_waybill_reference', null, 100);
         $coLoadReference = optionalString('co_load_reference', null, 100);
@@ -386,42 +424,62 @@ try {
         $unitCount = null;
         if ($unitCountRaw !== '') {
             if (!is_numeric($unitCountRaw) || (float)$unitCountRaw < 0 || (float)$unitCountRaw > 1000000) {
-                $pdo->rollBack();
-                jsonFail('Delivered unit count must be a number from 0 to 1,000,000.');
+                throw new InvalidArgumentException('Delivered unit count must be a number from 0 to 1,000,000.');
             }
             $unitCount = (float)$unitCountRaw;
         }
+        $deliveredAtRaw = trim((string)($_POST['delivered_at'] ?? ''));
+        $deliveredAt = $deliveredAtRaw === ''
+            ? new DateTimeImmutable('now')
+            : workflowDateTime($deliveredAtRaw, 'Delivery date and time');
+        if ($deliveredAt->getTimestamp() > time() + 300) {
+            throw new InvalidArgumentException('The delivery time cannot be in the future.');
+        }
+
+        // The target has no columns for the delivery receipt number, co-load
+        // reference and delivered unit count; they are kept, labelled, in
+        // delivery_notes so nothing the dispatcher entered is lost.
+        $deliveryDetails = $deliveryNotes;
+        foreach ([
+            'Delivery receipt' => $receiptNumber,
+            'Co-load reference' => $coLoadReference,
+            'Delivered units' => $unitCount === null ? null : rtrim(rtrim(number_format($unitCount, 2, '.', ''), '0'), '.'),
+        ] as $label => $value) {
+            if ($value !== null && $value !== '') {
+                $deliveryDetails .= "\n{$label}: {$value}";
+            }
+        }
+        $returnDetails = $returnNotes . ($returnLocation ? "\nReturn location: {$returnLocation}" : '');
 
         $pdo->prepare(
-            'INSERT INTO trip_delivery_return_details
-                (trip_id, dispatch_id, delivered_unit_count, delivery_receipt_number,
-                 shared_waybill_reference, co_load_reference, delivery_notes,
-                 return_location, return_notes, recorded_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            'INSERT INTO trip_deliveries
+                (trip_id, delivery_date, delivery_time, received_by, delivery_notes, waybill_number, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
-                delivered_unit_count = VALUES(delivered_unit_count),
-                delivery_receipt_number = VALUES(delivery_receipt_number),
-                shared_waybill_reference = VALUES(shared_waybill_reference),
-                co_load_reference = VALUES(co_load_reference),
+                delivery_date = VALUES(delivery_date),
+                delivery_time = VALUES(delivery_time),
+                received_by = VALUES(received_by),
                 delivery_notes = VALUES(delivery_notes),
-                return_location = VALUES(return_location),
-                return_notes = VALUES(return_notes),
-                recorded_by = VALUES(recorded_by)'
+                waybill_number = VALUES(waybill_number)'
         )->execute([
             $tripId,
-            (int)$trip['dispatch_id'],
-            $unitCount,
-            $receiptNumber,
+            $deliveredAt->format('Y-m-d'),
+            $deliveredAt->format('H:i:s'),
+            $receivedBy,
+            $deliveryDetails,
             $sharedWaybill,
-            $coLoadReference,
-            $deliveryNotes,
-            $returnLocation,
-            $returnNotes,
             currentUserId(),
         ]);
+        $pdo->prepare(
+            'INSERT INTO trip_returns (trip_id, return_date, return_notes, created_by)
+             VALUES (?, CURDATE(), ?, ?)
+             ON DUPLICATE KEY UPDATE return_notes = VALUES(return_notes)'
+        )->execute([$tripId, $returnDetails, currentUserId()]);
+        // The actual arrival used by the on-time metric.
+        $pdo->prepare('UPDATE trips SET arrival_time = ? WHERE trip_id = ?')
+            ->execute([$deliveredAt->format('Y-m-d H:i:s'), $tripId]);
         recordTripWorkflowEvent(
             $pdo,
-            (int)$trip['dispatch_id'],
             $tripId,
             11,
             'delivery-return-details-recorded',
@@ -431,13 +489,22 @@ try {
         $message = 'Delivery and return details recorded.';
         $auditAction = 'RECORD_TRIP_DELIVERY_RETURN';
         $auditDetails = [
-            'delivered_unit_count' => $unitCount,
-            'has_shared_waybill' => $sharedWaybill !== null,
+            'delivered_unit_count'  => $unitCount,
+            'has_shared_waybill'    => $sharedWaybill !== null,
             'has_co_load_reference' => $coLoadReference !== null,
+            'delivered_at'          => $deliveredAt->format('Y-m-d H:i:s'),
         ];
     }
 
+    auditLog($auditAction, 'trips', $tripId, null, $auditDetails);
+    if ($ownerOverride) {
+        auditAdminOverride([
+            'action'          => 'trip_workflow',
+            'workflow_action' => $action,
+        ]);
+    }
     $pdo->commit();
+    if ($ownerOverride) adminOverrideSucceeded();
 } catch (InvalidArgumentException $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     jsonFail($e->getMessage());
@@ -450,5 +517,4 @@ try {
     jsonFail('Could not save the trip workflow action.', 500);
 }
 
-auditLog($auditAction, 'trips', $tripId, null, $auditDetails);
 jsonOk([], $message);

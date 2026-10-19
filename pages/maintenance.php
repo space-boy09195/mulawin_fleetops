@@ -2,10 +2,18 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
+require_once __DIR__ . '/../includes/inspections.php';
+require_once __DIR__ . '/../includes/trip_workflow.php';
+require_once __DIR__ . '/../includes/truck_records.php';
 
 requireAnyPermission(['maintenance.view', 'maintenance.manage']);
+$hideMaintenanceEntryButtons = isAdmin() || currentRoleKey() === 'operations_head';
 $requestedTripId = filter_input(INPUT_GET, 'trip_id', FILTER_VALIDATE_INT);
 $requestedInspectionStage = $_GET['inspection_stage'] ?? null;
+if ($requestedInspectionStage === 'Arrival') {
+    $requestedInspectionStage = 'Return';
+}
 if (!in_array($requestedInspectionStage, ['Departure', 'Return'], true)) {
     $requestedInspectionStage = null;
 }
@@ -19,7 +27,7 @@ $pdo = getDBConnection();
 
 // ── Period filter (scopes Maintenance Records list below) ────────────────────
 $periods = [
-    'today' => 'Today', '1w' => 'This Week', '1m' => 'This Month',
+    'today' => 'Today', '1w' => 'Last 7 Days', '1m' => 'Last 1 Month',
     '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months', 'all' => 'All Time',
 ];
 $period = $_GET['period'] ?? 'all';
@@ -34,75 +42,163 @@ $rangeStart = match ($period) {
     default => null,
 };
 $rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
-$recDateFilter = $rangeStartSql ? "AND mr.date_performed >= :rangeStart" : '';
+// Target date of a maintenance record (the legacy date_performed).
+$recordDateSql = 'COALESCE(mr.actual_completion_date, mr.start_date, mr.scheduled_date, DATE(mr.created_at))';
+$recDateFilter = $rangeStartSql ? "AND $recordDateSql >= :rangeStart" : '';
 
 // ── Maintenance records ───────────────────────────────────────────────────────
+// Target maintenance_records with record_source 'record' / 'pm_service'
+// (T-M2); work orders and general inspections are listed separately below.
+// The legacy truck_status of a record is derived from the record status.
 $recordsSql = "
     SELECT
-        mr.record_id,
+        mr.maintenance_id AS record_id,
         mr.maintenance_type,
-        mr.truck_status,
+        CASE mr.status
+            WHEN 'Completed' THEN 'Operational'
+            WHEN 'Scheduled' THEN 'Scheduled Maintenance'
+            ELSE 'Under Repair'
+        END AS truck_status,
+        mr.status AS record_status,
         mr.description,
-        mr.cost,
-        mr.date_performed,
+        mr.total_cost AS cost,
+        $recordDateSql AS date_performed,
         mr.next_due_date,
-        mr.inspection_id,
+        mr.vehicle_inspection_id AS inspection_id,
         mr.created_at,
         tr.plate_number,
         tr.brand,
         tr.model,
-        u.full_name      AS performed_by_name,
+        COALESCE(ue.full_name, u.username, '—') AS performed_by_name,
         i.incident_type  AS linked_incident_type,
         i.incident_id
     FROM maintenance_records mr
-    JOIN trucks tr   ON mr.truck_id     = tr.truck_id
-    JOIN users u     ON mr.performed_by = u.user_id
-    LEFT JOIN incidents i ON mr.incident_id = i.incident_id
-    WHERE 1=1 $recDateFilter
-    ORDER BY mr.date_performed DESC, mr.created_at DESC
+    JOIN trucks tr   ON mr.truck_id = tr.truck_id
+    LEFT JOIN users u ON u.user_id = COALESCE(mr.completed_by, mr.created_by)
+    LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+    LEFT JOIN trip_incidents i ON mr.incident_id = i.incident_id
+    WHERE mr.record_source IN ('record', 'pm_service') $recDateFilter
+    ORDER BY date_performed DESC, mr.created_at DESC
+    LIMIT 1000
 ";
 $recordsStmt = $pdo->prepare($recordsSql);
 if ($rangeStartSql) $recordsStmt->bindValue(':rangeStart', $rangeStartSql);
 $recordsStmt->execute();
 $records = $recordsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-$inspectionRows = $pdo->query("
-    SELECT vi.inspection_id, vi.truck_id, vi.trip_id, vi.inspection_stage,
-           vi.inspection_date, vi.notes, tr.plate_number, u.full_name AS inspected_by,
+// ── Inspections ───────────────────────────────────────────────────────────────
+// Trip inspections: vehicle_inspections on the 'Standard vehicle inspection'
+// templates (stage Arrival shown as the legacy 'Return'). General
+// inspections: maintenance_records (record_source 'inspection'); their ID is
+// shown negated so it can never collide with a vehicle_inspections ID.
+$checklistTemplate = inspectionTemplateForForm($pdo, 'checklist');
+$checklistTemplateId = $checklistTemplate ? (int)$checklistTemplate['template_id'] : 0;
+$tripInspectionRows = $pdo->prepare("
+    SELECT vi.inspection_id, vi.truck_id, vi.trip_id,
+           IF(vi.inspection_stage = 'Arrival', 'Return', vi.inspection_stage) AS inspection_stage,
+           DATE(vi.completed_at) AS inspection_date, vi.remarks AS notes, vi.completed_at AS sort_at,
+           tr.plate_number, COALESCE(ue.full_name, u.username) AS inspected_by,
            t.trip_number
     FROM vehicle_inspections vi
     JOIN trucks tr ON tr.truck_id = vi.truck_id
     JOIN users u ON u.user_id = vi.inspected_by
+    LEFT JOIN employees ue ON ue.employee_id = u.employee_id
     LEFT JOIN trips t ON t.trip_id = vi.trip_id
-    ORDER BY vi.inspection_date DESC, vi.created_at DESC
-")->fetchAll(PDO::FETCH_ASSOC);
-$inspectionTrips = $pdo->query("
-    SELECT t.trip_id, t.trip_number, t.status, dr.truck_id, tr.plate_number
-    FROM trips t
-    JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
-    JOIN trucks tr ON tr.truck_id = dr.truck_id
-    WHERE t.status IN ('Loading', 'Unloading')
-      AND (
-        NOT EXISTS (
-          SELECT 1 FROM trip_workflow_state tws
-          WHERE tws.dispatch_id = t.dispatch_id
-        )
-        OR EXISTS (
-          SELECT 1 FROM trip_workflow_state tws
-          WHERE tws.dispatch_id = t.dispatch_id
-            AND tws.current_step >= IF(t.status = 'Loading', 6, 11)
-        )
+    WHERE vi.completed_at IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM inspection_findings f
+          JOIN inspection_items ii ON ii.inspection_item_id = f.inspection_item_id
+          WHERE f.inspection_id = vi.inspection_id AND ii.template_id = ?
       )
-    ORDER BY t.created_at DESC
+    ORDER BY vi.completed_at DESC
+    LIMIT 500
+");
+$tripInspectionRows->execute([$checklistTemplateId]);
+$generalInspectionRows = $pdo->query("
+    SELECT -mr.maintenance_id AS inspection_id, mr.truck_id, NULL AS trip_id,
+           'General' AS inspection_stage,
+           COALESCE(mr.actual_completion_date, mr.start_date, DATE(mr.created_at)) AS inspection_date,
+           mr.description AS notes, mr.created_at AS sort_at,
+           tr.plate_number, COALESCE(ue.full_name, u.username) AS inspected_by,
+           NULL AS trip_number
+    FROM maintenance_records mr
+    JOIN trucks tr ON tr.truck_id = mr.truck_id
+    LEFT JOIN users u ON u.user_id = COALESCE(mr.completed_by, mr.created_by)
+    LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+    WHERE mr.record_source = 'inspection'
+    ORDER BY mr.created_at DESC
+    LIMIT 500
 ")->fetchAll(PDO::FETCH_ASSOC);
-$findingRows = $pdo->query("
-    SELECT inspection_id, view_name, part_name, `condition`, notes
-    FROM vehicle_inspection_findings
-    ORDER BY view_name, part_name
-")->fetchAll(PDO::FETCH_ASSOC);
+$inspectionRows = array_merge($tripInspectionRows->fetchAll(PDO::FETCH_ASSOC), $generalInspectionRows);
+usort($inspectionRows, static fn(array $a, array $b): int => strcmp((string)$b['sort_at'], (string)$a['sort_at']));
+
+// Findings in the legacy shape (view_name, part_name, condition, notes).
+// condition_description holds "Condition — notes" (includes/inspections.php).
+$splitCondition = static function (string $text): array {
+    $parts = explode(' — ', $text, 2);
+    return [$parts[0], $parts[1] ?? null];
+};
 $findingsByInspection = [];
-foreach ($findingRows as $finding) {
-    $findingsByInspection[(int)$finding['inspection_id']][] = $finding;
+$tripFindingRows = $pdo->query("
+    SELECT f.inspection_id, ii.category AS view_name, ii.item_name AS part_name,
+           f.result, f.condition_description
+    FROM inspection_findings f
+    JOIN inspection_items ii ON ii.inspection_item_id = f.inspection_item_id
+    JOIN inspection_templates it ON it.template_id = ii.template_id
+    WHERE it.template_name = 'Standard vehicle inspection'
+    ORDER BY ii.category, ii.sort_order, ii.item_name
+")->fetchAll(PDO::FETCH_ASSOC);
+foreach ($tripFindingRows as $finding) {
+    [$condition, $notes] = $splitCondition((string)($finding['condition_description'] ?? ''));
+    if ($condition === '' || !in_array($condition, INSPECTION_CONDITIONS, true)) {
+        $condition = $finding['result'] === 'Good' ? 'Good' : ($finding['result'] === 'N/A' ? 'Not Checked' : 'Needs Attention');
+    }
+    $findingsByInspection[(int)$finding['inspection_id']][] = [
+        'inspection_id' => (int)$finding['inspection_id'],
+        'view_name' => $finding['view_name'],
+        'part_name' => $finding['part_name'],
+        'condition' => $condition,
+        'notes' => $notes,
+    ];
+}
+$generalFindingRows = $pdo->query("
+    SELECT mf.maintenance_id, mf.finding_type, mf.description
+    FROM maintenance_findings mf
+    JOIN maintenance_records mr ON mr.maintenance_id = mf.maintenance_id
+    WHERE mr.record_source = 'inspection'
+    ORDER BY mf.finding_type
+")->fetchAll(PDO::FETCH_ASSOC);
+foreach ($generalFindingRows as $finding) {
+    [$view, $part] = array_pad(explode(': ', (string)$finding['finding_type'], 2), 2, '');
+    [$condition, $notes] = $splitCondition((string)$finding['description']);
+    $findingsByInspection[-(int)$finding['maintenance_id']][] = [
+        'inspection_id' => -(int)$finding['maintenance_id'],
+        'view_name' => $view,
+        'part_name' => $part,
+        'condition' => $condition,
+        'notes' => $notes,
+    ];
+}
+$inspectionTripsRaw = $pdo->query("
+    SELECT t.trip_id, t.trip_number, t.status, t.truck_id, tr.plate_number
+    FROM trips t
+    JOIN trucks tr ON tr.truck_id = t.truck_id
+    WHERE t.status IN ('Assigned', 'Delivered')
+    ORDER BY t.created_at DESC
+    LIMIT 300
+")->fetchAll(PDO::FETCH_ASSOC);
+// Departure inspections after the departure packet (step 6), arrival
+// inspections after delivery details (step 11). The form keeps the legacy
+// labels: Assigned = 'Loading', Delivered = 'Unloading'.
+$inspectionTrips = [];
+foreach ($inspectionTripsRaw as $inspectionTrip) {
+    $step = tripWorkflowCurrentStep($pdo, (int)$inspectionTrip['trip_id']);
+    $isDeparture = $inspectionTrip['status'] === 'Assigned';
+    if ($step < ($isDeparture ? 6 : 11)) {
+        continue;
+    }
+    $inspectionTrip['status'] = $isDeparture ? 'Loading' : 'Unloading';
+    $inspectionTrips[] = $inspectionTrip;
 }
 $departureInspectionByTrip = [];
 foreach ($inspectionRows as $inspection) {
@@ -135,61 +231,91 @@ foreach ($inspectionRows as $inspection) {
 }
 
 // ── Checklists ────────────────────────────────────────────────────────────────
-$checklistSql = "
-    SELECT
-        mc.checklist_id,
-        mc.result,
-        mc.notes,
-        mc.submitted_at,
-        mc.lights_ok,
-        mc.tires_ok,
-        mc.tools_ok,
-        mc.medical_kit_ok,
-        mc.license_ok,
-        mc.or_cr_ok,
-        mc.waybill_ok,
-        mc.fuel_po_ok,
-        tr.plate_number,
-        tr.brand,
-        tr.model,
-        dr.status        AS dispatch_status,
-        t.trip_number,
-        u.full_name      AS submitted_by_name
-    FROM maintenance_checklists mc
-    JOIN trucks tr            ON mc.truck_id    = tr.truck_id
-    JOIN dispatch_requests dr ON mc.dispatch_id = dr.dispatch_id
-    LEFT JOIN trips t         ON mc.trip_id     = t.trip_id
-    JOIN users u              ON mc.submitted_by = u.user_id
-    ORDER BY mc.submitted_at DESC
-";
-$checklists = $pdo->query($checklistSql)->fetchAll(PDO::FETCH_ASSOC);
+// Departure inspections on the 'Pre-trip checklist' template (T-N1); each
+// legacy *_ok flag is that item's 'Good' result.
+$checklists = [];
+if ($checklistTemplateId > 0) {
+    $checklistStmt = $pdo->prepare("
+        SELECT vi.inspection_id AS checklist_id,
+               IF(vi.overall_result = 'Passed', 'Passed', 'Failed') AS result,
+               vi.remarks AS notes, vi.completed_at AS submitted_at,
+               tr.plate_number, tr.brand, tr.model,
+               dr.status AS dispatch_status, t.trip_number,
+               COALESCE(ue.full_name, u.username) AS submitted_by_name
+        FROM vehicle_inspections vi
+        JOIN trucks tr ON tr.truck_id = vi.truck_id
+        JOIN trips t ON t.trip_id = vi.trip_id
+        LEFT JOIN dispatch_requests dr ON dr.trip_id = t.trip_id
+        JOIN users u ON u.user_id = vi.inspected_by
+        LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+        WHERE vi.completed_at IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM inspection_findings f
+              JOIN inspection_items ii ON ii.inspection_item_id = f.inspection_item_id
+              WHERE f.inspection_id = vi.inspection_id AND ii.template_id = ?
+          )
+        ORDER BY vi.completed_at DESC
+        LIMIT 500
+    ");
+    $checklistStmt->execute([$checklistTemplateId]);
+    $checklists = $checklistStmt->fetchAll(PDO::FETCH_ASSOC);
+    $itemResults = $pdo->prepare("
+        SELECT f.inspection_id, ii.item_name, f.result
+        FROM inspection_findings f
+        JOIN inspection_items ii ON ii.inspection_item_id = f.inspection_item_id
+        WHERE ii.template_id = ?
+    ");
+    $itemResults->execute([$checklistTemplateId]);
+    $goodItems = [];
+    foreach ($itemResults->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $goodItems[(int)$row['inspection_id']][$row['item_name']] = $row['result'] === 'Good';
+    }
+    foreach ($checklists as &$checklistRow) {
+        foreach (CHECKLIST_ITEM_FIELDS as $field => $label) {
+            $checklistRow[$field] = !empty($goodItems[(int)$checklistRow['checklist_id']][$label]) ? 1 : 0;
+        }
+    }
+    unset($checklistRow);
+}
 
 // ── Dropdowns for forms ───────────────────────────────────────────────────────
-// Requires db/truck_image_migration.sql to have been applied — see
-// instructions/instructions.md, which now runs every db/*_migration.sql file
-// as a required setup step.
+// Truck photos come from documents (includes/truck_records.php).
 $trucks = $pdo->query("
-    SELECT truck_id, plate_number, brand, model, image_path,
-           image_front_path, image_side_path, image_rear_path, image_top_path,
-           COALESCE(body_type, 'Closed Van') AS body_type
-    FROM trucks
-    WHERE status != 'Inactive'
-    ORDER BY plate_number
+    SELECT " . truckProfileColumnsSql() . ",
+           COALESCE(t.body_details, 'Closed Van') AS body_type
+    FROM trucks t
+    WHERE t.status <> 'Unavailable'
+    ORDER BY t.plate_number
 ")->fetchAll(PDO::FETCH_ASSOC);
+foreach ($trucks as &$truckRow) {
+    $truckRow['image_path'] = $truckRow['image_front_path'];
+}
+unset($truckRow);
 $availableTrucks = $pdo->query("
     SELECT truck_id, plate_number, brand, model, status
     FROM trucks WHERE status IN ('Available', 'Under Maintenance') ORDER BY plate_number
 ")->fetchAll(PDO::FETCH_ASSOC);
+// Repair work orders: maintenance_records with record_source 'work_order'
+// (T-M2). Legacy 'Open' = target 'Reported'; the expected completion is a
+// date in the target.
 $workOrders = $pdo->query("
-    SELECT wo.work_order_id, wo.truck_id, wo.title, wo.description, wo.priority, wo.status,
-           wo.expected_completion_at, wo.opened_at, wo.closed_at, wo.closure_notes,
-           tr.plate_number, tr.brand, tr.model, creator.full_name AS created_by_name,
-           TIMESTAMPDIFF(MINUTE, wo.opened_at, COALESCE(wo.closed_at, NOW())) AS downtime_minutes
-    FROM repair_work_orders wo
-    JOIN trucks tr ON tr.truck_id = wo.truck_id
-    JOIN users creator ON creator.user_id = wo.created_by
-    ORDER BY FIELD(wo.status, 'Open', 'In Progress', 'Completed', 'Cancelled'),
-             wo.expected_completion_at IS NULL, wo.expected_completion_at, wo.opened_at DESC
+    SELECT mr.maintenance_id AS work_order_id, mr.truck_id, mr.reported_issue AS title,
+           mr.description, mr.work_order_priority AS priority,
+           CASE mr.status WHEN 'Reported' THEN 'Open' WHEN 'Scheduled' THEN 'Open'
+                          WHEN 'Waiting for Parts' THEN 'In Progress' ELSE mr.status END AS status,
+           mr.expected_completion_date AS expected_completion_at, mr.created_at AS opened_at,
+           mr.closed_at, mr.closure_notes,
+           tr.plate_number, tr.brand, tr.model,
+           COALESCE(ce.full_name, cu.username, '—') AS created_by_name,
+           TIMESTAMPDIFF(MINUTE, mr.created_at, COALESCE(mr.closed_at, NOW())) AS downtime_minutes
+    FROM maintenance_records mr
+    JOIN trucks tr ON tr.truck_id = mr.truck_id
+    LEFT JOIN users cu ON cu.user_id = mr.created_by
+    LEFT JOIN employees ce ON ce.employee_id = cu.employee_id
+    WHERE mr.record_source = 'work_order'
+    ORDER BY FIELD(mr.status, 'Reported', 'Scheduled', 'In Progress', 'Waiting for Parts', 'Completed', 'Cancelled'),
+             mr.expected_completion_date IS NULL, mr.expected_completion_date, mr.created_at DESC
+    LIMIT 500
 ")->fetchAll(PDO::FETCH_ASSOC);
 $preventiveSchedules = $pdo->query("
     SELECT pms.schedule_id, pms.truck_id, pms.service_name, pms.description,
@@ -257,60 +383,61 @@ foreach ($inspectionImageSets as $bodyType => $views) {
     }
 }
 
-// Approved dispatches without a passed checklist
-$pendingDispatchesSql = "
+// Approved dispatches whose trip is ready for the pre-trip checklist (step 6,
+// status Assigned) and has no passed checklist yet. dispatch_id is the
+// dispatch_request_id the checklist form posts.
+$pendingDispatchRows = $pdo->query("
     SELECT
-        dr.dispatch_id,
-        dr.truck_id,
+        dr.dispatch_request_id AS dispatch_id,
+        t.truck_id,
         t.trip_id,
         tr.plate_number,
         tr.brand,
         tr.model,
-        e.full_name  AS driver_name,
-        r.origin,
-        r.destination,
-        dr.scheduled_at
+        COALESCE(e.full_name, CONCAT('Employee #', e.employee_id)) AS driver_name,
+        COALESCE(r.origin, t.origin) AS origin,
+        COALESCE(r.destination, t.destination) AS destination,
+        t.scheduled_departure AS scheduled_at
     FROM dispatch_requests dr
-    JOIN trucks tr    ON dr.truck_id  = tr.truck_id
-    JOIN employees e  ON dr.driver_id = e.employee_id
-    JOIN routes r     ON dr.route_id  = r.route_id
-    LEFT JOIN trips t ON t.dispatch_id = dr.dispatch_id
-    WHERE dr.status = 'Approved'
-      AND NOT EXISTS (
-          SELECT 1 FROM maintenance_checklists mc
-          WHERE mc.dispatch_id = dr.dispatch_id AND mc.result = 'Passed'
-      )
-      AND (
-        NOT EXISTS (
-          SELECT 1 FROM trip_workflow_state tws
-          WHERE tws.dispatch_id = dr.dispatch_id
-        )
-        OR EXISTS (
-          SELECT 1 FROM trip_workflow_state tws
-          WHERE tws.dispatch_id = dr.dispatch_id AND tws.current_step >= 6
-        )
-      )
-    ORDER BY dr.scheduled_at ASC
-";
-$pendingDispatches = $pdo->query($pendingDispatchesSql)->fetchAll(PDO::FETCH_ASSOC);
+    JOIN trips t      ON t.trip_id = dr.trip_id
+    JOIN trucks tr    ON t.truck_id = tr.truck_id
+    LEFT JOIN employees e ON t.driver_id = e.employee_id
+    LEFT JOIN routes r ON t.route_id = r.route_id
+    WHERE dr.status = 'Approved' AND t.status = 'Assigned'
+    ORDER BY t.scheduled_departure ASC
+    LIMIT 300
+")->fetchAll(PDO::FETCH_ASSOC);
+$pendingDispatches = [];
+foreach ($pendingDispatchRows as $pendingDispatch) {
+    if (tripWorkflowCurrentStep($pdo, (int)$pendingDispatch['trip_id']) < 6) {
+        continue;
+    }
+    $passed = false;
+    if ($checklistTemplateId > 0) {
+        foreach (tripTemplateInspectionResults($pdo, (int)$pendingDispatch['trip_id'], $checklistTemplateId) as $row) {
+            $passed = $passed || $row['overall_result'] === 'Passed';
+        }
+    }
+    if (!$passed) {
+        $pendingDispatches[] = $pendingDispatch;
+    }
+}
 
 // Open incidents (for linking to a maintenance record)
-$openIncidentsSql = "
+$openIncidents = $pdo->query("
     SELECT
         i.incident_id,
         i.incident_type,
         t.trip_number,
         tr.plate_number
-    FROM incidents i
-    JOIN trips t              ON i.trip_id     = t.trip_id
-    JOIN dispatch_requests dr ON t.dispatch_id = dr.dispatch_id
-    JOIN trucks tr            ON dr.truck_id   = tr.truck_id
+    FROM trip_incidents i
+    JOIN trips t   ON i.trip_id = t.trip_id
+    JOIN trucks tr ON tr.truck_id = COALESCE(i.truck_id, t.truck_id)
     WHERE i.resolved_at IS NULL
-    ORDER BY i.reported_at DESC
-";
-$openIncidents = $pdo->query($openIncidentsSql)->fetchAll(PDO::FETCH_ASSOC);
+    ORDER BY i.incident_date DESC
+")->fetchAll(PDO::FETCH_ASSOC);
 
-$maintenanceTypes = ['Preventive', 'Corrective', 'Inspection'];
+$maintenanceTypes = MAINTENANCE_TYPES;
 $truckStatuses    = ['Operational', 'Scheduled Maintenance', 'Under Repair'];
 
 $checklistItems = [
@@ -341,6 +468,7 @@ $checklistItems = [
           <?php endforeach; ?>
         </select>
       </form>
+      <?php if (!$hideMaintenanceEntryButtons): ?>
       <button class="btn btn-mnt-secondary" data-bs-toggle="modal" data-bs-target="#checklistModal">
         <i class="bi bi-clipboard-check me-1"></i> New Checklist
       </button>
@@ -358,6 +486,7 @@ $checklistItems = [
               <?= empty($trucks) ? 'disabled title="No active trucks are available."' : '' ?>>
         <i class="bi bi-calendar-check me-1"></i> New PM Schedule
       </button>
+      <?php endif; ?>
     </div>
 
     <!-- Interactive vehicle inspection -->
@@ -1022,7 +1151,7 @@ $checklistItems = [
             <label class="form-label mnt-label" for="recInspectionId">Vehicle Inspection (optional)</label>
             <select class="form-select mnt-input" id="recInspectionId">
               <option value="">— None —</option>
-              <?php foreach ($inspectionRows as $inspection): ?>
+              <?php foreach (array_filter($inspectionRows, static fn(array $row): bool => (int)$row["inspection_id"] > 0) as $inspection): ?>
               <option value="<?= $inspection['inspection_id'] ?>" data-truck-id="<?= $inspection['truck_id'] ?>">
                 <?= htmlspecialchars($inspection['plate_number']) ?> — <?= date('M d, Y', strtotime($inspection['inspection_date'])) ?>
               </option>

@@ -106,10 +106,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!bsModal) return;
     modalTripNum.textContent  = tripNumber;
     modalTripId.value         = tripId;
+    // Same transitions as ajax/update_trip_status.php (target trip statuses).
+    // Earlier steps (assignment, clearance, delivery details, inspections)
+    // happen on the trip workflow page.
     const nextStatuses = {
-      'Loading': ['In Transit', 'Cancelled'],
-      'In Transit': ['Unloading', 'Cancelled'],
-      'Unloading': ['Completed', 'Cancelled'],
+      'Approved': ['Cancelled'],
+      'Assigned': ['Cancelled'],
+      'Ready for Dispatch': ['Cancelled'],
+      'Dispatched': ['In Progress', 'Cancelled'],
+      'In Progress': ['Delivered', 'Cancelled'],
+      'Delivered': ['Completed', 'Cancelled'],
+      'Returned': ['Completed'],
     }[currentStatus] || [];
     modalStatus.replaceChildren(...nextStatuses.map(status => {
       const option = document.createElement('option');
@@ -156,12 +163,29 @@ document.addEventListener('DOMContentLoaded', () => {
         fd.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
         const scope = `trip.status:${tripId}`;
         const headers = window.fleetOpsIdempotencyHeaders(scope);
-        const res = await fetch(window.APP_BASE + '/ajax/update_trip_status.php', {
+        const send = () => fetch(window.APP_BASE + '/ajax/update_trip_status.php', {
           method: 'POST',
           headers,
           body: fd,
         });
-        const result = await res.json();
+        let res = await send();
+        let result = await res.json();
+
+        // HTTP 422: Admin override reason required. Ask once and retry once
+        // with the same headers, so the same idempotency key is reused.
+        if (res.status === 422) {
+          const answer = window.prompt(
+            `${result.message || 'This action needs an Admin override reason.'}\n\nAdmin override reason (required, up to 500 characters):`
+          );
+          const reason = answer === null ? '' : answer.trim();
+          if (!reason || Array.from(reason).length > 500) {
+            alert('Cancelled: an Admin override reason of 1 to 500 characters is required. Nothing was saved.');
+            return;
+          }
+          fd.append('override_reason', reason);
+          res = await send();
+          result = await res.json();
+        }
 
         if (result.success) {
           window.fleetOpsCompleteIdempotency(scope);

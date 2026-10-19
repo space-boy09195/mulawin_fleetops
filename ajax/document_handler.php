@@ -9,6 +9,7 @@ require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
 require_once __DIR__ . '/../includes/attachments.php';
 require_once __DIR__ . '/../includes/document_storage.php';
+require_once __DIR__ . '/../includes/document_upload.php';
 require_once __DIR__ . '/../includes/upload_validation.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 
@@ -31,11 +32,8 @@ if ($action === 'upload') {
     $tripId      = filter_input(INPUT_POST, 'trip_id', FILTER_VALIDATE_INT) ?: null;
     $description = optionalString('description');
     $expiryDate = optionalString('expiry_date', null, 10);
-    if ($expiryDate !== null) {
-        $parsedExpiry = DateTime::createFromFormat('Y-m-d', $expiryDate);
-        if (!$parsedExpiry || $parsedExpiry->format('Y-m-d') !== $expiryDate) {
-            jsonFail('Expiry date must be a valid date.');
-        }
+    if ($expiryDate !== null && !isValidDate($expiryDate)) {
+        jsonFail('Expiry date must be a valid date.');
     }
 
     $file = $_FILES['file'];
@@ -45,9 +43,6 @@ if ($action === 'upload') {
         jsonFail($e->getMessage());
     }
     $origName = $upload['original_name'];
-    $tmpPath  = $file['tmp_name'];
-    $fileSize = $upload['size'];
-    $mimeType = $upload['mime_type'];
 
     try {
         $uploadDir = documentStorageDirectory() . DIRECTORY_SEPARATOR;
@@ -56,18 +51,17 @@ if ($action === 'upload') {
         jsonFail('Document storage is unavailable. Please contact an administrator.', 500);
     }
 
-    // UUID-based stored filename to prevent collisions and enumeration
+    // Random stored filename to prevent collisions and enumeration
     $ext        = $upload['extension'];
     $storedName = sprintf('%s.%s', bin2hex(random_bytes(16)), $ext);
     $destPath   = $uploadDir . $storedName;
-    $filePath   = documentStorageReference($storedName);
     $requestKey = requestIdempotencyKey();
     if ($requestKey === null) {
         jsonFail('Missing or invalid request idempotency key.', 400);
     }
 
-    if (!move_uploaded_file($tmpPath, $destPath)) {
-        error_log('document_handler: move_uploaded_file failed for ' . $origName);
+    if (!move_uploaded_file($file['tmp_name'], $destPath)) {
+        error_log('document_handler: move_uploaded_file failed for an upload');
         jsonFail('Failed to save file. Please try again.');
     }
 
@@ -78,33 +72,34 @@ if ($action === 'upload') {
             if (is_file($destPath)) unlink($destPath);
             jsonFail('This document upload has already been processed.', 409);
         }
-        // Requires db/document_expiry_migration.sql to have been applied — see
-        // instructions/instructions.md, which now runs every db/*_migration.sql
-        // file as a required setup step rather than a hand-picked subset.
-        $stmt = $pdo->prepare("INSERT INTO documents (uploaded_by, trip_id, doc_type, file_name, stored_name, file_path, file_size, mime_type, description, expiry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([currentUserId(), $tripId, $docType, $origName, $storedName, $filePath, $fileSize, $mimeType, $description, $expiryDate]);
-        $newId = (int)$pdo->lastInsertId();
-        if ($tripId !== null) {
-            attachDocumentToEntity(
-                $pdo,
-                $newId,
-                'trip',
-                $tripId,
-                $docType,
-                currentUserId(),
-                $description
-            );
-        }
+        $newId = recordStoredDocument(
+            $pdo,
+            $upload,
+            $storedName,
+            $destPath,
+            $docType,
+            $description,
+            'all',
+            currentUserId(),
+            $expiryDate,
+            $tripId !== null ? [['trip', $tripId]] : []
+        );
 
         auditLog('UPLOAD_DOCUMENT', 'documents', $newId, null, [
             'file_name' => $origName,
             'doc_type'  => $docType,
-            'file_size' => $fileSize,
+            'file_size' => $upload['size'],
             'trip_id'   => $tripId,
         ]);
         $pdo->commit();
 
         jsonOk(['id' => $newId], 'Document uploaded successfully.');
+    } catch (InvalidArgumentException $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if (file_exists($destPath)) unlink($destPath);
+        jsonFail($e->getMessage());
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
@@ -122,27 +117,47 @@ if ($action === 'delete') {
 
     $docId = requiredInt('document_id', 'Document ID', 1);
 
-    $doc = findOrFail($pdo, 'documents', 'document_id', $docId, 'Document not found.');
+    // Same visibility rule as document_download.php. A missing document and
+    // one outside the user's scope get the same not-found response.
+    $params = [$docId];
+    $visibility = documentVisibilitySql(documentVisibilityScopesForCurrentUser(), 'd', $params);
+    $docQuery = $pdo->prepare(
+        "SELECT d.document_id, f.original_name AS file_name
+         FROM documents d
+         JOIN files f ON f.file_id = d.file_id
+         WHERE d.document_id = ? $visibility"
+    );
+    $docQuery->execute($params);
+    $doc = $docQuery->fetch(PDO::FETCH_ASSOC);
+    if (!$doc) {
+        jsonFail('Document not found.', 404);
+    }
 
-    // Check not referenced in billing_documents
-    $billingRef = $pdo->prepare("SELECT billing_id FROM billing_documents WHERE document_id = ? LIMIT 1");
-    $billingRef->execute([$docId]);
-    if ($billingRef->fetch()) {
+    // Billing support documents stay with their billing record.
+    if (documentHasLink($pdo, $docId, 'billing')) {
         jsonFail('This document is linked to a billing record and cannot be deleted.');
     }
 
     $deletedByName = $_SESSION['full_name'] ?? 'Unknown user';
 
-    $archived = archiveAndDelete($pdo, 'documents', 'document_id', $docId, currentUserId(), $deletedByName);
-
-    if (!$archived) {
-        jsonFail('Document not found or could not be deleted.', 404);
+    $pdo->beginTransaction();
+    try {
+        // The physical file and its files row stay, so a recycle-bin restore
+        // can recover the archived document and its links.
+        $archived = archiveAndDelete($pdo, 'documents', 'document_id', $docId, currentUserId(), $deletedByName, $doc['file_name']);
+        if (!$archived) {
+            $pdo->rollBack();
+            jsonFail('Document not found or could not be deleted.', 404);
+        }
+        auditLog('DELETE_DOCUMENT', 'documents', $docId, ['file_name' => $doc['file_name']], null);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('document_handler/delete: ' . $e->getMessage());
+        jsonFail('A database error occurred. Please try again.', 500);
     }
-
-    // The physical file stays in configured storage so a recycle-bin restore
-    // can recover the archived document row.
-
-    auditLog('DELETE_DOCUMENT', 'documents', $docId, ['file_name' => $doc['file_name']], null);
 
     jsonOk([], 'Document deleted. It can be restored from the Recycle Bin if needed.');
 }

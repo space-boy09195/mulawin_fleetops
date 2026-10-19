@@ -67,6 +67,17 @@
   transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
 }
 
+.dh-department {
+  margin-bottom: 1rem;
+}
+
+.dh-department > h2 {
+  margin: 0 0 0.55rem;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 650;
+}
+
 .dh-stat-card:hover,
 .dh-widget:hover,
 .dh-rec-panel:hover {

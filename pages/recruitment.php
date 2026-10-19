@@ -1,24 +1,39 @@
 <?php
+http_response_code(404);
+exit;
+
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/recruitment.php';
 
 requireAnyPermission(['hr.recruitment.view', 'hr.recruitment.manage']);
 $pdo = getDBConnection();
 $canManage = currentUserHasAnyPermission(['hr.recruitment.manage']);
-$candidates = $pdo->query(
-    'SELECT candidate_number, full_name, desired_position, phone, email, applied_on, source, status, notes
-     FROM recruitment_candidates ORDER BY applied_on DESC, candidate_id DESC LIMIT 300'
+$rows = $pdo->query(
+    'SELECT recruitment_id, applicant_name AS full_name, position AS desired_position,
+            contact_number AS phone, application_date AS applied_on, status, notes
+     FROM recruitment_records ORDER BY application_date DESC, recruitment_id DESC LIMIT 300'
 )->fetchAll(PDO::FETCH_ASSOC);
-$statuses = ['New','Screening','Interview','Reference Check','Offer','Hired','Rejected','Withdrawn'];
+// Candidate number, email and source in the legacy shape (includes/recruitment.php).
+$candidates = [];
+foreach ($rows as $row) {
+    $parts = recruitmentSplitNotes($row['notes']);
+    $row['candidate_number'] = recruitmentCandidateNumber((int)$row['recruitment_id']);
+    $row['email'] = $parts['email'];
+    $row['source'] = $parts['source'];
+    $row['notes'] = $parts['notes'];
+    $candidates[] = $row;
+}
+$statuses = RECRUITMENT_STATUSES;
 layoutHead('Recruitment');
 ?>
-<div class="page-header"><h1 class="page-title">Recruitment</h1><p class="page-subtitle">Track applicants through screening, interviews, offers, and hiring.</p></div>
+<div class="page-header"><h1 class="page-title">Recruitment</h1><p class="page-subtitle">Track applicants through screening, interviews, and acceptance.</p></div>
 <div id="recruitmentFeedback" class="alert d-none" role="alert"></div>
 <?php if ($canManage): ?>
 <div class="card mb-4"><div class="card-header-custom"><h2 class="card-title-custom">Add candidate</h2></div><div class="card-body-custom">
 <form id="candidateForm" class="row g-3">
-<div class="col-md-4"><label class="form-label" for="candidateName">Full name</label><input class="form-control" id="candidateName" maxlength="150" required></div>
+<div class="col-md-4"><label class="form-label" for="candidateName">Full name</label><input class="form-control" id="candidateName" maxlength="180" required></div>
 <div class="col-md-4"><label class="form-label" for="candidatePosition">Desired position</label><input class="form-control" id="candidatePosition" maxlength="100" required></div>
 <div class="col-md-4"><label class="form-label" for="candidateDate">Application date</label><input class="form-control" id="candidateDate" type="date" value="<?= date('Y-m-d') ?>" required></div>
 <div class="col-md-4"><label class="form-label" for="candidatePhone">Phone</label><input class="form-control" id="candidatePhone" maxlength="50"></div>

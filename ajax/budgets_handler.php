@@ -18,7 +18,9 @@ require_once __DIR__ . '/../includes/validate.php';
 
 header('Content-Type: application/json');
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+// Budgets: budgets.manage. Until that permission exists in the database only
+// Admin passes (Admin passes every permission check).
+requirePermission('budgets.manage');
 requirePostMethod();
 enforceCsrf();
 

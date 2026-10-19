@@ -2,30 +2,24 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/crew_trip_access.php';
+require_once __DIR__ . '/../includes/trip_queries.php';
+require_once __DIR__ . '/../includes/trip_workflow.php';
 
-requirePermission('trips.view');
+// trips.view, or a Helper limited to trips assigned to them.
+$helperEmployeeId = tripPageAccess(['trips.view']);
 
 $tripId = filter_input(INPUT_GET, 'trip_id', FILTER_VALIDATE_INT);
 if (!$tripId) {
     http_response_code(400);
     exit('Invalid trip.');
 }
+if ($helperEmployeeId !== null) {
+    requireHelperAssignedToTrip((int)$tripId, $helperEmployeeId);
+}
 
 $pdo = getDBConnection();
-$tripQuery = $pdo->prepare(
-    'SELECT t.trip_id, t.dispatch_id, t.trip_number, t.status,
-            dr.requested_by, dr.truck_id, dr.driver_id, dr.second_driver_id, dr.helper_id,
-            dr.scheduled_at, dr.expected_arrival,
-            dr.client_name, dr.unit_count, dr.waybill_reference,
-            tr.plate_number, driver.full_name AS driver_name,
-            route.origin, route.destination
-     FROM trips t
-     JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
-     JOIN trucks tr ON tr.truck_id = dr.truck_id
-     JOIN employees driver ON driver.employee_id = dr.driver_id
-     JOIN routes route ON route.route_id = dr.route_id
-     WHERE t.trip_id = ?'
-);
+$tripQuery = $pdo->prepare(tripSelectSql() . ' WHERE t.trip_id = ?');
 $tripQuery->execute([$tripId]);
 $trip = $tripQuery->fetch(PDO::FETCH_ASSOC);
 if (!$trip) {
@@ -33,121 +27,137 @@ if (!$trip) {
     exit('Trip not found.');
 }
 
-$stateQuery = $pdo->prepare('SELECT * FROM trip_workflow_state WHERE dispatch_id = ?');
-$stateQuery->execute([(int)$trip['dispatch_id']]);
-$workflow = $stateQuery->fetch(PDO::FETCH_ASSOC) ?: null;
+// The workflow is tracked for every trip with a dispatch request (target
+// trips are always created through one, D2).
+$workflow = $trip['dispatch_id'] !== null;
 $events = [];
 $eventSteps = [];
 $documents = 0;
 $checklistResult = null;
-$departureFindingCount = 0;
-$departureNeedsAttention = 0;
-$returnFindingCount = 0;
+$departureSummary = ['required' => 0, 'covered' => 0, 'flagged' => 0, 'completed_inspections' => 0];
+$arrivalSummary = $departureSummary;
 $approvedAllowances = [];
+$tripAllowanceRequests = [];
+$activeTripAllowanceRequest = null;
 $deliveryDetails = null;
+$packetDetails = null;
 
 if ($workflow) {
     $eventQuery = $pdo->prepare(
-        'SELECT e.step_number, e.details, e.event_at, e.event_key,
-                u.full_name AS actor_name
-         FROM trip_workflow_events e
-         JOIN users u ON u.user_id = e.actor_user_id
-         WHERE e.dispatch_id = ?
-         ORDER BY e.event_at, e.event_id'
+        "SELECT e.workflow_event_id, e.event_type AS event_key, e.remarks AS details,
+                e.created_at AS event_at,
+                COALESCE(ae.full_name, u.username, 'System') AS actor_name
+         FROM workflow_events e
+         LEFT JOIN users u ON u.user_id = e.performed_by
+         LEFT JOIN employees ae ON ae.employee_id = u.employee_id
+         WHERE e.entity_type = 'trip' AND e.entity_id = ?
+         ORDER BY e.created_at, e.workflow_event_id"
     );
-    $eventQuery->execute([(int)$trip['dispatch_id']]);
+    $eventQuery->execute([$tripId]);
     $events = $eventQuery->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($events as $event) {
-        if ((int)$event['step_number'] > 0) {
-            $eventSteps[(int)$event['step_number']] = true;
+    foreach ($events as &$event) {
+        $step = tripWorkflowStepForKey((string)$event['event_key']);
+        $event['step_number'] = $step;
+        if ($step !== null && $step > 0) {
+            $eventSteps[$step] = true;
+        } elseif ($step === 0) {
+            $eventSteps[0] = true;
+        }
+        if ($event['event_key'] === 'departure-packet-prepared') {
+            $decoded = json_decode((string)$event['details'], true);
+            if (is_array($decoded)) {
+                $packetDetails = $decoded;
+                $event['details'] = 'Documents: ' . ($decoded['documents_status'] ?? '—')
+                    . (!empty($decoded['documents_notes']) ? ' — ' . $decoded['documents_notes'] : '')
+                    . '. Allowance: ' . ($decoded['allowance_status'] ?? '—')
+                    . (!empty($decoded['allowance_notes']) ? ' — ' . $decoded['allowance_notes'] : '')
+                    . '.';
+            }
         }
     }
+    unset($event);
 
     $documentQuery = $pdo->prepare(
-        "SELECT COUNT(*) FROM documents
-         WHERE trip_id = ? AND visibility_scope IN ('all', 'operations')"
+        "SELECT COUNT(*)
+         FROM document_links dl
+         JOIN documents d ON d.document_id = dl.document_id
+         WHERE dl.entity_type = 'trip' AND dl.entity_id = ?
+           AND COALESCE(d.visibility_scope, 'all') IN ('all', 'operations')"
     );
     $documentQuery->execute([$tripId]);
     $documents = (int)$documentQuery->fetchColumn();
 
-    $checklistQuery = $pdo->prepare(
-        "SELECT result FROM maintenance_checklists
-         WHERE dispatch_id = ? ORDER BY submitted_at DESC LIMIT 1"
-    );
-    $checklistQuery->execute([(int)$trip['dispatch_id']]);
-    $checklistResult = $checklistQuery->fetchColumn() ?: null;
-
-    $inspectionQuery = $pdo->prepare(
-        "SELECT COUNT(*) AS finding_count,
-                SUM(vif.`condition` <> 'Good') AS non_good_count
-         FROM vehicle_inspections vi
-         JOIN vehicle_inspection_findings vif ON vif.inspection_id = vi.inspection_id
-         WHERE vi.trip_id = ? AND vi.inspection_stage = 'Departure'"
-    );
-    $inspectionQuery->execute([$tripId]);
-    $departureInspection = $inspectionQuery->fetch(PDO::FETCH_ASSOC);
-    $departureFindingCount = (int)($departureInspection['finding_count'] ?? 0);
-    $departureNeedsAttention = (int)($departureInspection['non_good_count'] ?? 0);
-
-    $returnQuery = $pdo->prepare(
-        "SELECT COUNT(*)
-         FROM vehicle_inspections vi
-         JOIN vehicle_inspection_findings vif ON vif.inspection_id = vi.inspection_id
-         WHERE vi.trip_id = ? AND vi.inspection_stage = 'Return'"
-    );
-    $returnQuery->execute([$tripId]);
-    $returnFindingCount = (int)$returnQuery->fetchColumn();
+    // The target merges the legacy pre-trip checklist and the departure
+    // inspection into departure vehicle inspections (inspection templates).
+    $departureSummary = tripInspectionSummary($pdo, $tripId, 'Departure');
+    $arrivalSummary = tripInspectionSummary($pdo, $tripId, 'Arrival');
+    if ($departureSummary['completed_inspections'] > 0) {
+        $checklistResult = tripDepartureChecksPassed($pdo, $tripId) ? 'Passed' : 'Incomplete or flagged';
+    }
 
     $allowanceQuery = $pdo->prepare(
         "SELECT fund_request_id, request_number, purpose, amount, status
          FROM fund_requests
          WHERE trip_id = ? AND request_type = 'Trip Allowance'
-           AND status IN ('Approved', 'Disbursed')
-         ORDER BY requested_at DESC"
+         ORDER BY created_at DESC"
     );
     $allowanceQuery->execute([$tripId]);
-    $approvedAllowances = $allowanceQuery->fetchAll(PDO::FETCH_ASSOC);
+    $tripAllowanceRequests = $allowanceQuery->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($tripAllowanceRequests as $allowanceRequest) {
+        if (in_array($allowanceRequest['status'], ['Approved', 'Processing', 'Disbursed', 'Settled'], true)) {
+            $approvedAllowances[] = $allowanceRequest;
+        }
+        if ($activeTripAllowanceRequest === null
+            && in_array($allowanceRequest['status'], ['Pending Approval', 'Approved', 'Processing', 'Disbursed', 'Settled'], true)) {
+            $activeTripAllowanceRequest = $allowanceRequest;
+        }
+    }
 
-    $deliveryQuery = $pdo->prepare(
-        'SELECT * FROM trip_delivery_return_details WHERE trip_id = ?'
-    );
+    $deliveryQuery = $pdo->prepare('SELECT * FROM trip_deliveries WHERE trip_id = ?');
     $deliveryQuery->execute([$tripId]);
-    $deliveryDetails = $deliveryQuery->fetch(PDO::FETCH_ASSOC) ?: null;
+    $returnQuery = $pdo->prepare('SELECT * FROM trip_returns WHERE trip_id = ?');
+    $returnQuery->execute([$tripId]);
+    $deliveryDetails = tripDeliveryFormValues(
+        $deliveryQuery->fetch(PDO::FETCH_ASSOC) ?: null,
+        $returnQuery->fetch(PDO::FETCH_ASSOC) ?: null
+    );
 }
 
-$isDispatcher = currentRoleId() === ROLE_ADMIN
+$isDispatcher = isAdmin()
     || (int)$trip['requested_by'] === currentUserId();
 $canDispatchWorkflow = $isDispatcher && currentUserHasAnyPermission(['trips.assign']);
+$canRequestTripAllowance = $canDispatchWorkflow
+    && currentUserHasAnyPermission(['finance.trip_allowance.request']);
 $canUpdateWorkflow = $isDispatcher && currentUserHasAnyPermission(['trips.update']);
 $canClear = currentUserHasAnyPermission(['dispatch.clear']);
-$currentStep = $workflow ? (int)$workflow['current_step'] : 0;
+$currentStep = $workflow ? tripWorkflowCurrentStep($pdo, $tripId) : 0;
 
-$canReassign = $canDispatchWorkflow && $currentStep === 4 && $trip['status'] === 'Loading'
-    && $workflow && $workflow['assignment_confirmed_at'] === null;
+$canReassign = $canDispatchWorkflow && $currentStep === 4 && $trip['status'] === 'Approved';
 $reassignTrucks = [];
 $reassignDrivers = [];
 $reassignHelpers = [];
 if ($canReassign) {
-    // Include the currently assigned truck even though it's "Deployed" for this
-    // trip, so the current selection still shows up in the dropdown.
+    // Include the currently assigned truck even though it is 'Assigned' to
+    // this trip, so the current selection still shows up in the dropdown.
+    // Replacement trucks must be the same type as the trip.
     $reassignTrucks = $pdo->prepare(
         "SELECT truck_id, plate_number, brand, model
          FROM trucks
-         WHERE status = 'Available' OR truck_id = ?
+         WHERE (status = 'Available' AND truck_type = ?) OR truck_id = ?
          ORDER BY plate_number"
     );
-    $reassignTrucks->execute([(int)$trip['truck_id']]);
+    $reassignTrucks->execute([(string)$trip['trip_type'], (int)$trip['truck_id']]);
     $reassignTrucks = $reassignTrucks->fetchAll(PDO::FETCH_ASSOC);
 
     $reassignDrivers = $pdo->query(
         "SELECT employee_id, full_name FROM employees
-         WHERE is_active = 1 AND license_number IS NOT NULL
+         WHERE employment_status = 'Active' AND license_number IS NOT NULL
          ORDER BY full_name"
     )->fetchAll(PDO::FETCH_ASSOC);
 
     $reassignHelpers = $pdo->query(
         "SELECT employee_id, full_name FROM employees
-         WHERE is_active = 1 ORDER BY full_name"
+         WHERE employment_status = 'Active' ORDER BY full_name"
     )->fetchAll(PDO::FETCH_ASSOC);
 }
 
@@ -233,10 +243,10 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
           <tbody>
           <?php foreach (array_reverse($events) as $event): ?>
           <tr>
-            <td><?= (int)$event['step_number'] === 0 ? 'Cancelled' : (int)$event['step_number'] ?></td>
+            <td><?= $event['step_number'] === null ? '—' : ((int)$event['step_number'] === 0 ? 'Cancelled' : (int)$event['step_number']) ?></td>
             <td>
               <?= htmlspecialchars($event['details'] ?? $event['event_key']) ?>
-              <?php if ($event['step_number'] === '10'): ?>
+              <?php if ($event['step_number'] === 10): ?>
               <div class="small text-muted"><?= htmlspecialchars($event['event_key']) ?></div>
               <?php endif; ?>
             </td>
@@ -321,7 +331,7 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
     </div>
     <?php endif; ?>
 
-    <?php if ($canDispatchWorkflow && $currentStep === 4 && $trip['status'] === 'Loading'): ?>
+    <?php if ($canDispatchWorkflow && $currentStep === 4 && $trip['status'] === 'Approved'): ?>
     <div class="card p-3 mb-4">
       <h2 class="h5">Step 5 · Confirm assignment</h2>
       <p class="text-muted">The approved truck and driver are reserved for this trip.</p>
@@ -333,10 +343,51 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
     </div>
     <?php endif; ?>
 
-    <?php if ($canDispatchWorkflow && $currentStep === 5 && $trip['status'] === 'Loading'): ?>
+    <?php if ($canDispatchWorkflow && $currentStep === 5 && $trip['status'] === 'Assigned'): ?>
     <div class="card p-3 mb-4">
       <h2 class="h5">Step 6 · Prepare documents and allowance</h2>
       <p class="text-muted">No document categories are mandatory. “Prepared” requires at least one uploaded trip document.</p>
+      <?php if ($canRequestTripAllowance): ?>
+      <div class="border rounded p-3 mb-3">
+        <h3 class="h6">Trip Allowance Request</h3>
+        <p class="small text-muted">Submit a Trip Allowance request for this trip. It remains subject to the existing approval process; this does not grant access to cash advances, operating funds, or disbursement actions.</p>
+        <?php if ($tripAllowanceRequests): ?>
+        <ul class="small mb-3">
+          <?php foreach ($tripAllowanceRequests as $allowanceRequest): ?>
+          <li>
+            <?= htmlspecialchars($allowanceRequest['request_number']) ?> ·
+            <?= htmlspecialchars($allowanceRequest['status']) ?> ·
+            ₱<?= number_format((float)$allowanceRequest['amount'], 2) ?>
+          </li>
+          <?php endforeach; ?>
+        </ul>
+        <?php endif; ?>
+        <?php if ($activeTripAllowanceRequest): ?>
+        <div class="alert alert-info py-2 mb-0">
+          An active allowance request already exists. Record departure preparation after its approval or rejection.
+        </div>
+        <?php else: ?>
+        <form id="tripAllowanceRequestForm">
+          <input type="hidden" name="action" value="create_fund_request">
+          <input type="hidden" name="request_type" value="Trip Allowance">
+          <input type="hidden" name="trip_id" value="<?= $tripId ?>">
+          <div class="mb-3">
+            <label class="form-label" for="tripAllowancePurpose">Purpose</label>
+            <input class="form-control" id="tripAllowancePurpose" name="purpose" maxlength="255" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="tripAllowanceAmount">Amount (₱)</label>
+            <input class="form-control" id="tripAllowanceAmount" name="amount" type="number" min="0.01" step="0.01" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="tripAllowanceNotes">Notes <span class="text-muted">(optional)</span></label>
+            <textarea class="form-control" id="tripAllowanceNotes" name="notes" rows="2" maxlength="2000"></textarea>
+          </div>
+          <button class="btn btn-outline-primary" type="submit">Submit allowance request</button>
+        </form>
+        <?php endif; ?>
+      </div>
+      <?php endif; ?>
       <p><a href="<?= APP_BASE ?>/pages/documents.php?trip_id=<?= $tripId ?>">Upload or review trip documents</a> (<?= $documents ?> linked)</p>
       <form class="trip-workflow-form" id="departurePreparationForm">
         <input type="hidden" name="action" value="prepare_departure">
@@ -355,7 +406,10 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
         <div class="mb-3">
           <label class="form-label" for="allowanceStatus">Trip allowance</label>
           <select class="form-select" id="allowanceStatus" name="allowance_status" required>
-            <option value="Not Required">Not required</option>
+            <?php if ($activeTripAllowanceRequest): ?>
+            <option value="" selected disabled>Awaiting allowance decision</option>
+            <?php endif; ?>
+            <option value="Not Required" <?= $activeTripAllowanceRequest ? 'disabled' : '' ?>>Not required</option>
             <option value="Approved">Approved or disbursed fund request</option>
           </select>
         </div>
@@ -384,14 +438,16 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
 
     <div class="card p-3 mb-4">
       <h2 class="h5">Step 7 · Pre-departure checks</h2>
-      <p class="mb-1">Maintenance checklist: <strong><?= htmlspecialchars($checklistResult ?? 'Not submitted') ?></strong></p>
-      <p class="mb-1">Departure inspection: <strong><?= $departureFindingCount ?>/24 findings</strong>
-        <?= $departureFindingCount >= 24 && $departureNeedsAttention === 0 ? '· All good' : '· Incomplete or needs attention' ?>
+      <p class="mb-1">Departure checks: <strong><?= htmlspecialchars($checklistResult ?? 'Not submitted') ?></strong></p>
+      <?php if ($departureSummary['required'] === 0): ?>
+      <p class="mb-1 text-danger">No active departure inspection template is configured. Departure stays blocked until an inspection template is set up.</p>
+      <?php else: ?>
+      <p class="mb-1">Departure inspection: <strong><?= (int)$departureSummary['covered'] ?>/<?= (int)$departureSummary['required'] ?> required items passed</strong>
+        <?= $departureSummary['covered'] >= $departureSummary['required'] ? '· All good' : '· Incomplete or needs attention' ?>
       </p>
+      <?php endif; ?>
       <?php if (currentUserHasAnyPermission(['maintenance.manage'])): ?>
       <div class="mt-2">
-        <a href="<?= APP_BASE ?>/pages/maintenance.php?trip_id=<?= $tripId ?>#checklistModal">Open pre-trip checklist</a>
-        <span class="mx-1">·</span>
         <a href="<?= APP_BASE ?>/pages/maintenance.php?trip_id=<?= $tripId ?>&amp;inspection_stage=Departure#inspectionModal">Open departure inspection</a>
       </div>
       <?php else: ?>
@@ -399,7 +455,7 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
       <?php endif; ?>
     </div>
 
-    <?php if ($canClear && $currentStep === 7 && $trip['status'] === 'Loading'): ?>
+    <?php if ($canClear && $currentStep === 7 && $trip['status'] === 'Ready for Dispatch'): ?>
     <div class="card p-3 mb-4">
       <h2 class="h5">Step 8 · Operations Head dispatch clearance</h2>
       <form class="trip-workflow-form">
@@ -412,7 +468,7 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
     </div>
     <?php endif; ?>
 
-    <?php if ($canUpdateWorkflow && $trip['status'] === 'In Transit' && $currentStep >= 9): ?>
+    <?php if ($canUpdateWorkflow && $trip['status'] === 'In Progress' && $currentStep >= 9): ?>
     <div class="card p-3 mb-4">
       <h2 class="h5">Step 10 · Record trip progress</h2>
       <form class="trip-workflow-form">
@@ -427,7 +483,7 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
     </div>
     <?php endif; ?>
 
-    <?php if ($canUpdateWorkflow && $trip['status'] === 'In Transit' && $currentStep >= 10): ?>
+    <?php if ($canUpdateWorkflow && $trip['status'] === 'In Progress' && $currentStep >= 10): ?>
     <div class="card p-3 mb-4">
       <h2 class="h5">Step 11 · Delivery and return details</h2>
       <?php if ($deliveryDetails): ?>
@@ -449,6 +505,12 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
         <label class="form-label" for="coLoadReference">Co-load reference <span class="text-muted">(optional)</span></label>
         <input class="form-control mb-3" id="coLoadReference" name="co_load_reference" maxlength="100"
                value="<?= htmlspecialchars($deliveryDetails['co_load_reference'] ?? '') ?>">
+        <label class="form-label" for="deliveredAt">Delivered at <span class="text-muted">(optional; defaults to now)</span></label>
+        <input class="form-control mb-3" type="datetime-local" id="deliveredAt" name="delivered_at"
+               max="<?= date('Y-m-d\TH:i') ?>">
+        <label class="form-label" for="receivedBy">Received by <span class="text-muted">(optional)</span></label>
+        <input class="form-control mb-3" id="receivedBy" name="received_by" maxlength="150"
+               value="<?= htmlspecialchars($deliveryDetails['received_by'] ?? '') ?>">
         <label class="form-label" for="deliveryNotes">Delivery details</label>
         <textarea class="form-control mb-3" id="deliveryNotes" name="delivery_notes" rows="3" maxlength="4000" required><?= htmlspecialchars($deliveryDetails['delivery_notes'] ?? '') ?></textarea>
         <label class="form-label" for="returnLocation">Return location <span class="text-muted">(optional)</span></label>
@@ -463,13 +525,18 @@ layoutHead('Trip Workflow', APP_BASE . '/assets/css/trip_monitor.css');
 
     <div class="card p-3">
       <h2 class="h5">Step 12 · Arrival checklist</h2>
-      <p class="mb-1">Return inspection: <strong><?= $returnFindingCount ?>/24 findings</strong></p>
+      <?php if ($arrivalSummary['required'] === 0): ?>
+      <p class="mb-1 text-danger">No active arrival inspection template is configured. Completion stays blocked until an inspection template is set up.</p>
+      <?php else: ?>
+      <p class="mb-1">Arrival inspection: <strong><?= (int)$arrivalSummary['covered'] ?>/<?= (int)$arrivalSummary['required'] ?> required items recorded</strong>
+        <?= $arrivalSummary['flagged'] > 0 ? '· ' . (int)$arrivalSummary['flagged'] . ' flagged finding(s)' : '' ?></p>
+      <?php endif; ?>
       <?php if (currentUserHasAnyPermission(['maintenance.manage'])): ?>
-      <div class="mt-2"><a href="<?= APP_BASE ?>/pages/maintenance.php?trip_id=<?= $tripId ?>&amp;inspection_stage=Return#inspectionModal">Open return vehicle inspection</a></div>
+      <div class="mt-2"><a href="<?= APP_BASE ?>/pages/maintenance.php?trip_id=<?= $tripId ?>&amp;inspection_stage=Arrival#inspectionModal">Open arrival vehicle inspection</a></div>
       <?php else: ?>
       <div class="small text-muted mt-2">Maintenance personnel complete the return inspection.</div>
       <?php endif; ?>
-      <?php if ($trip['status'] === 'Unloading'): ?>
+      <?php if (in_array($trip['status'], ['Delivered', 'Returned'], true)): ?>
       <p class="text-muted small mt-2 mb-0">After the return inspection passes its completeness checks, submit the trip as Completed from Trip Monitoring to finish Step 13.</p>
       <?php endif; ?>
     </div>

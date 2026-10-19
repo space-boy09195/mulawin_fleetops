@@ -1,2 +1,22 @@
-Options -Indexes
+# Truck photos are shown with direct <img> URLs (fleet_status.php,
+# maintenance.php), so only files stored by ajax/trucks_handler.php are served:
+# a 32-character hex name with a jpg, png or webp extension. Everything else,
+# including any script, is refused and never executed.
+Options -Indexes -ExecCGI
 Require all denied
+
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule php_module>
+    php_flag engine off
+</IfModule>
+
+<FilesMatch "^[0-9a-f]{32}\.(jpg|png|webp)$">
+    SetHandler none
+    Require all granted
+    <IfModule mod_headers.c>
+        Header set X-Content-Type-Options "nosniff"
+        Header set Content-Security-Policy "default-src 'none'; sandbox"
+    </IfModule>
+</FilesMatch>

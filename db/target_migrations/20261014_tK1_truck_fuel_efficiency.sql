@@ -1,0 +1,46 @@
+-- ============================================================
+-- T-K1: trucks.fuel_efficiency_km_per_liter (DRAFT FOR REVIEW -
+-- DECISION-GATED)
+-- File: db/target_migrations/20261014_tK1_truck_fuel_efficiency.sql
+-- Option B phase: B3a. GATED ON DECISION D14 (keep the fuel-variance
+-- analysis). If D14 drops fuel variance, do NOT apply this file.
+--
+-- STATUS: NOT EXECUTED and NOT APPROVED FOR EXECUTION.
+--
+-- TARGET DATABASE: the Option B target only. Do NOT apply to the legacy
+--   database (the column already exists there). No USE statement.
+--
+-- PURPOSE:
+--   pages/trip_costs.php computes expected fuel per trip from route distance
+--   and the truck's km-per-liter figure (3 code references). The target
+--   trucks table has no such column. Other legacy truck fields are NOT
+--   added: registration / insurance data maps to truck_documents and truck
+--   photos map to documents + document_links (B3a / B4 code, decision D14).
+--
+-- DEFAULT: 4.00 km/l, identical to the legacy migration so existing fuel
+--   baselines behave the same. This is a placeholder value: review it and
+--   set real figures per truck.
+--
+-- DEPENDENCIES: target schema baseline (trucks).
+-- COMPATIBILITY: MariaDB 10.4 / MySQL 8 syntax. Hostinger NOT verified.
+-- NOTE: SQL examples in comments have no statement terminators on purpose.
+--
+-- READ-ONLY PRE-CHECKS (expected result in brackets):
+--   a) SELECT DATABASE()                                  -- [the target db]
+--   b) SELECT COLUMN_NAME FROM information_schema.COLUMNS
+--       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'trucks'
+--         AND COLUMN_NAME = 'fuel_efficiency_km_per_liter' -- [no rows]
+--
+-- TRANSACTIONS: ALTER TABLE commits implicitly; a rerun fails with a
+--   duplicate-column error and changes nothing.
+--
+-- ROLLBACK (only with explicit approval, before B3a code uses the column):
+--     ALTER TABLE trucks DROP CHECK chk_trucks_fuel_efficiency,
+--       DROP COLUMN fuel_efficiency_km_per_liter
+--   (MariaDB 10.4: DROP CONSTRAINT instead of DROP CHECK.)
+--   Data loss: per-truck fuel efficiency figures.
+-- ============================================================
+
+ALTER TABLE trucks
+    ADD COLUMN fuel_efficiency_km_per_liter DECIMAL(6,2) NOT NULL DEFAULT 4.00 AFTER fuel_type,
+    ADD CONSTRAINT chk_trucks_fuel_efficiency CHECK (fuel_efficiency_km_per_liter > 0);

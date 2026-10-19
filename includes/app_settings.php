@@ -17,11 +17,3 @@ function setAppSetting(PDO $pdo, string $key, string $value, ?int $updatedBy): v
     );
     $stmt->execute([$key, $value, $updatedBy]);
 }
-
-function isCompanyEmail(string $email, string $domain): bool {
-    $at = strrpos($email, '@');
-    if ($at === false || $domain === '') {
-        return false;
-    }
-    return strtolower(substr($email, $at + 1)) === strtolower(ltrim($domain, '@'));
-}

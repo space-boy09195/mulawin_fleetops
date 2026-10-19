@@ -2,22 +2,33 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
+require_once __DIR__ . '/../includes/finance_records.php';
 
 requireAnyPermission(['billing.view', 'billing.manage']);
-$isHead = currentRoleId() === ROLE_HEAD_MANAGEMENT;
+$isHead = isAdmin();
+// Billing and Collection staff see billings and collections only. The
+// payroll report is reviewed by Finance as well as Payroll
+// (client questionnaire Q1: "Finance Personnel / Audit Personnel /
+// Management"), so it needs payroll.view or finance.view. Recording a
+// salary payment still needs payroll.manage, as in ajax/payroll_handler.php.
+$canViewPayroll   = currentUserHasAnyPermission(['payroll.view', 'finance.view']);
+$canManagePayroll = currentUserHasAnyPermission(['payroll.manage']);
+$canManageBilling = currentUserHasAnyPermission(['billing.manage']);
+$needsPayTotals   = $canViewPayroll;
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/billing.js';
 
 layoutHead('Billing & Collections', APP_BASE . '/assets/css/billing.css');
 
 $pdo = getDBConnection();
-$clients = $pdo->query("SELECT client_name FROM clients WHERE is_active = 1 ORDER BY client_name")->fetchAll(PDO::FETCH_COLUMN);
+$clients = $pdo->query("SELECT client_name FROM clients WHERE status = 'Active' ORDER BY client_name")->fetchAll(PDO::FETCH_COLUMN);
 
-// ── Period filter (scopes the summary cards + both lists below) ──────────────
+// ── Period filter (scopes the billing and collection lists below) ────────────
 $periods = [
     'today' => 'Today',
-    '1w'    => 'This Week',
-    '1m'    => 'This Month',
+    '1w'    => 'Last 7 Days',
+    '1m'    => 'Last 1 Month',
     '3m'    => 'Last 3 Months',
     '6m'    => 'Last 6 Months',
     '1y'    => 'Last 12 Months',
@@ -34,36 +45,51 @@ $rangeStart = match ($period) {
     '1y'    => (new DateTime('today'))->modify('-12 months'),
     default => null,
 };
-$rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
-$billingDateFilter    = $rangeStartSql ? "AND b.created_at >= :rangeStart" : '';
-$collectionDateFilter = $rangeStartSql ? "AND c.payment_date >= :rangeStart" : '';
+$rangeStartDate = $rangeStart ? $rangeStart->format('Y-m-d') : null;
+// A bounded period ends today: the half-open window [start, tomorrow) keeps
+// records dated after today out, as on the accounting dashboard. All Time
+// stays unbounded.
+$rangeEnd = $rangeStart ? new DateTime('tomorrow') : null;
+$rangeEndDate = $rangeEnd ? $rangeEnd->format('Y-m-d') : null;
+// Every figure on this page uses the definitions in includes/finance_records.php.
+$billingDateFilter    = $rangeStartDate ? "AND b.billing_date >= :rangeStart AND b.billing_date < :rangeEnd" : '';
+$collectionDateFilter = $rangeStartDate ? "AND c.payment_date >= :rangeStart AND c.payment_date < :rangeEnd" : '';
 
-// ── Billings via summary view ─────────────────────────────────────────────────
+// ── Billings (target billings + collections) ─────────────────────────────────
+// Status labels are normalized for the view; they are not recomputed from
+// due dates because billing terms and the overdue rule are not confirmed.
 $billingSql = "
     SELECT
         b.billing_id,
-        b.billing_number,
+        b.invoice_number AS billing_number,
         b.invoice_number,
-        b.invoice_date,
-        b.client_name,
-        b.amount,
+        b.billing_date AS invoice_date,
+        c.client_name,
+        b.total_amount AS amount,
         b.due_date,
-        b.status,
-        b.notes,
+        CASE b.status WHEN 'Issued' THEN 'Unpaid' WHEN 'Overdue' THEN 'Unpaid'
+                      WHEN 'Partially Paid' THEN 'Partial' ELSE b.status END AS status,
+        b.status AS target_status,
+        NULL AS notes,
         b.created_at,
         t.trip_number,
-        u.full_name        AS created_by_name,
-        vs.total_collected,
-        vs.balance
+        COALESCE(ue.full_name, u.username) AS created_by_name,
+        " . billingCollectedSql('b') . " AS total_collected,
+        b.total_amount - " . billingCollectedSql('b') . " AS balance
     FROM billings b
-    JOIN trips t ON b.trip_id   = t.trip_id
-    JOIN users u ON b.created_by = u.user_id
-    JOIN v_billing_summary vs ON b.billing_id = vs.billing_id
-    WHERE 1=1 $billingDateFilter
-    ORDER BY b.created_at DESC
+    JOIN trips t   ON b.trip_id   = t.trip_id
+    JOIN clients c ON c.client_id = b.client_id
+    JOIN users u   ON b.created_by = u.user_id
+    LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+    WHERE b.status NOT IN ('Draft', 'Cancelled') $billingDateFilter
+    ORDER BY b.billing_date DESC, b.billing_id DESC
+    LIMIT 2000
 ";
 $billingStmt = $pdo->prepare($billingSql);
-if ($rangeStartSql) $billingStmt->bindValue(':rangeStart', $rangeStartSql);
+if ($rangeStartDate) {
+    $billingStmt->bindValue(':rangeStart', $rangeStartDate);
+    $billingStmt->bindValue(':rangeEnd', $rangeEndDate);
+}
 $billingStmt->execute();
 $billings = $billingStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -71,251 +97,131 @@ $billings = $billingStmt->fetchAll(PDO::FETCH_ASSOC);
 $collectionsSql = "
     SELECT
         c.collection_id,
-        c.amount_paid,
+        c.amount AS amount_paid,
         c.payment_date,
-        c.payment_mode,
-        c.reference_no,
-        c.remarks,
+        c.payment_method AS payment_mode,
+        c.reference_number AS reference_no,
+        NULL AS remarks,
         c.created_at,
-        b.billing_number,
+        b.invoice_number AS billing_number,
         b.billing_id,
-        b.client_name,
-        u.full_name AS recorded_by_name
+        cl.client_name,
+        COALESCE(ue.full_name, u.username) AS recorded_by_name
     FROM collections c
-    JOIN billings b ON c.billing_id  = b.billing_id
-    JOIN users u    ON c.recorded_by = u.user_id
+    JOIN billings b  ON c.billing_id  = b.billing_id
+    JOIN clients cl  ON cl.client_id  = c.client_id
+    JOIN users u     ON c.received_by = u.user_id
+    LEFT JOIN employees ue ON ue.employee_id = u.employee_id
     WHERE 1=1 $collectionDateFilter
-    ORDER BY c.created_at DESC
+    ORDER BY c.payment_date DESC, c.collection_id DESC
     LIMIT 150
 ";
 $collectionsStmt = $pdo->prepare($collectionsSql);
-if ($rangeStartSql) $collectionsStmt->bindValue(':rangeStart', $rangeStartSql);
+if ($rangeStartDate) {
+    $collectionsStmt->bindValue(':rangeStart', $rangeStartDate);
+    $collectionsStmt->bindValue(':rangeEnd', $rangeEndDate);
+}
 $collectionsStmt->execute();
 $collections = $collectionsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// ── Trips for new billing dropdown (completed, no billing yet) ────────────────
-$tripsSql = "
-    SELECT t.trip_id, t.trip_number, r.origin, r.destination
-    FROM trips t
-    JOIN dispatch_requests dr ON t.dispatch_id = dr.dispatch_id
-    JOIN routes r             ON dr.route_id   = r.route_id
-    WHERE t.status = 'Completed'
-    ORDER BY t.trip_number DESC
-";
-$completedTrips = $pdo->query($tripsSql)->fetchAll(PDO::FETCH_ASSOC);
-
-// ── Unbilled trips dashboard (completed trips with zero billing records) ──────
-// Distinct from the dropdown above (which intentionally still lists trips
-// that already have a billing, in case Accounting needs to issue a second/
-// supplementary billing for the same trip) — this view is specifically for
-// finding work that hasn't been billed at all yet.
+// ── Trips with Completed status and no billing ────────────────────────────────
+// The target allows one billing per trip (uq_billing_trip), so the new
+// billing dropdown and the unbilled list are the same set.
 $unbilledSql = "
-    SELECT t.trip_id, t.trip_number, r.origin, r.destination,
-           dr.client_name, dr.scheduled_at
+    SELECT t.trip_id, t.trip_number,
+           COALESCE(r.origin, t.origin) AS origin, COALESCE(r.destination, t.destination) AS destination,
+           c.client_name, t.scheduled_departure AS scheduled_at
     FROM trips t
-    JOIN dispatch_requests dr ON t.dispatch_id = dr.dispatch_id
-    JOIN routes r             ON dr.route_id   = r.route_id
-    LEFT JOIN billings b      ON b.trip_id     = t.trip_id
+    JOIN clients c       ON c.client_id = t.client_id
+    LEFT JOIN routes r   ON r.route_id  = t.route_id
+    LEFT JOIN billings b ON b.trip_id   = t.trip_id
     WHERE t.status = 'Completed' AND b.billing_id IS NULL
     ORDER BY t.trip_number DESC
+    LIMIT 1000
 ";
 $unbilledTrips = $pdo->query($unbilledSql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Active employees (for the Log Payroll Payment form) ───────────────────────
-// Drivers and Helpers are on-call and receive per-trip wages through trip_pay.
-// Keep them out of this periodic fixed-salary payroll form; Driver Allowance
-// remains a separate trip expense and may coexist with Trip Pay.
-$activeEmployees = $pdo->query("
+// Drivers and Helpers are on-call and receive per-trip wages through Trip
+// Pay. Keep them out of this periodic fixed-salary payroll form; Driver
+// Allowance remains a separate trip expense and may coexist with Trip Pay.
+$activeEmployees = !$canManagePayroll ? [] : $pdo->query("
     SELECT employee_id, full_name, position
     FROM employees
-    WHERE is_active = 1
-      AND position NOT IN ('Driver', 'Helper')
+    WHERE employment_status = 'Active'
+      AND (position IS NULL OR position NOT IN ('Driver', 'Helper'))
     ORDER BY full_name
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// ── Payroll: recent records (for the Payroll tab table) ───────────────────────
-// Wrapped defensively: if payroll_records hasn't been created yet (migration
-// not run), degrade to "no payroll data" instead of a fatal crash — but keep
-// a flag so the page can tell Accounting/Head *why* payroll is showing as
-// zero, rather than silently under-reporting Total Expenses and Profit.
-$payrollTableMissing = false;
-$payrollRecords = [];
-$payrollTotal   = 0.0;
-try {
-    $payrollSql = "
+// ── Payroll: payroll_records + payroll_periods; paid date from the record's
+// disbursement (includes/finance_records.php).
+$payrollSql = "
+    SELECT * FROM (
         SELECT
-            pr.payroll_id, pr.employee_id, pr.pay_period_start, pr.pay_period_end,
-            pr.amount_paid, pr.paid_date, pr.notes,
+            pr.payroll_record_id AS payroll_id, pr.employee_id,
+            pp.period_start AS pay_period_start, pp.period_end AS pay_period_end,
+            pr.net_amount AS amount_paid, " . payrollPaidDateSql('pr') . " AS paid_date,
+            " . payrollNotesSql('pr') . " AS notes,
             e.full_name AS employee_name, e.position,
-            u.full_name AS recorded_by_name
+            '—' AS recorded_by_name, pr.created_at
         FROM payroll_records pr
+        JOIN payroll_periods pp ON pp.payroll_period_id = pr.payroll_period_id
         JOIN employees e ON pr.employee_id = e.employee_id
-        JOIN users u     ON pr.recorded_by = u.user_id
-        WHERE 1=1 " . ($rangeStartSql ? "AND pr.paid_date >= :rangeStart" : "") . "
-        ORDER BY pr.paid_date DESC, pr.created_at DESC
-    ";
+        WHERE pr.status = 'Disbursed'
+    ) payroll_rows
+    WHERE 1=1 " . ($rangeStartDate ? "AND paid_date >= :rangeStart AND paid_date < :rangeEnd" : "") . "
+    ORDER BY paid_date DESC, created_at DESC
+";
+$payrollRecords = [];
+if ($needsPayTotals) {
     $payrollStmt = $pdo->prepare($payrollSql);
-    if ($rangeStartSql) $payrollStmt->bindValue(':rangeStart', $rangeStartSql);
+    if ($rangeStartDate) {
+        $payrollStmt->bindValue(':rangeStart', $rangeStartDate);
+        $payrollStmt->bindValue(':rangeEnd', $rangeEndDate);
+    }
     $payrollStmt->execute();
     $payrollRecords = $payrollStmt->fetchAll(PDO::FETCH_ASSOC);
-    $payrollTotal   = array_sum(array_column($payrollRecords, 'amount_paid'));
-} catch (PDOException $e) {
-    // SQLSTATE 42S02 / MySQL 1146 = table doesn't exist. Anything else is a
-    // real problem (bad credentials, syntax error, etc.) and should still
-    // surface loudly rather than being swallowed here.
-    if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
-        $payrollTableMissing = true;
-    } else {
-        throw $e;
-    }
 }
-
-// ── Crew pay: Driver/Helper per-trip wages (for the merged Payroll Report) ────
-// Same defensive pattern as payroll_records above.
-$tripPayTableMissing = false;
+// ── Crew pay: Driver/Helper per-trip wages (trip_pay_records, T-P1) ───────────
+// Dated by the trip (completion, else scheduled departure); the entered
+// paid date is shown from the notes.
+$tripPaySql = "
+    SELECT
+        tp.trip_pay_id, tp.employee_id,
+        IF(tp.pay_type = 'Helper Trip Pay', 'Helper', 'Driver') AS crew_role,
+        tp.amount, tp.notes AS stored_notes, " . tripPayDateSql('t') . " AS trip_date,
+        e.full_name AS employee_name, e.position,
+        t.trip_number,
+        COALESCE(ue.full_name, u.username, '—') AS recorded_by_name
+    FROM trip_pay_records tp
+    JOIN employees e ON tp.employee_id = e.employee_id
+    JOIN trips t     ON tp.trip_id     = t.trip_id
+    LEFT JOIN users u ON tp.recorded_by = u.user_id
+    LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+    WHERE tp.status <> 'Cancelled' " . ($rangeStartDate ? "AND " . tripPayDateSql('t') . " >= :rangeStart AND " . tripPayDateSql('t') . " < :rangeEnd" : "") . "
+    ORDER BY trip_date DESC, tp.trip_pay_id DESC
+";
 $tripPayRecords = [];
-$tripPayTotal   = 0.0;
-try {
-    $tripPaySql = "
-        SELECT
-            tp.trip_pay_id, tp.employee_id, tp.crew_role, tp.amount, tp.paid_date, tp.notes,
-            e.full_name AS employee_name, e.position,
-            t.trip_number,
-            u.full_name AS recorded_by_name
-        FROM trip_pay tp
-        JOIN employees e ON tp.employee_id = e.employee_id
-        JOIN trips t     ON tp.trip_id     = t.trip_id
-        JOIN users u     ON tp.recorded_by = u.user_id
-        WHERE 1=1 " . ($rangeStartSql ? "AND tp.paid_date >= :rangeStart" : "") . "
-        ORDER BY tp.paid_date DESC, tp.created_at DESC
-    ";
+if ($needsPayTotals) {
     $tripPayStmt = $pdo->prepare($tripPaySql);
-    if ($rangeStartSql) $tripPayStmt->bindValue(':rangeStart', $rangeStartSql);
+    if ($rangeStartDate) {
+        $tripPayStmt->bindValue(':rangeStart', $rangeStartDate);
+        $tripPayStmt->bindValue(':rangeEnd', $rangeEndDate);
+    }
     $tripPayStmt->execute();
     $tripPayRecords = $tripPayStmt->fetchAll(PDO::FETCH_ASSOC);
-    $tripPayTotal   = array_sum(array_column($tripPayRecords, 'amount'));
-} catch (PDOException $e) {
-    if ($e->getCode() === '42S02' || str_contains($e->getMessage(), "doesn't exist")) {
-        $tripPayTableMissing = true;
-    } else {
-        throw $e;
-    }
 }
-
-// ── Summary stats ─────────────────────────────────────────────────────────────
-$totalBilled    = array_sum(array_column($billings, 'amount'));
-$totalCollected = array_sum(array_column($billings, 'total_collected'));
-$totalBalance   = array_sum(array_column($billings, 'balance'));
-$unpaidCount    = count(array_filter($billings, fn($b) => $b['status'] === 'Unpaid'));
-
-// ══════════════════════════════════════════════════════════════════════════
-// EXPENSES & PROFIT — Revenue minus every real expense category, scoped to
-// the same period filter as the rest of this page.
-//
-// Expense sources:
-//   - trip_expenses: Fuel, Toll, Driver Allowance, Other (per-trip costs)
-//   - maintenance_records.cost (per job)
-//   - payroll_records.amount_paid (actual logged disbursements — not an
-//     estimate from a salary rate, only what was actually paid out)
-//
-// Deliberately NOT included: parts_movements purchase cost. Maintenance
-// staff currently enter a record's "Cost" as effectively the parts spend
-// for that job, so adding parts_movements on top would double-count the
-// same money under two different names. Parts-purchase spend is still
-// shown below, but as a separate informational figure for inventory
-// reference — it does not feed into Total Expenses or Profit.
-// ══════════════════════════════════════════════════════════════════════════
-$expenseDateFilter = $rangeStartSql ? "AND te.expense_date >= :rangeStart" : '';
-$expByCategoryStmt = $pdo->prepare("
-    SELECT te.expense_type, COALESCE(SUM(te.amount), 0) AS total
-    FROM trip_expenses te
-    WHERE 1=1 $expenseDateFilter
-    GROUP BY te.expense_type
-");
-if ($rangeStartSql) $expByCategoryStmt->bindValue(':rangeStart', $rangeStartSql);
-$expByCategoryStmt->execute();
-$expenseCategories = ['Fuel' => 0.0, 'Toll' => 0.0, 'Driver Allowance' => 0.0, 'Other' => 0.0];
-foreach ($expByCategoryStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-    $expenseCategories[$row['expense_type']] = (float)$row['total'];
+foreach ($tripPayRecords as &$tripPayRow) {
+    $split = tripPaySplitNotes($tripPayRow['stored_notes']);
+    $tripPayRow['paid_date'] = $split['paid_date'] ?? $tripPayRow['trip_date'];
+    $tripPayRow['notes'] = $split['notes'];
 }
+unset($tripPayRow);
+$paymentModes = PAYMENT_MODES;
 
-$maintDateFilter = $rangeStartSql ? "AND date_performed >= :rangeStart" : '';
-$maintCostStmt = $pdo->prepare("
-    SELECT COALESCE(SUM(cost), 0) FROM maintenance_records WHERE 1=1 $maintDateFilter
-");
-if ($rangeStartSql) $maintCostStmt->bindValue(':rangeStart', $rangeStartSql);
-$maintCostStmt->execute();
-$maintCostTotal = (float)$maintCostStmt->fetchColumn();
-
-// Informational only — inventory reference, not part of Total Expenses (see note above).
-$partsDateFilter = $rangeStartSql ? "AND moved_at >= :rangeStart" : '';
-$partsPurchasedStmt = $pdo->prepare("
-    SELECT COALESCE(SUM(unit_cost * ABS(quantity)), 0)
-    FROM parts_movements
-    WHERE movement_type = 'Stock In' AND unit_cost IS NOT NULL $partsDateFilter
-");
-if ($rangeStartSql) $partsPurchasedStmt->bindValue(':rangeStart', $rangeStartSql);
-$partsPurchasedStmt->execute();
-$partsPurchasedTotal = (float)$partsPurchasedStmt->fetchColumn();
-
-$totalExpenses = $maintCostTotal + array_sum($expenseCategories) + $payrollTotal + $tripPayTotal;
-$profit        = $totalBilled - $totalExpenses;
-$profitMargin  = $totalBilled > 0 ? round(($profit / $totalBilled) * 100, 1) : null;
-
-$paymentModes = ['Cash', 'Check', 'Bank Transfer', 'GCash', 'Other'];
-
-// ── Overdue helper ────────────────────────────────────────────────────────────
-function isOverdue(string $dueDate, string $status): bool {
-    return $status !== 'Paid' && strtotime($dueDate) < strtotime('today');
-}
-
-$agingBuckets = [
-    'Current' => 0.0,
-    '1-30 days' => 0.0,
-    '31-60 days' => 0.0,
-    '61-90 days' => 0.0,
-    '91+ days' => 0.0,
-];
-$overdueClients = [];
-$today = new DateTimeImmutable('today');
-foreach ($billings as $billing) {
-    $balance = (float)$billing['balance'];
-    if ($balance <= 0) {
-        continue;
-    }
-    $daysPastDue = (int)(new DateTimeImmutable($billing['due_date']))->diff($today)->format('%r%a');
-    if ($daysPastDue <= 0) {
-        $bucket = 'Current';
-    } elseif ($daysPastDue <= 30) {
-        $bucket = '1-30 days';
-    } elseif ($daysPastDue <= 60) {
-        $bucket = '31-60 days';
-    } elseif ($daysPastDue <= 90) {
-        $bucket = '61-90 days';
-    } else {
-        $bucket = '91+ days';
-    }
-    $agingBuckets[$bucket] += $balance;
-    if ($daysPastDue > 0) {
-        $client = $billing['client_name'] ?: 'Unassigned client';
-        $overdueClients[$client] = ($overdueClients[$client] ?? 0) + $balance;
-    }
-}
-arsort($overdueClients);
 ?>
 
 <div class="bil-page">
-
-  <?php if ($payrollTableMissing): ?>
-  <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="alert">
-    <i class="bi bi-exclamation-triangle-fill mt-1"></i>
-    <div>
-      <strong>Payroll data is not available.</strong> The <code>payroll_records</code> table hasn't been created yet,
-      so Total Expenses and Net Profit below do not include payroll. Run <code>db/payroll_migration.sql</code>
-      against the database to fix this.
-    </div>
-  </div>
-  <?php endif; ?>
 
   <!-- Header -->
   <div class="bil-header d-flex align-items-center justify-content-between mb-4">
@@ -331,80 +237,19 @@ arsort($overdueClients);
           <?php endforeach; ?>
         </select>
       </form>
+      <?php if ($canManageBilling): ?>
       <button class="btn btn-bil-primary" data-bs-toggle="modal" data-bs-target="#createBillingModal">
         <i class="bi bi-plus-lg me-1"></i> Create Billing
       </button>
+      <?php endif; ?>
     </div>
   </div>
   <?php if ($period !== 'all'): ?>
   <p class="bil-period-note">
     <i class="bi bi-funnel"></i> Showing <?= htmlspecialchars($periods[$period]) ?> —
-    the cards and lists below are scoped to this period.
+    billing, collection and (when available) payroll/Trip Pay records use this period; the no-billing trip list is not period-filtered.
   </p>
   <?php endif; ?>
-
-  <!-- Summary cards -->
-  <div class="bil-cards mb-4">
-    <div class="bil-card">
-      <div class="bil-card-value">₱<?= number_format($totalBilled, 2) ?></div>
-      <div class="bil-card-label">Total Billed</div>
-    </div>
-    <div class="bil-card bil-card-success">
-      <div class="bil-card-value">₱<?= number_format($totalCollected, 2) ?></div>
-      <div class="bil-card-label">Total Collected</div>
-    </div>
-    <div class="bil-card <?= $totalBalance > 0 ? 'bil-card-alert' : '' ?>">
-      <div class="bil-card-value">₱<?= number_format($totalBalance, 2) ?></div>
-      <div class="bil-card-label">Outstanding Balance</div>
-    </div>
-    <div class="bil-card <?= $unpaidCount > 0 ? 'bil-card-warn' : '' ?>">
-      <div class="bil-card-value"><?= $unpaidCount ?></div>
-      <div class="bil-card-label">Unpaid Billings</div>
-    </div>
-  </div>
-
-  <div class="row g-3 mb-4">
-    <div class="col-lg-7">
-      <div class="bil-table-wrap h-100">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <h2 class="h5 mb-0">Receivables aging</h2>
-          <span class="text-muted small">Outstanding balances by due date</span>
-        </div>
-        <div class="table-responsive">
-          <table class="table bil-table mb-0">
-            <thead><tr><th>Bucket</th><th class="text-end">Balance</th></tr></thead>
-            <tbody>
-            <?php foreach ($agingBuckets as $bucket => $amount): ?>
-              <tr><td><?= htmlspecialchars($bucket) ?></td><td class="text-end">₱<?= number_format($amount, 2) ?></td></tr>
-            <?php endforeach; ?>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-    <div class="col-lg-5">
-      <div class="bil-table-wrap h-100">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-          <h2 class="h5 mb-0">Overdue by client</h2>
-          <span class="text-muted small"><?= count($overdueClients) ?> clients</span>
-        </div>
-        <?php if (!$overdueClients): ?>
-          <p class="text-muted mb-0">No overdue balances in this period.</p>
-        <?php else: ?>
-          <div class="table-responsive">
-            <table class="table bil-table mb-0">
-              <thead><tr><th>Client</th><th class="text-end">Overdue</th></tr></thead>
-              <tbody>
-              <?php foreach (array_slice($overdueClients, 0, 10, true) as $client => $amount): ?>
-                <tr><td><?= htmlspecialchars($client) ?></td><td class="text-end text-danger">₱<?= number_format($amount, 2) ?></td></tr>
-              <?php endforeach; ?>
-              </tbody>
-            </table>
-          </div>
-        <?php endif; ?>
-      </div>
-    </div>
-  </div>
 
   <!-- Tabs -->
   <ul class="nav bil-tabs mb-4" id="bilTabs" role="tablist">
@@ -418,7 +263,7 @@ arsort($overdueClients);
     <li class="nav-item" role="presentation">
       <button class="bil-tab" id="tab-unbilled" data-bs-toggle="tab"
               data-bs-target="#pane-unbilled" type="button" role="tab">
-        <i class="bi bi-exclamation-circle me-1"></i> Unbilled Trips
+        <i class="bi bi-exclamation-circle me-1"></i> Completed-Status Trips Without Billing
         <span class="bil-tab-count"><?= count($unbilledTrips) ?></span>
       </button>
     </li>
@@ -429,12 +274,7 @@ arsort($overdueClients);
         <span class="bil-tab-count"><?= count($collections) ?></span>
       </button>
     </li>
-    <li class="nav-item" role="presentation">
-      <button class="bil-tab" id="tab-expenses" data-bs-toggle="tab"
-              data-bs-target="#pane-expenses" type="button" role="tab">
-        <i class="bi bi-graph-down-arrow me-1"></i> Expenses &amp; Profit
-      </button>
-    </li>
+    <?php if ($canViewPayroll): ?>
     <li class="nav-item" role="presentation">
       <button class="bil-tab" id="tab-payroll" data-bs-toggle="tab"
               data-bs-target="#pane-payroll" type="button" role="tab">
@@ -442,6 +282,7 @@ arsort($overdueClients);
         <span class="bil-tab-count"><?= count($payrollRecords) + count($tripPayRecords) ?></span>
       </button>
     </li>
+    <?php endif; ?>
   </ul>
 
   <div class="tab-content">
@@ -458,9 +299,11 @@ arsort($overdueClients);
         </select>
         <input type="search" id="filterBilSearch" class="form-control bil-filter-search"
                placeholder="Search billing no., trip, client…">
+        <?php if (currentUserHasAnyPermission(['billing.export'])): ?>
         <a class="btn btn-bil-outline ms-auto" href="<?= APP_BASE ?>/ajax/billing_export.php?period=<?= urlencode($period) ?>">
           <i class="bi bi-download me-1"></i> Download AR Report (CSV)
         </a>
+        <?php endif; ?>
       </div>
 
       <div class="bil-table-wrap">
@@ -487,9 +330,7 @@ arsort($overdueClients);
             </tr>
           </thead>
           <tbody>
-            <?php foreach ($billings as $bil):
-              $overdue = isOverdue($bil['due_date'], $bil['status']);
-            ?>
+            <?php foreach ($billings as $bil): ?>
             <tr
               data-status="<?= htmlspecialchars($bil['status']) ?>"
               data-search="<?= htmlspecialchars(strtolower(
@@ -514,11 +355,8 @@ arsort($overdueClients);
               <td class="bil-balance <?= $bil['balance'] > 0 ? 'bil-balance-due' : '' ?>">
                 ₱<?= number_format($bil['balance'], 2) ?>
               </td>
-              <td class="bil-date <?= $overdue ? 'bil-overdue' : '' ?>">
-                <?= date('M d, Y', strtotime($bil['due_date'])) ?>
-                <?php if ($overdue): ?>
-                <span class="bil-overdue-badge">Overdue</span>
-                <?php endif; ?>
+              <td class="bil-date">
+                <?= $bil['due_date'] ? date('M d, Y', strtotime($bil['due_date'])) : '<span class="text-muted">—</span>' ?>
               </td>
               <td>
                 <span class="bil-status-badge bil-status-<?= strtolower($bil['status']) ?>">
@@ -527,17 +365,19 @@ arsort($overdueClients);
               </td>
               <td class="bil-created-by"><?= htmlspecialchars($bil['created_by_name']) ?></td>
               <td class="text-end">
-                <?php if ($bil['status'] !== 'Paid'): ?>
+                <?php if ($canManageBilling && $bil['status'] !== 'Paid'): ?>
                 <button class="btn btn-sm btn-bil-collect"
                         data-id="<?= $bil['billing_id'] ?>"
                         data-number="<?= htmlspecialchars($bil['billing_number']) ?>"
                         data-balance="<?= $bil['balance'] ?>">
                   Record Payment
                 </button>
-                <?php else: ?>
+                <?php elseif ($bil['status'] === 'Paid'): ?>
                 <span class="bil-paid-check" title="Fully paid">
                   <i class="bi bi-check-circle-fill text-success"></i>
                 </span>
+                <?php else: ?>
+                <span class="text-muted">—</span>
                 <?php endif; ?>
               </td>
             </tr>
@@ -552,12 +392,12 @@ arsort($overdueClients);
       </div>
     </div>
 
-    <!-- ── Unbilled Trips pane ───────────────────────────────────────────── -->
+    <!-- ── Trips with Completed status and no billing ───────────────────── -->
     <div class="tab-pane fade" id="pane-unbilled" role="tabpanel">
       <?php if (empty($unbilledTrips)): ?>
       <div class="bil-empty">
         <i class="bi bi-check-circle bil-empty-icon"></i>
-        <p>All completed trips have been billed.</p>
+        <p>No trips with Completed status are missing billing.</p>
       </div>
       <?php else: ?>
       <div class="bil-table-wrap">
@@ -579,11 +419,13 @@ arsort($overdueClients);
               <td><?= $ut['client_name'] ? htmlspecialchars($ut['client_name']) : '<span class="text-muted">—</span>' ?></td>
               <td><?= $ut['scheduled_at'] ? date('M d, Y', strtotime($ut['scheduled_at'])) : '<span class="text-muted">—</span>' ?></td>
               <td class="text-end">
+                <?php if ($canManageBilling): ?>
                 <button class="btn btn-sm btn-bil-primary bil-unbilled-create-btn"
                         data-trip-id="<?= $ut['trip_id'] ?>"
                         data-bs-toggle="modal" data-bs-target="#createBillingModal">
                   Create Billing
                 </button>
+                <?php else: ?><span class="text-muted">—</span><?php endif; ?>
               </td>
             </tr>
             <?php endforeach; ?>
@@ -665,71 +507,8 @@ arsort($overdueClients);
       </div>
     </div>
 
-    <!-- ── Expenses & Profit pane ────────────────────────────────────────── -->
-    <div class="tab-pane fade" id="pane-expenses" role="tabpanel">
-
-      <div class="bil-profit-summary mb-4">
-        <div class="bil-profit-card">
-          <div class="bil-profit-label">Revenue</div>
-          <div class="bil-profit-value">₱<?= number_format($totalBilled, 2) ?></div>
-        </div>
-        <div class="bil-profit-card">
-          <div class="bil-profit-label">Total Expenses</div>
-          <div class="bil-profit-value bil-profit-negative">₱<?= number_format($totalExpenses, 2) ?></div>
-        </div>
-        <div class="bil-profit-card bil-profit-highlight <?= $profit >= 0 ? 'bil-profit-positive-card' : 'bil-profit-negative-card' ?>">
-          <div class="bil-profit-label">Net Profit</div>
-          <div class="bil-profit-value <?= $profit >= 0 ? 'bil-profit-positive' : 'bil-profit-negative' ?>">
-            <?= $profit >= 0 ? '' : '-' ?>₱<?= number_format(abs($profit), 2) ?>
-          </div>
-          <?php if ($profitMargin !== null): ?>
-          <div class="bil-profit-sub"><?= $profitMargin ?>% margin</div>
-          <?php endif; ?>
-        </div>
-      </div>
-
-      <h6 class="bil-expense-breakdown-title">Expense Breakdown <?= htmlspecialchars($periods[$period]) ?></h6>
-      <div class="bil-expense-cards mb-4">
-        <div class="bil-expense-card">
-          <div class="bil-expense-label"><i class="bi bi-people me-1"></i>Payroll</div>
-          <div class="bil-expense-value">₱<?= number_format($payrollTotal, 2) ?></div>
-        </div>
-        <div class="bil-expense-card">
-          <div class="bil-expense-label"><i class="bi bi-person-workspace me-1"></i>Trip Pay</div>
-          <div class="bil-expense-value">₱<?= number_format($tripPayTotal, 2) ?></div>
-        </div>
-        <div class="bil-expense-card">
-          <div class="bil-expense-label"><i class="bi bi-tools me-1"></i>Maintenance</div>
-          <div class="bil-expense-value">₱<?= number_format($maintCostTotal, 2) ?></div>
-        </div>
-        <div class="bil-expense-card">
-          <div class="bil-expense-label"><i class="bi bi-fuel-pump me-1"></i>Fuel</div>
-          <div class="bil-expense-value">₱<?= number_format($expenseCategories['Fuel'], 2) ?></div>
-        </div>
-        <div class="bil-expense-card">
-          <div class="bil-expense-label"><i class="bi bi-signpost-split me-1"></i>Toll</div>
-          <div class="bil-expense-value">₱<?= number_format($expenseCategories['Toll'], 2) ?></div>
-        </div>
-        <div class="bil-expense-card">
-          <div class="bil-expense-label"><i class="bi bi-person-badge me-1"></i>Driver Allowance</div>
-          <div class="bil-expense-value">₱<?= number_format($expenseCategories['Driver Allowance'], 2) ?></div>
-        </div>
-        <div class="bil-expense-card">
-          <div class="bil-expense-label"><i class="bi bi-three-dots me-1"></i>Other</div>
-          <div class="bil-expense-value">₱<?= number_format($expenseCategories['Other'], 2) ?></div>
-        </div>
-      </div>
-
-      <div class="bil-parts-note">
-        <i class="bi bi-info-circle me-1"></i>
-        Parts purchased this period: <strong>₱<?= number_format($partsPurchasedTotal, 2) ?></strong>
-        — shown for inventory reference only. Not included in Total Expenses, since Maintenance Cost already
-        reflects parts spend per job.
-      </div>
-
-    </div>
-
-    <!-- ── Payroll pane ──────────────────────────────────────────────────── -->
+    <?php if ($canViewPayroll): ?>
+    <!-- ── Payroll pane (payroll.view) ───────────────────────────────────── -->
     <div class="tab-pane fade" id="pane-payroll" role="tabpanel">
 
       <?php
@@ -775,24 +554,18 @@ arsort($overdueClients);
       </div>
 
       <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-        <div class="bil-payroll-total">
-          <?= htmlspecialchars($periods[$period]) ?> totals —
-          Payroll: <strong>₱<?= number_format($payrollTotal, 2) ?></strong>
-          <span class="mx-2">|</span>
-          Trip Pay: <strong>₱<?= number_format($tripPayTotal, 2) ?></strong>
-        </div>
+        <span class="text-muted small">Individual disbursement records for <?= htmlspecialchars($periods[$period]) ?>.</span>
         <div class="d-flex gap-2 flex-wrap">
-          <button class="btn btn-outline-secondary btn-sm" id="printPayrollReportBtn">
-            <i class="bi bi-printer me-1"></i> Print Report
-          </button>
-          <?php if (!$isHead): ?>
+          <?php if (!$isHead && $canManagePayroll): ?>
           <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#sendPayrollReportModal">
             <i class="bi bi-send me-1"></i> Send to Head
           </button>
           <?php endif; ?>
+          <?php if ($canManagePayroll): ?>
           <button class="btn btn-bil-primary btn-sm" data-bs-toggle="modal" data-bs-target="#logPayrollModal">
             <i class="bi bi-plus-lg me-1"></i> Log Salary Payment
           </button>
+          <?php endif; ?>
         </div>
       </div>
 
@@ -843,66 +616,13 @@ arsort($overdueClients);
         <?php endif; ?>
       </div>
 
-      <!-- Print-only view: hidden on screen, shown only when printing/saving as PDF -->
-      <div class="bil-print-only">
-        <div class="bil-print-header">
-          <h2>RP Mulawin Trucking Services</h2>
-          <h3>Payroll &amp; Trip Pay Disbursements</h3>
-          <p>Period: <?= htmlspecialchars($periods[$period]) ?> &middot; Generated: <?= date('F d, Y g:i A') ?></p>
-        </div>
-        <?php if (empty($payrollReportRows)): ?>
-        <p>No payroll or Trip Pay logged for this period.</p>
-        <?php else: ?>
-        <table class="bil-print-table">
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Employee</th>
-              <th>Position / Role</th>
-              <th>Reference</th>
-              <th>Amount</th>
-              <th>Paid Date</th>
-              <th>Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php foreach ($payrollReportRows as $pr): ?>
-            <tr>
-              <td><?= htmlspecialchars($pr['type']) ?></td>
-              <td><?= htmlspecialchars($pr['employee_name']) ?></td>
-              <td><?= htmlspecialchars($pr['position']) ?></td>
-              <td><?= htmlspecialchars($pr['reference']) ?></td>
-              <td>₱<?= number_format($pr['amount'], 2) ?></td>
-              <td><?= date('M d, Y', strtotime($pr['paid_date'])) ?></td>
-              <td><?= $pr['notes'] ? htmlspecialchars($pr['notes']) : '—' ?></td>
-            </tr>
-            <?php endforeach; ?>
-          </tbody>
-          <tfoot>
-            <tr>
-              <td colspan="4"><strong>Payroll subtotal</strong></td>
-              <td><strong>₱<?= number_format($payrollTotal, 2) ?></strong></td>
-              <td colspan="2"></td>
-            </tr>
-            <tr>
-              <td colspan="4"><strong>Trip Pay subtotal</strong></td>
-              <td><strong>₱<?= number_format($tripPayTotal, 2) ?></strong></td>
-              <td colspan="2"></td>
-            </tr>
-          </tfoot>
-        </table>
-        <?php endif; ?>
-        <div class="bil-print-footer">
-          <p>Prepared by: _______________________</p>
-          <p>Reviewed by: _______________________</p>
-        </div>
-      </div>
-
     </div>
+    <?php endif; ?>
 
   </div><!-- /tab-content -->
 </div>
 
+<?php if ($canManageBilling): ?>
 <!-- ══ Create Billing Modal ════════════════════════════════════════════════ -->
 <div class="modal fade" id="createBillingModal" tabindex="-1" aria-labelledby="createBillingLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered modal-lg">
@@ -919,9 +639,9 @@ arsort($overdueClients);
           <div class="col-md-6">
             <label class="form-label bil-label" for="bilTripId">Trip</label>
             <select class="form-select bil-input" id="bilTripId" required>
-              <option value="">— Select completed trip —</option>
-              <?php foreach ($completedTrips as $tr): ?>
-              <option value="<?= $tr['trip_id'] ?>">
+              <option value="">— Select trip with Completed status —</option>
+              <?php foreach ($unbilledTrips as $tr): ?>
+              <option value="<?= (int)$tr['trip_id'] ?>" data-client="<?= htmlspecialchars($tr['client_name'] ?? '', ENT_QUOTES) ?>">
                 <?= htmlspecialchars($tr['trip_number']) ?> —
                 <?= htmlspecialchars($tr['origin']) ?> → <?= htmlspecialchars($tr['destination']) ?>
               </option>
@@ -931,7 +651,7 @@ arsort($overdueClients);
           <div class="col-md-6">
             <label class="form-label bil-label" for="bilClientName">Client Name *</label>
             <input type="text" class="form-control bil-input" id="bilClientName"
-                   list="billingClientsList" maxlength="150" placeholder="Select a registered client" required>
+                   list="billingClientsList" maxlength="180" placeholder="Select a registered client" required>
             <datalist id="billingClientsList">
               <?php foreach ($clients as $client): ?>
               <option value="<?= htmlspecialchars($client, ENT_QUOTES) ?>"></option>
@@ -978,8 +698,10 @@ arsort($overdueClients);
     </div>
   </div>
 </div>
+<?php endif; ?>
 
 <!-- ══ Record Payment Modal ════════════════════════════════════════════════ -->
+<?php if ($canManageBilling): ?>
 <div class="modal fade" id="paymentModal" tabindex="-1" aria-labelledby="paymentModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content bil-modal-content">
@@ -989,6 +711,7 @@ arsort($overdueClients);
         </h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
+      <?php endif; ?>
       <div class="modal-body bil-modal-body">
         <div id="paymentFormAlert" class="alert d-none" role="alert"></div>
         <p class="mb-3">
@@ -1038,6 +761,8 @@ arsort($overdueClients);
   </div>
 </div>
 
+<?php if ($canViewPayroll): ?>
+<?php if ($canManagePayroll): ?>
 <!-- ══ Log Payroll Payment Modal ═══════════════════════════════════════════ -->
 <div class="modal fade" id="logPayrollModal" tabindex="-1" aria-labelledby="logPayrollLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -1091,7 +816,8 @@ arsort($overdueClients);
   </div>
 </div>
 
-<?php if (!$isHead): ?>
+<?php endif; ?>
+<?php if (!$isHead && $canManagePayroll): ?>
 <!-- ══ Send Payroll Report to Head Modal ═══════════════════════════════════ -->
 <div class="modal fade" id="sendPayrollReportModal" tabindex="-1" aria-labelledby="sendPayrollReportLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -1126,6 +852,7 @@ arsort($overdueClients);
     </div>
   </div>
 </div>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php layoutFoot(); ?>

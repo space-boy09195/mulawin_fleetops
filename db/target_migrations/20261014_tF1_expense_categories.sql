@@ -1,0 +1,67 @@
+-- ============================================================
+-- T-F1: expense categories Toll / Driver Allowance and fuel quantity
+-- (DRAFT FOR REVIEW - DECISION-GATED)
+-- File: db/target_migrations/20261014_tF1_expense_categories.sql
+-- Option B phase: B5b. GATED ON DECISION D6.
+--
+-- STATUS: NOT EXECUTED and NOT APPROVED FOR EXECUTION.
+--
+-- TARGET DATABASE: the Option B target only. Do NOT apply to the legacy
+--   database (no expense_records there; legacy uses trip_expenses).
+--   No USE statement.
+--
+-- PURPOSE:
+--   Phase 4D established Driver Allowance as a trip EXPENSE, separate from
+--   Trip Pay wages. Legacy trip_expenses types are Fuel, Toll, Driver
+--   Allowance, Other, with a fuel quantity (liters) used by the trip-cost
+--   fuel-variance analysis. The target expense_records.expense_type has
+--   Fuel, Payroll, Maintenance, Parts, Operating, Other and no quantity.
+--   This file:
+--     - appends 'Toll' and 'Driver Allowance' to the expense_type ENUM
+--       (existing values keep their order and meaning);
+--     - adds quantity DECIMAL(12,2) NULL (+ CHECK quantity >= 0);
+--     - adds index idx_expenses_reference (reference_type, reference_id)
+--       for per-trip totals (B5b code records trip expenses as
+--       reference_type = 'trip', reference_id = trips.trip_id).
+--   Alternative for D6 (not drafted): model Driver Allowance as
+--   fund_requests.request_type = 'Trip Allowance'. Choosing that alternative
+--   changes the Phase 4D meaning and would make this file unnecessary.
+--
+-- DEPENDENCIES: target schema baseline (expense_records).
+-- COMPATIBILITY: appending ENUM values at the end is an in-place change in
+--   MySQL 8 and MariaDB 10.4; the full ENUM list is restated as required.
+--   CHECK constraints are enforced by MySQL 8.0.16+ and MariaDB 10.2+.
+--   Hostinger NOT verified.
+-- NOTE: SQL examples in comments have no statement terminators on purpose.
+--
+-- READ-ONLY PRE-CHECKS (expected result in brackets):
+--   a) SELECT DATABASE()                                  -- [the target db]
+--   b) Current ENUM must be exactly the reference definition:
+--        SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+--         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'expense_records'
+--           AND COLUMN_NAME = 'expense_type'
+--        -- [enum('Fuel','Payroll','Maintenance','Parts','Operating','Other')]
+--   c) SELECT COLUMN_NAME FROM information_schema.COLUMNS
+--       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'expense_records'
+--         AND COLUMN_NAME = 'quantity'                     -- [no rows]
+--
+-- TRANSACTIONS: ALTER TABLE commits implicitly; a rerun fails at the
+--   duplicate quantity column and changes nothing (the MODIFY is in the
+--   same statement).
+--
+-- ROLLBACK (only with explicit approval):
+--     ALTER TABLE expense_records DROP CHECK chk_expense_quantity,
+--       DROP INDEX idx_expenses_reference, DROP COLUMN quantity,
+--       MODIFY COLUMN expense_type ENUM('Fuel','Payroll','Maintenance',
+--         'Parts','Operating','Other') NOT NULL
+--   Limitation: the ENUM revert FAILS (strict mode) or corrupts values (non-
+--   strict) if any row uses 'Toll' or 'Driver Allowance'. Reclassify or
+--   delete those rows first - with approval - or restore the backup.
+--   MariaDB 10.4 uses DROP CONSTRAINT instead of DROP CHECK.
+-- ============================================================
+
+ALTER TABLE expense_records
+    MODIFY COLUMN expense_type ENUM('Fuel','Payroll','Maintenance','Parts','Operating','Other','Toll','Driver Allowance') NOT NULL,
+    ADD COLUMN quantity DECIMAL(12,2) NULL AFTER amount,
+    ADD KEY idx_expenses_reference (reference_type, reference_id),
+    ADD CONSTRAINT chk_expense_quantity CHECK (quantity IS NULL OR quantity >= 0);

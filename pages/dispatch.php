@@ -8,18 +8,24 @@ require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/dispatcher_scope.php';
+require_once __DIR__ . '/../includes/crew_trip_access.php';
+require_once __DIR__ . '/../includes/trip_queries.php';
 
 requirePermission('trips.view');
+refuseHelpers(); // the dispatch board lists every trip
 
 $instruction = null;
 $instructionId = filter_input(INPUT_GET, 'instruction_id', FILTER_VALIDATE_INT);
 if ($instructionId !== null && $instructionId !== false && $instructionId > 0) {
+    // An Operations Head instruction is an open client_bookings row (T-C1).
     $instructionQuery = getDBConnection()->prepare(
-        "SELECT i.instruction_id, i.client_id, i.route_id, i.scheduled_at, i.shift,
-                i.unit_count, i.instruction_notes, r.route_name, r.origin, r.destination
-         FROM dispatch_instructions i
-         JOIN routes r ON r.route_id = i.route_id
-         WHERE i.instruction_id = ? AND i.status = 'Open'"
+        "SELECT b.booking_id AS instruction_id, b.booking_reference, b.client_id, b.route_id,
+                b.scheduled_departure AS scheduled_at, b.shift, b.truck_type,
+                b.quantity AS unit_count, b.notes AS instruction_notes,
+                r.route_name, r.origin, r.destination
+         FROM client_bookings b
+         JOIN routes r ON r.route_id = b.route_id
+         WHERE b.booking_id = ? AND b.status = 'Pending' AND b.scheduled_departure IS NOT NULL"
     );
     $instructionQuery->execute([$instructionId]);
     $instruction = $instructionQuery->fetch(PDO::FETCH_ASSOC);
@@ -36,10 +42,13 @@ $canManageRoutes = currentUserHasAnyPermission(['routes.manage']);
 $canApproveRoutes = currentUserHasAnyPermission(['routes.approve']);
 $isDispatcher = currentUserHasAnyPermission(['trips.create']);
 $canReview    = currentUserHasAnyPermission(['approvals.review']);
+$isOperationsHead = currentRoleKey() === 'operations_head';
+$showRequestActions = $canReview && !$isOperationsHead;
+$showRouteActions = ($canManageRoutes || $canApproveRoutes) && !$isOperationsHead;
 
 // ── Period filter (scopes the Dispatch Requests list below) ──────────────────
 $periods = [
-    'today' => 'Today', '1w' => 'This Week', '1m' => 'This Month',
+    'today' => 'Today', '1w' => 'Last 7 Days', '1m' => 'Last 1 Month',
     '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months', 'all' => 'All Time',
 ];
 $period = $_GET['period'] ?? 'all';
@@ -54,7 +63,7 @@ $rangeStart = match ($period) {
     default => null,
 };
 $rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
-$reqDateFilter = $rangeStartSql ? "AND dr.requested_at >= :rangeStart" : '';
+$reqDateFilter = $rangeStartSql ? "AND dr.submitted_at >= :rangeStart" : '';
 
 // ── Dropdown data ─────────────────────────────────────────────────────────────
 $scope = dispatcherScope();
@@ -66,89 +75,94 @@ if ($scope) {
     $truckSql .= " AND truck_type IN ($typePlaceholders)";
     $truckParams = $scope['truck_types'];
 }
+if ($instruction) {
+    // The Operations Head instruction names the truck type.
+    $truckSql .= ' AND truck_type = ?';
+    $truckParams[] = $instruction['truck_type'];
+}
 $truckSql .= ' ORDER BY plate_number';
 $truckQuery = $pdo->prepare($truckSql);
 $truckQuery->execute($truckParams);
 $availableTrucks = $truckQuery->fetchAll(PDO::FETCH_ASSOC);
 
+// employees.full_name: T-E1 compatibility column.
 $drivers = $pdo->query("
-    SELECT employee_id, full_name, license_number FROM employees
-    WHERE is_active = 1 AND license_number IS NOT NULL
+    SELECT employee_id, full_name, license_number, availability_status FROM employees
+    WHERE employment_status = 'Active' AND license_number IS NOT NULL
     ORDER BY full_name
 ")->fetchAll();
 
 $helpers = $pdo->query("
-    SELECT employee_id, full_name FROM employees
-    WHERE is_active = 1 ORDER BY full_name
+    SELECT employee_id, full_name, availability_status FROM employees
+    WHERE employment_status = 'Active' ORDER BY full_name
 ")->fetchAll();
 
+// A requested route stays inactive until its route_request approval, so
+// active routes are the approved ones.
 $routes = $pdo->query("
     SELECT route_id, route_name, origin, destination
-    FROM routes WHERE is_active = 1 AND approval_status = 'Approved' ORDER BY route_name
+    FROM routes WHERE is_active = 1 ORDER BY route_name
 ")->fetchAll();
 
+// The target has no parent (billing) client; the field stays NULL so the
+// form logic keeps working.
 $clients = $pdo->query("
-    SELECT client_id, client_name, parent_client_id
-    FROM clients WHERE is_active = 1 ORDER BY client_name
+    SELECT client_id, client_name, NULL AS parent_client_id
+    FROM clients WHERE status = 'Active' ORDER BY client_name
 ")->fetchAll();
+// Target client_locations have no pickup/delivery type: every location can
+// be an origin or a destination ('Both').
 $clientLocations = $pdo->query("
-    SELECT location_id, client_id, location_name, location_type, address
+    SELECT location_id, client_id, location_name, 'Both' AS location_type, address
     FROM client_locations WHERE is_active = 1
     ORDER BY client_id, location_name
 ")->fetchAll();
 
 // ── All routes for management tab ─────────────────────────────────────────────
+// approval_status / request_notes come from the latest route_request
+// approval; a route created directly by routes.manage has none ('Approved').
 $allRoutes = $pdo->query("
-    SELECT route_id, route_name, origin, destination,
-           distance_km, is_active, approval_status, request_notes
-    FROM routes ORDER BY route_name
+    SELECT r.route_id, r.route_name, r.origin, r.destination,
+           r.distance AS distance_km, r.is_active,
+           COALESCE(lr.status, 'Approved') AS approval_status,
+           (SELECT ah.remarks FROM approval_history ah
+             WHERE ah.approval_request_id = lr.approval_request_id AND ah.action = 'Submitted'
+             ORDER BY ah.approval_history_id LIMIT 1) AS request_notes
+    FROM routes r
+    LEFT JOIN approval_requests lr ON lr.approval_request_id = (
+        SELECT MAX(ar.approval_request_id)
+        FROM approval_requests ar
+        JOIN approval_workflows w ON w.workflow_id = ar.workflow_id AND w.workflow_key = 'route_request'
+        WHERE ar.entity_type = 'route' AND ar.entity_id = r.route_id
+    )
+    ORDER BY r.route_name
 ")->fetchAll();
 
 // ── Dispatch requests ─────────────────────────────────────────────────────────
 // Pending requests always show regardless of period (they need action now);
 // the period filter only narrows down the historical Approved/Rejected ones.
-$reqStmt = $pdo->prepare("
-    SELECT
-        dr.dispatch_id,
-        dr.status,
-        dr.shift,
-        dr.scheduled_at,
-        dr.remarks,
-        dr.client_name,
-        dr.booking_reference,
-        dr.waybill_reference,
-        dr.unit_count,
-        dr.requested_at,
-        dr.reviewed_at,
-        tr.plate_number,
-        tr.brand,
-        tr.model,
-        e_d.full_name   AS driver_name,
-        e_sd.full_name  AS second_driver_name,
-        e_h.full_name   AS helper_name,
-        origin.location_name AS origin_location_name,
-        destination.location_name AS destination_location_name,
-        r.route_name,
-        r.origin,
-        r.destination,
-        u_req.full_name AS requested_by,
-        u_apr.full_name AS approved_by
-    FROM dispatch_requests dr
-    JOIN trucks tr          ON dr.truck_id     = tr.truck_id
-    JOIN employees e_d      ON dr.driver_id    = e_d.employee_id
-    LEFT JOIN employees e_sd ON dr.second_driver_id = e_sd.employee_id
-    LEFT JOIN employees e_h ON dr.helper_id    = e_h.employee_id
-    LEFT JOIN client_locations origin ON dr.origin_location_id = origin.location_id
-    LEFT JOIN client_locations destination ON dr.destination_location_id = destination.location_id
-    JOIN routes r           ON dr.route_id     = r.route_id
-    JOIN users u_req        ON dr.requested_by = u_req.user_id
-    LEFT JOIN users u_apr   ON dr.approved_by  = u_apr.user_id
-    WHERE dr.status = 'Pending' " . ($rangeStartSql ? "OR (dr.status != 'Pending' $reqDateFilter)" : "OR dr.status != 'Pending'") . "
-    ORDER BY FIELD(dr.status,'Pending','Approved','Rejected'), dr.requested_at DESC
-");
+// Target: trips + dispatch_requests (includes/trip_queries.php).
+$reqStmt = $pdo->prepare(
+    tripSelectSql() . "
+    WHERE dr.dispatch_request_id IS NOT NULL
+      AND (dr.status = 'Pending' " . ($rangeStartSql ? "OR (dr.status != 'Pending' $reqDateFilter)" : "OR dr.status != 'Pending'") . ")
+    ORDER BY FIELD(dr.status,'Pending','Approved','Rejected','Cancelled'), dr.submitted_at DESC
+    LIMIT 500"
+);
 if ($rangeStartSql) $reqStmt->bindValue(':rangeStart', $rangeStartSql);
 $reqStmt->execute();
 $requests = $reqStmt->fetchAll();
+foreach ($requests as &$requestRow) {
+    // Keys the view uses: the trip's origin/destination text holds the
+    // client location chosen at submission; requester / reviewer names.
+    $requestRow['status'] = $requestRow['dispatch_status'];
+    $requestRow['origin_location_name'] = $requestRow['trip_origin'];
+    $requestRow['destination_location_name'] = $requestRow['trip_destination'];
+    $requestRow['waybill_reference'] = null;
+    $requestRow['requested_by'] = $requestRow['requested_by_name'];
+    $requestRow['approved_by'] = $requestRow['approved_by_name'];
+}
+unset($requestRow);
 
 $pendingCount = count(array_filter($requests, fn($r) => $r['status'] === 'Pending'));
 $activeRoutes = count(array_filter($allRoutes, fn($r) => $r['is_active']));
@@ -164,9 +178,9 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
         Encoding Operations Head instruction #<?= (int)$instruction['instruction_id'] ?> —
         <?= htmlspecialchars($instruction['shift']) ?> Shift.
       <?php else: ?>
-        <?php if (currentRoleId() === ROLE_DISPATCHER): ?>
+        <?php if ($isDispatcher && !isAdmin()): ?>
           Choose an instruction from the Dispatcher Queue to encode.
-        <?php elseif ($canReview && currentRoleId() !== ROLE_ADMIN): ?>
+        <?php elseif ($canReview && !isAdmin()): ?>
           Review trip requests submitted by Dispatchers.
         <?php endif; ?>
       <?php endif; ?>
@@ -181,7 +195,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
         <?php endforeach; ?>
       </select>
     </form>
-    <?php if ($isDispatcher && currentRoleId() === ROLE_DISPATCHER && !$instruction): ?>
+    <?php if ($isDispatcher && !isAdmin() && !$instruction): ?>
     <a class="btn btn-primary btn-sm d-flex align-items-center gap-2"
        href="<?= APP_BASE ?>/pages/dispatch_inbox.php">
       <i class="bi bi-inbox"></i> Dispatch Queue
@@ -262,7 +276,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
               <th>Scheduled</th>
               <th>Status</th>
               <th>Reviewed By</th>
-              <?php if ($canReview): ?>
+              <?php if ($showRequestActions): ?>
               <th>Action</th>
               <?php endif; ?>
             </tr>
@@ -270,7 +284,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
           <tbody id="dispatchBody">
             <?php if (empty($requests)): ?>
             <tr>
-              <td colspan="<?= $canReview ? 10 : 9 ?>" class="text-center text-muted py-4">
+              <td colspan="<?= $showRequestActions ? 10 : 9 ?>" class="text-center text-muted py-4">
               
               </td>
             </tr>
@@ -357,7 +371,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                 </div>
                 <?php endif; ?>
               </td>
-              <?php if ($canReview): ?>
+              <?php if ($showRequestActions): ?>
               <td>
                 <?php if ($req['status'] === 'Pending'): ?>
                 <div class="d-flex gap-1">
@@ -423,7 +437,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
               <th>Requester Note</th>
               <th>Approval Status</th>
               <th>Map</th>
-              <?php if ($canManageRoutes || $canApproveRoutes): ?>
+              <?php if ($showRouteActions): ?>
               <th>Actions</th>
               <?php endif; ?>
             </tr>
@@ -459,7 +473,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                   <i class="bi bi-map"></i>
                 </button>
               </td>
-              <?php if ($canManageRoutes || $canApproveRoutes): ?>
+              <?php if ($showRouteActions): ?>
               <td>
                 <div class="d-flex gap-1">
                   <?php if ($canApproveRoutes && $rt['approval_status'] === 'Pending'): ?>
@@ -598,15 +612,6 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             </select>
           </div>
           <div class="col-md-6">
-            <label class="disp-label">Billing Client <span class="text-muted">(optional)</span></label>
-            <select class="form-select disp-input" id="d_billing_client">
-              <option value="">— Use client’s parent, or the selected client —</option>
-              <?php foreach ($clients as $client): ?>
-              <option value="<?= (int)$client['client_id'] ?>"><?= htmlspecialchars($client['client_name']) ?></option>
-              <?php endforeach; ?>
-            </select>
-          </div>
-          <div class="col-md-6">
             <label class="disp-label">Pickup Location <span class="text-danger">*</span></label>
             <select class="form-select disp-input" id="d_origin_location" disabled required>
               <option value="">— Select client first —</option>
@@ -648,19 +653,21 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             <label class="disp-label">Expected Arrival <span class="text-muted">(optional)</span></label>
             <input type="datetime-local" class="form-control disp-input" id="d_expected_arrival">
           </div>
-          <div class="col-md-4">
-            <label class="disp-label">Booking / Nomination Ref.</label>
-            <input class="form-control disp-input" id="d_booking_reference" maxlength="100">
+          <?php if ($instruction): ?>
+          <?php /* Booking reference and unit count come from the Operations
+                   Head instruction (client_bookings); the waybill number is
+                   recorded with the delivery details (trip_deliveries). */ ?>
+          <div class="col-md-6">
+            <label class="disp-label">Instruction / Booking Ref.</label>
+            <input class="form-control disp-input" id="d_booking_reference" readonly
+                   value="<?= htmlspecialchars((string)$instruction['booking_reference']) ?>">
           </div>
-          <div class="col-md-4">
-            <label class="disp-label">Waybill / DR Ref.</label>
-            <input class="form-control disp-input" id="d_waybill_reference" maxlength="100">
-          </div>
-          <div class="col-md-4">
+          <div class="col-md-6">
             <label class="disp-label">Unit Count</label>
-            <input type="number" min="0.01" step="0.01" class="form-control disp-input" id="d_unit_count"
-                   value="<?= $instruction && $instruction['unit_count'] !== null ? htmlspecialchars((string)$instruction['unit_count']) : '' ?>">
+            <input class="form-control disp-input" id="d_unit_count" readonly
+                   value="<?= htmlspecialchars((string)$instruction['unit_count']) ?>">
           </div>
+          <?php endif; ?>
           <div class="col-12">
             <label class="disp-label">Remarks <span class="text-muted">(optional)</span></label>
             <textarea class="form-control disp-input" id="d_remarks" rows="2"

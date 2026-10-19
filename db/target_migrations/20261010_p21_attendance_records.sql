@@ -1,0 +1,127 @@
+-- ============================================================
+-- P-21M: attendance_records compatibility (DRAFT FOR REVIEW)
+-- File: db/target_migrations/20261010_p21_attendance_records.sql
+--
+-- STATUS: NOT EXECUTED and NOT APPROVED FOR EXECUTION.
+--   This file is a review draft only. Execute it only after explicit
+--   approval, against a disposable scratch copy of the target schema first,
+--   with a backup taken beforehand.
+--
+-- TARGET DATABASE: mulawin_fleetops_new ONLY.
+--   Do NOT apply to the current application database (mulawin_fleetops),
+--   which uses the legacy employee_attendance table instead.
+--   This file deliberately lives outside db/*_migration.sql so the existing
+--   "apply every db/*_migration.sql" setup step never picks it up.
+--   It contains no USE statement: the operator must select the target
+--   database explicitly before running it.
+--
+-- SCOPE: one ALTER TABLE on the existing target table attendance_records.
+--   1. status: keeps every existing value in its existing order and appends
+--      'On Duty':
+--        ENUM('Present','Absent','Late','Half Day','Leave','On Duty') NOT NULL
+--      No default is added (the target column has none). No automatic rules
+--      for 'Late' or 'Half Day' are introduced by this file.
+--   2. overtime_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 0 (new column)
+--   3. overtime_reason  VARCHAR(255) NULL                   (new column)
+--   4. open_shift_employee_id INT UNSIGNED, a VIRTUAL generated column that
+--      equals employee_id while a shift is open (time_in set, time_out
+--      NULL) and is NULL otherwise, plus
+--      UNIQUE KEY uq_attendance_single_open_shift. UNIQUE allows any number
+--      of NULLs, so only open shifts are limited, to one per employee.
+--   It does not DROP, TRUNCATE, INSERT, UPDATE or DELETE anything, and does
+--   not change time_in/time_out (already DATETIME), remarks, or the existing
+--   keys and constraints. Application code still has to be adapted
+--   separately (batches P21-1 to P21-3).
+--
+-- DATABASE VERSION ASSUMPTIONS:
+--   - Target: MySQL 8.x (db/reference/mulawin_fleetops_new.sql, header).
+--     Virtual generated columns with a UNIQUE secondary index are supported
+--     by InnoDB in MySQL 5.7.8+ and 8.x. CHECK constraints are enforced from
+--     8.0.16.
+--   - Local server: MariaDB 10.4.32 (C:\xampp\readme_en.txt). Indexes,
+--     including UNIQUE, on VIRTUAL columns are supported from 10.2.3. CHECK
+--     constraints are enforced from 10.2.1.
+--   - The legacy schema already used this exact open-shift pattern on
+--     employee_attendance (db/mulawin_fleetops_db.sql, lines 1911-1915).
+--   - Uses no ADD COLUMN IF NOT EXISTS (not supported by MySQL 8).
+--   - None of this has been tested on a server. Confirm the exact server
+--     version (SELECT VERSION()) before execution.
+--
+-- NOTE: SQL examples in these comments intentionally have no statement
+--   terminators, so no tool that splits on terminators can turn a comment
+--   into an executable statement.
+--
+-- READ-ONLY PRE-CHECKS (all must return no rows unless stated otherwise):
+--   a) Correct database                                  -- [mulawin_fleetops_new]
+--        SELECT DATABASE()
+--   b) Columns this file adds must not exist yet         -- [no rows]
+--        SELECT COLUMN_NAME FROM information_schema.COLUMNS
+--         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'attendance_records'
+--           AND COLUMN_NAME IN ('overtime_minutes', 'overtime_reason',
+--                               'open_shift_employee_id')
+--   c) Index this file adds must not exist yet           -- [no rows]
+--        SELECT INDEX_NAME FROM information_schema.STATISTICS
+--         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'attendance_records'
+--           AND INDEX_NAME = 'uq_attendance_single_open_shift'
+--   d) Current status definition is the expected one
+--        [ENUM('Present','Absent','Late','Half Day','Leave')]
+--        SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+--         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'attendance_records'
+--           AND COLUMN_NAME = 'status'
+--   e) Status values outside the new list (e.g. '' stored by a non-strict
+--      server) would block or be altered by the ENUM change   -- [no rows]
+--        SELECT attendance_id, status FROM attendance_records
+--         WHERE status NOT IN ('Present','Absent','Late','Half Day','Leave','On Duty')
+--   f) More than one open shift per employee would make the new UNIQUE
+--      key fail                                             -- [no rows]
+--        SELECT employee_id, COUNT(*) AS open_shifts FROM attendance_records
+--         WHERE time_in IS NOT NULL AND time_out IS NULL
+--         GROUP BY employee_id HAVING COUNT(*) > 1
+--   g) Duplicate employee/date rows (should be impossible because of
+--      uq_attendance_employee_date, checked for completeness)  -- [no rows]
+--        SELECT employee_id, attendance_date, COUNT(*) FROM attendance_records
+--         GROUP BY employee_id, attendance_date HAVING COUNT(*) > 1
+--   h) Rows violating the existing time order check (informational: this
+--      file does not touch it, but a copy of legacy TIME data could)
+--                                                           -- [no rows]
+--        SELECT attendance_id FROM attendance_records
+--         WHERE time_in IS NOT NULL AND time_out IS NOT NULL AND time_out < time_in
+--   If any check returns rows, STOP. Resolving them is a separate, approved
+--   data correction. This file never changes data.
+--
+-- EXECUTION AND RERUN:
+--   This is a single ALTER TABLE statement, so all four changes are applied
+--   together or not at all. A rerun fails with a duplicate-column error and
+--   changes nothing. Appending to the end of an ENUM keeps the stored values
+--   and their order unchanged.
+--
+-- RECOVERY / ROLLBACK (only with explicit approval):
+--   - Open-shift guard: safe to remove at any time. The generated column is
+--     derived from time_in/time_out, so dropping it loses no data:
+--       ALTER TABLE attendance_records DROP INDEX uq_attendance_single_open_shift,
+--         DROP COLUMN open_shift_employee_id
+--   - Overtime columns: dropping them PERMANENTLY DELETES every stored
+--     overtime_minutes and overtime_reason value. Export them first if any
+--     rows have been written since this migration:
+--       ALTER TABLE attendance_records DROP COLUMN overtime_minutes,
+--         DROP COLUMN overtime_reason
+--   - 'On Duty' status: it can only be removed once no row uses it. Rows
+--     with 'On Duty' must first be changed to another status, which changes
+--     business data and needs its own approval. Removing the value while
+--     such rows exist fails on a strict server, and on a non-strict server
+--     turns those statuses into '' (data loss). Check first:
+--       SELECT COUNT(*) FROM attendance_records WHERE status = 'On Duty'
+--     then, only if the count is 0:
+--       ALTER TABLE attendance_records MODIFY COLUMN status
+--         ENUM('Present','Absent','Late','Half Day','Leave') NOT NULL
+-- ============================================================
+
+ALTER TABLE attendance_records
+    MODIFY COLUMN status ENUM('Present','Absent','Late','Half Day','Leave','On Duty') NOT NULL,
+    ADD COLUMN overtime_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER remarks,
+    ADD COLUMN overtime_reason VARCHAR(255) NULL AFTER overtime_minutes,
+    ADD COLUMN open_shift_employee_id INT UNSIGNED
+        GENERATED ALWAYS AS (
+            CASE WHEN time_in IS NOT NULL AND time_out IS NULL THEN employee_id ELSE NULL END
+        ) VIRTUAL,
+    ADD UNIQUE KEY uq_attendance_single_open_shift (open_shift_employee_id);

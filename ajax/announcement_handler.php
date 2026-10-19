@@ -16,8 +16,19 @@ require_once __DIR__ . '/../includes/db_helpers.php';
 
 header('Content-Type: application/json');
 
-// Only Head Management can post, edit, or delete
-requireRole([ROLE_HEAD_MANAGEMENT]);
+// Only Admin can post, edit, or delete: the validated role key (isAdmin),
+// not a legacy role grant. Unauthorized responses match requireRole():
+// login check first, then a 403 JSON reply for JSON/AJAX requests,
+// otherwise the 403 page.
+requireLogin();
+if (!isAdmin()) {
+    if (isJsonRequest()) {
+        sendJsonAccessResponse(403, 'You do not have permission to perform this action.');
+    }
+    http_response_code(403);
+    include __DIR__ . '/../pages/403.php';
+    exit;
+}
 requirePostMethod();
 enforceCsrf();
 
@@ -81,7 +92,7 @@ function readAnnouncementWindow(array $post): array {
 
 // ---- ADD --------------------------------------------------
 if ($action === 'add') {
-    $title    = requiredString('title', 'Title', 200);
+    $title    = requiredString('title', 'Title', 180);
     $body     = requiredString('body', 'Message');
     $priority = readPriority($_POST);
     $isPinned = readPinnedFlag($_POST);
@@ -90,8 +101,8 @@ if ($action === 'add') {
 
     $stmt = $pdo->prepare(
         "INSERT INTO announcements
-            (created_by, title, body, priority, is_pinned, audience, starts_at, ends_at)
-         VALUES (:user, :title, :body, :priority, :pinned, :audience, :starts_at, :ends_at)"
+            (created_by, title, content, priority, is_pinned, audience, start_date, end_date, is_active)
+         VALUES (:user, :title, :body, :priority, :pinned, :audience, :starts_at, :ends_at, 1)"
     );
     $stmt->execute([
         ':user'     => currentUserId(),
@@ -112,7 +123,7 @@ if ($action === 'add') {
 // ---- EDIT ---------------------------------------------------
 if ($action === 'edit') {
     $id       = requiredInt('announcement_id', 'Announcement ID', 1);
-    $title    = requiredString('title', 'Title', 200);
+    $title    = requiredString('title', 'Title', 180);
     $body     = requiredString('body', 'Message');
     $priority = readPriority($_POST);
     $isPinned = readPinnedFlag($_POST);
@@ -123,8 +134,8 @@ if ($action === 'edit') {
 
     $pdo->prepare(
         "UPDATE announcements
-            SET title = :title, body = :body, priority = :priority, is_pinned = :pinned,
-                audience = :audience, starts_at = :starts_at, ends_at = :ends_at
+            SET title = :title, content = :body, priority = :priority, is_pinned = :pinned,
+                audience = :audience, start_date = :starts_at, end_date = :ends_at
           WHERE announcement_id = :id"
     )->execute([
         ':title'    => $title,

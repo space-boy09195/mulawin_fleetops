@@ -21,6 +21,7 @@
 //
 
 require_once __DIR__ . '/prescriptive_analytics.php';
+require_once __DIR__ . '/../includes/finance_records.php';
 
 function getDiagnosticAlerts(PDO $pdo, array $metrics, string $periodLabel): array {
     $alerts = [];
@@ -48,15 +49,17 @@ function getDiagnosticAlerts(PDO $pdo, array $metrics, string $periodLabel): arr
                 $contributorNote = '';
                 if ($rangeStartSql) {
                     $stmt = $pdo->prepare("
-                        SELECT tr.plate_number, tr.brand, tr.model, SUM(mr.cost) AS total_cost
+                        SELECT tr.plate_number, tr.brand, tr.model, SUM(mr.total_cost) AS total_cost
                         FROM maintenance_records mr
                         JOIN trucks tr ON tr.truck_id = mr.truck_id
-                        WHERE mr.date_performed >= :rangeStart
-                        GROUP BY tr.truck_id
+                        WHERE mr.status <> 'Cancelled'
+                          AND " . maintenanceRecordDateSql('mr') . " >= :rangeStart
+                          AND " . maintenanceRecordDateSql('mr') . " < :rangeEnd
+                        GROUP BY tr.truck_id, tr.plate_number, tr.brand, tr.model
                         ORDER BY total_cost DESC
                         LIMIT 1
                     ");
-                    $stmt->execute([':rangeStart' => $rangeStartSql]);
+                    $stmt->execute([':rangeStart' => $rangeStartSql, ':rangeEnd' => $metrics['rangeEndSql'] ?? date('Y-m-d 00:00:00', strtotime('tomorrow'))]);
                     $topTruck = $stmt->fetch(PDO::FETCH_ASSOC);
                     if ($topTruck) {
                         $label = trim($topTruck['brand'] . ' ' . $topTruck['model']) . ' (' . $topTruck['plate_number'] . ')';

@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 
 requireAnyPermission(['parts.view', 'parts.manage']);
 
@@ -13,7 +14,7 @@ $pdo = getDBConnection();
 
 // ── Period filter (scopes the Movements list — Stock Levels stays live/current) ─
 $periods = [
-    'today' => 'Today', '1w' => 'This Week', '1m' => 'This Month',
+    'today' => 'Today', '1w' => 'Last 7 Days', '1m' => 'Last 1 Month',
     '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months', 'all' => 'All Time',
 ];
 $period = $_GET['period'] ?? 'all';
@@ -28,9 +29,14 @@ $rangeStart = match ($period) {
     default => null,
 };
 $rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
-$movDateFilter = $rangeStartSql ? "AND pm.moved_at >= :rangeStart" : '';
+$movDateFilter = $rangeStartSql ? "AND it.transaction_date >= :rangeStart" : '';
 
 // ── Parts inventory ───────────────────────────────────────────────────────────
+// Target: parts (catalog) + inventory (quantity_on_hand) + suppliers.
+// The catalog has a warranty period, not an expiry date. warranty_expiry
+// here is the earliest warranty end of installed units of the part
+// (maintenance_parts issue date + period) within 30 days either side of
+// today, the same rule as the expiry reminders.
 $partsSql = "
     SELECT
         p.part_id,
@@ -38,47 +44,65 @@ $partsSql = "
         p.part_name,
         p.category,
         p.unit,
-        p.quantity,
+        COALESCE(i.quantity_on_hand, 0) AS quantity,
         p.reorder_level,
         p.unit_cost,
-        p.warranty_expiry,
-        p.supplier,
-        p.updated_at,
-        (p.quantity <= p.reorder_level) AS is_low_stock,
-        (p.warranty_expiry IS NOT NULL AND p.warranty_expiry <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)) AS warranty_expiring
-    FROM parts_inventory p
+        p.warranty_period_days,
+        w.next_warranty_end AS warranty_expiry,
+        s.supplier_name AS supplier,
+        COALESCE(i.updated_at, p.updated_at) AS updated_at,
+        (COALESCE(i.quantity_on_hand, 0) <= p.reorder_level) AS is_low_stock,
+        (w.next_warranty_end IS NOT NULL) AS warranty_expiring
+    FROM parts p
+    LEFT JOIN inventory i ON i.part_id = p.part_id
+    LEFT JOIN suppliers s ON s.supplier_id = p.supplier_id
+    LEFT JOIN (
+        SELECT mp.part_id,
+               MIN(DATE_ADD(DATE(mp.issued_at), INTERVAL wp.warranty_period_days DAY)) AS next_warranty_end
+        FROM maintenance_parts mp
+        JOIN parts wp ON wp.part_id = mp.part_id
+        WHERE wp.warranty_period_days IS NOT NULL AND wp.warranty_period_days > 0
+          AND DATE_ADD(DATE(mp.issued_at), INTERVAL wp.warranty_period_days DAY)
+              BETWEEN DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+        GROUP BY mp.part_id
+    ) w ON w.part_id = p.part_id
+    WHERE p.is_active = 1
     ORDER BY p.category ASC, p.part_name ASC
 ";
 $parts = $pdo->query($partsSql)->fetchAll(PDO::FETCH_ASSOC);
 $inventoryValue = array_reduce(
     $parts,
-    static fn($carry, $part) => $carry + ($part['unit_cost'] !== null ? $part['unit_cost'] * $part['quantity'] : 0),
+    static fn($carry, $part) => $carry + ((float)$part['unit_cost'] * (float)$part['quantity']),
     0.0
 );
 $warrantyExpiringCount = count(array_filter($parts, fn($p) => $p['warranty_expiring']));
 
 // ── Recent movements ──────────────────────────────────────────────────────────
+// inventory_transactions quantities are positive; the signed change shown
+// here follows the direction rule in ajax/parts_handler.php.
 $movementsSql = "
     SELECT
-        pm.movement_id,
-        pm.movement_type,
-        pm.quantity,
-        pm.unit_cost,
-        pm.reference_number,
-        pm.notes,
-        pm.moved_at,
+        it.inventory_transaction_id AS movement_id,
+        it.transaction_type AS movement_type,
+        CASE WHEN it.transaction_type = 'Stock Out' OR it.reference_type = 'count_decrease'
+             THEN -it.quantity ELSE it.quantity END AS quantity,
+        it.unit_cost,
+        NULL AS reference_number,
+        it.remarks AS notes,
+        it.transaction_date AS moved_at,
         p.part_name,
         p.part_id,
         p.unit,
-        u.full_name AS recorded_by_name,
-        mr.record_id,
+        COALESCE(ue.full_name, u.username) AS recorded_by_name,
+        mr.maintenance_id AS record_id,
         mr.maintenance_type
-    FROM parts_movements pm
-    JOIN parts_inventory p ON pm.part_id      = p.part_id
-    JOIN users u           ON pm.recorded_by  = u.user_id
-    LEFT JOIN maintenance_records mr ON pm.maintenance_id = mr.record_id
+    FROM inventory_transactions it
+    JOIN parts p           ON it.part_id = p.part_id
+    LEFT JOIN users u      ON it.performed_by = u.user_id
+    LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+    LEFT JOIN maintenance_records mr ON it.reference_type = 'maintenance' AND it.reference_id = mr.maintenance_id
     WHERE 1=1 $movDateFilter
-    ORDER BY pm.moved_at DESC
+    ORDER BY it.transaction_date DESC, it.inventory_transaction_id DESC
     LIMIT 100
 ";
 $movementsStmt = $pdo->prepare($movementsSql);
@@ -89,11 +113,14 @@ $movements = $movementsStmt->fetchAll(PDO::FETCH_ASSOC);
 // Recent maintenance jobs, for optionally linking a parts movement to the
 // job that consumed the part (last 90 days keeps the dropdown manageable).
 $recentJobs = $pdo->query("
-    SELECT mr.record_id, mr.maintenance_type, mr.date_performed, tr.plate_number
+    SELECT mr.maintenance_id AS record_id, mr.maintenance_type,
+           COALESCE(mr.actual_completion_date, mr.start_date, mr.scheduled_date, DATE(mr.created_at)) AS date_performed,
+           tr.plate_number
     FROM maintenance_records mr
     JOIN trucks tr ON tr.truck_id = mr.truck_id
-    WHERE mr.date_performed >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
-    ORDER BY mr.date_performed DESC
+    WHERE mr.status <> 'Cancelled'
+      AND COALESCE(mr.actual_completion_date, mr.start_date, mr.scheduled_date, DATE(mr.created_at)) >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+    ORDER BY date_performed DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Categories for filter ─────────────────────────────────────────────────────
@@ -103,7 +130,7 @@ sort($categories);
 // ── Low stock count for badge ─────────────────────────────────────────────────
 $lowStockCount = count(array_filter($parts, fn($p) => $p['is_low_stock']));
 
-$movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
+$movementTypes = PARTS_MOVEMENT_TYPES;
 ?>
 
 <div class="pts-page">
@@ -128,10 +155,12 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
           <?php endforeach; ?>
         </select>
       </form>
+      <?php if (currentUserHasAnyPermission(['parts.manage']) && !isAdmin()): ?>
       <button class="btn btn-pts-secondary" data-bs-toggle="modal" data-bs-target="#movementModal">
         <i class="bi bi-arrow-left-right me-1"></i> Record Movement
       </button>
-      <?php if (currentRoleId() === ROLE_HEAD_MANAGEMENT): ?>
+      <?php endif; ?>
+      <?php if (currentUserHasAnyPermission(['parts.catalog.manage'])): ?>
       <button class="btn btn-pts-primary" data-bs-toggle="modal" data-bs-target="#addPartModal">
         <i class="bi bi-plus-lg me-1"></i> Add Part
       </button>
@@ -297,9 +326,11 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
               </td>
               <td class="pts-date">
                 <?php if ($part['warranty_expiry']): ?>
-                <span class="<?= $part['warranty_expiring'] ? 'text-danger fw-semibold' : '' ?>">
+                <span class="text-danger fw-semibold" title="Earliest warranty end of installed units">
                   <?= date('M d, Y', strtotime($part['warranty_expiry'])) ?>
                 </span>
+                <?php elseif ($part['warranty_period_days']): ?>
+                <span class="text-muted"><?= (int)$part['warranty_period_days'] ?> days</span>
                 <?php else: ?>
                 <span class="text-muted">—</span>
                 <?php endif; ?>
@@ -455,7 +486,7 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
               <th>Category</th>
               <th>Supplier</th>
               <th>Current Stock</th>
-              <th>Warranty Expiry</th>
+              <th>Installed Warranty Ends</th>
             </tr>
           </thead>
           <tbody>
@@ -546,8 +577,8 @@ $movementTypes = ['Stock In', 'Stock Out', 'Adjustment'];
                    placeholder="Optional">
           </div>
           <div class="col-md-4">
-            <label class="form-label pts-label" for="apWarrantyExpiry">Warranty Expiry</label>
-            <input type="date" class="form-control pts-input" id="apWarrantyExpiry">
+            <label class="form-label pts-label" for="apWarrantyDays">Warranty Period (days)</label>
+            <input type="number" min="1" max="99999" step="1" class="form-control pts-input" id="apWarrantyDays" placeholder="e.g. 365">
           </div>
         </div>
       </div>

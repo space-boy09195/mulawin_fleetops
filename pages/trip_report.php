@@ -2,26 +2,24 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/crew_trip_access.php';
+require_once __DIR__ . '/../includes/trip_queries.php';
+require_once __DIR__ . '/../includes/trip_workflow.php';
 
-requireAnyPermission(['trips.view', 'billing.view']);
+// trips.view or billing.view, or a Helper limited to trips assigned to them.
+$helperEmployeeId = tripPageAccess(['trips.view', 'billing.view']);
 
 $tripId = filter_input(INPUT_GET, 'trip_id', FILTER_VALIDATE_INT);
 if (!$tripId) {
     http_response_code(400);
     exit('Invalid trip.');
 }
+if ($helperEmployeeId !== null) {
+    requireHelperAssignedToTrip((int)$tripId, $helperEmployeeId);
+}
 
 $pdo = getDBConnection();
-$tripStmt = $pdo->prepare("
-    SELECT t.trip_id, t.trip_number, t.status, t.actual_arrival, tr.plate_number,
-           e.full_name AS driver_name, r.origin, r.destination
-    FROM trips t
-    JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
-    JOIN trucks tr ON tr.truck_id = dr.truck_id
-    JOIN employees e ON e.employee_id = dr.driver_id
-    JOIN routes r ON r.route_id = dr.route_id
-    WHERE t.trip_id = ?
-");
+$tripStmt = $pdo->prepare(tripSelectSql() . ' WHERE t.trip_id = ?');
 $tripStmt->execute([$tripId]);
 $trip = $tripStmt->fetch(PDO::FETCH_ASSOC);
 if (!$trip) {
@@ -29,22 +27,27 @@ if (!$trip) {
     exit('Trip not found.');
 }
 
+// Trip documents through document_links (target).
 $docsStmt = $pdo->prepare("
-    SELECT document_id, doc_type, file_name, description, uploaded_at
-    FROM documents
-    WHERE trip_id = ? AND visibility_scope IN ('all', 'operations')
-    ORDER BY uploaded_at
+    SELECT d.document_id, d.document_category AS doc_type, f.original_name AS file_name,
+           d.description, f.uploaded_at
+    FROM document_links dl
+    JOIN documents d ON d.document_id = dl.document_id
+    JOIN files f ON f.file_id = d.file_id
+    WHERE dl.entity_type = 'trip' AND dl.entity_id = ?
+      AND COALESCE(d.visibility_scope, 'all') IN ('all', 'operations')
+    ORDER BY f.uploaded_at
 ");
 $docsStmt->execute([$tripId]);
 $documents = $docsStmt->fetchAll(PDO::FETCH_ASSOC);
-$deliveryStmt = $pdo->prepare(
-    'SELECT delivered_unit_count, delivery_receipt_number, shared_waybill_reference,
-            co_load_reference, delivery_notes, return_location, return_notes
-     FROM trip_delivery_return_details
-     WHERE trip_id = ?'
-);
+$deliveryStmt = $pdo->prepare('SELECT * FROM trip_deliveries WHERE trip_id = ?');
 $deliveryStmt->execute([$tripId]);
-$deliveryReturn = $deliveryStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+$returnStmt = $pdo->prepare('SELECT * FROM trip_returns WHERE trip_id = ?');
+$returnStmt->execute([$tripId]);
+$deliveryReturn = tripDeliveryFormValues(
+    $deliveryStmt->fetch(PDO::FETCH_ASSOC) ?: null,
+    $returnStmt->fetch(PDO::FETCH_ASSOC) ?: null
+);
 
 layoutHead('Trip Report', APP_BASE . '/assets/css/trip_monitor.css');
 ?>

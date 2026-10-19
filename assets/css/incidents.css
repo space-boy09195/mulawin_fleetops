@@ -181,12 +181,16 @@
   white-space: nowrap;
 }
 
-.inc-type-vehicle-breakdown {
+.inc-type-vehicle-breakdown,
+.inc-type-breakdown,
+.inc-type-accident {
   background: rgba(220, 53, 69, 0.12);
   color: #b02a37;
 }
 
-.inc-type-item-damage {
+.inc-type-item-damage,
+.inc-type-damage,
+.inc-type-missing-equipment {
   background: rgba(255, 145, 0, 0.12);
   color: #a05a00;
 }
@@ -401,8 +405,12 @@ textarea.inc-input {
    These status colors were tuned for light backgrounds only; on the
    dark theme's near-black blended backgrounds several dropped below
    2.5:1 contrast (WCAG AA requires 4.5:1 for text). ── */
-[data-theme="dark"] .inc-type-vehicle-breakdown { color: #f87171; }
-[data-theme="dark"] .inc-type-item-damage { color: #fbbf24; }
+[data-theme="dark"] .inc-type-vehicle-breakdown,
+[data-theme="dark"] .inc-type-breakdown,
+[data-theme="dark"] .inc-type-accident { color: #f87171; }
+[data-theme="dark"] .inc-type-item-damage,
+[data-theme="dark"] .inc-type-damage,
+[data-theme="dark"] .inc-type-missing-equipment { color: #fbbf24; }
 [data-theme="dark"] .inc-type-delay { color: #60a5fa; }
 [data-theme="dark"] .inc-status-open { color: #f87171; }
 [data-theme="dark"] .inc-status-resolved { color: #4ade80; }

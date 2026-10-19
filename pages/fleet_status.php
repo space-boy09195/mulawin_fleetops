@@ -9,6 +9,9 @@ require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/enums.php';
+require_once __DIR__ . '/../includes/truck_records.php';
+require_once __DIR__ . '/../includes/trip_queries.php';
+require_once __DIR__ . '/../includes/metrics.php';
 
 requirePermission('fleet.view');
 
@@ -16,45 +19,13 @@ $GLOBALS['page_js'] = APP_BASE . '/assets/js/fleet_status.js';
 
 $pdo = getDBConnection();
 
-// ── Summary counts ────────────────────────────────────────────────────────────
-$summaryStmt = $pdo->query("SELECT status, COUNT(*) AS cnt FROM trucks GROUP BY status");
-$summary = ['Available' => 0, 'Deployed' => 0, 'Under Maintenance' => 0, 'Inactive' => 0];
-foreach ($summaryStmt->fetchAll() as $row) {
-    $summary[$row['status']] = (int)$row['cnt'];
-}
-$totalTrucks = array_sum($summary);
-
 // ── Full truck list with active trip info ─────────────────────────────────────
-// Joined via a derived table (ROW_NUMBER per truck) rather than a plain JOIN —
-// a truck can have many historical 'Approved' dispatch_requests over its
-// lifetime, and a plain join on status alone would produce one duplicate row
-// per historical dispatch instead of just the truck's current active one.
+// The current trip comes from a derived table (ROW_NUMBER per truck), so a
+// truck with several open trips still appears once. Profile fields kept in
+// related tables come from includes/truck_records.php.
 $trucks = $pdo->query("
     SELECT
-        t.truck_id,
-        t.plate_number,
-        t.unit_number,
-        t.truck_type,
-        t.chassis_number,
-        t.engine_number,
-        t.mv_file_number,
-        t.registration_expiry,
-        t.insurance_provider,
-        t.insurance_policy_number,
-        t.insurance_expiry,
-        t.warranty_expiry,
-        t.brand,
-        t.model,
-        t.year_model,
-        t.body_type,
-        t.fuel_type,
-        t.capacity_tons,
-        t.image_path,
-        t.image_front_path,
-        t.image_side_path,
-        t.image_rear_path,
-        t.image_top_path,
-        t.status,
+        " . truckProfileColumnsSql() . ",
         cur.trip_number,
         cur.driver_name,
         cur.origin,
@@ -62,21 +33,29 @@ $trucks = $pdo->query("
     FROM trucks t
     LEFT JOIN (
         SELECT
-            dr.truck_id, tr.trip_number, e.full_name AS driver_name,
-            r.origin, r.destination,
-            ROW_NUMBER() OVER (PARTITION BY dr.truck_id ORDER BY tr.created_at DESC) AS rn
-        FROM dispatch_requests dr
-        JOIN trips tr      ON tr.dispatch_id = dr.dispatch_id
-                           AND tr.status NOT IN ('Completed','Cancelled')
-        LEFT JOIN employees e ON dr.driver_id = e.employee_id
-        LEFT JOIN routes r    ON dr.route_id  = r.route_id
+            tp.truck_id, tp.trip_number, e.full_name AS driver_name,
+            COALESCE(r.origin, tp.origin) AS origin,
+            COALESCE(r.destination, tp.destination) AS destination,
+            ROW_NUMBER() OVER (PARTITION BY tp.truck_id ORDER BY tp.created_at DESC) AS rn
+        FROM trips tp
+        LEFT JOIN dispatch_requests dr ON dr.trip_id = tp.trip_id
+        LEFT JOIN employees e ON tp.driver_id = e.employee_id
+        LEFT JOIN routes r    ON tp.route_id  = r.route_id
+        WHERE tp.truck_id IS NOT NULL
+          AND tp.status NOT IN ('Completed','Cancelled')
+          AND " . tripOperationalSql('tp', 'dr') . "
     ) cur ON cur.truck_id = t.truck_id AND cur.rn = 1
     ORDER BY
-        FIELD(t.status,'Deployed','Available','Under Maintenance','Inactive'),
+        FIELD(t.status,'On Trip','Assigned','Available','Under Maintenance','Unavailable'),
         t.plate_number
 ")->fetchAll();
+foreach ($trucks as &$truckRow) {
+    // The legacy single image column is the front view.
+    $truckRow['image_path'] = $truckRow['image_front_path'];
+}
+unset($truckRow);
 
-$isHead = currentRoleId() === ROLE_HEAD_MANAGEMENT;
+$isHead = isAdmin() || currentUserHasAnyPermission(['fleet.manage']); // Truck add/edit, matching ajax/trucks_handler.php
 
 layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
 ?>
@@ -84,7 +63,7 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
 <div class="page-header d-flex align-items-start justify-content-between flex-wrap gap-3">
   <div>
     <h1 class="page-title">Fleet Status</h1>
-    <p class="page-subtitle">Real-time overview of all <?= $totalTrucks ?> trucks</p>
+    <p class="page-subtitle">Current truck records, stored statuses, and active assignments.</p>
   </div>
   <div class="d-flex gap-2">
     <?php if ($isHead): ?>
@@ -93,7 +72,7 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
       <i class="bi bi-plus-lg"></i> Add Truck
     </button>
     <?php endif; ?>
-    <?php if (in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER])): ?>
+    <?php if (isAdmin() || currentUserHasAnyPermission(['dispatch.instructions.encode'])): ?>
     <a href="<?= APP_BASE ?>/pages/dispatch.php"
        class="btn btn-primary btn-sm d-flex align-items-center gap-2">
       <i class="bi bi-send"></i> New Dispatch
@@ -102,56 +81,17 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
   </div>
 </div>
 
-<!-- Stat cards -->
-<div class="row g-3 mb-4">
-  <div class="col-6 col-xl-3">
-    <div class="stat-card">
-      <div class="stat-icon amber"><i class="bi bi-truck"></i></div>
-      <div class="stat-info">
-        <div class="stat-value"><?= $totalTrucks ?></div>
-        <div class="stat-label">Total Trucks</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-xl-3">
-    <div class="stat-card">
-      <div class="stat-icon green"><i class="bi bi-check-circle"></i></div>
-      <div class="stat-info">
-        <div class="stat-value"><?= $summary['Available'] ?></div>
-        <div class="stat-label">Available</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-xl-3">
-    <div class="stat-card">
-      <div class="stat-icon blue"><i class="bi bi-arrow-right-circle"></i></div>
-      <div class="stat-info">
-        <div class="stat-value"><?= $summary['Deployed'] ?></div>
-        <div class="stat-label">Deployed</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-xl-3">
-    <div class="stat-card">
-      <div class="stat-icon red"><i class="bi bi-tools"></i></div>
-      <div class="stat-info">
-        <div class="stat-value"><?= $summary['Under Maintenance'] ?></div>
-        <div class="stat-label">Under Maintenance</div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- Filter bar -->
 <div class="card mb-4">
   <div class="card-body-custom">
     <div class="d-flex flex-wrap gap-2 align-items-center" data-persist-filter="fleet_status">
       <span class="text-muted" style="font-size:.8rem;">Filter:</span>
-      <button class="filter-btn active" data-filter="all">All (<?= $totalTrucks ?>)</button>
-      <button class="filter-btn" data-filter="Available">Available (<?= $summary['Available'] ?>)</button>
-      <button class="filter-btn" data-filter="Deployed">Deployed (<?= $summary['Deployed'] ?>)</button>
-      <button class="filter-btn" data-filter="Under Maintenance">Maintenance (<?= $summary['Under Maintenance'] ?>)</button>
-      <button class="filter-btn" data-filter="Inactive">Inactive (<?= $summary['Inactive'] ?>)</button>
+      <button class="filter-btn active" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="Available">Available</button>
+      <button class="filter-btn" data-filter="Assigned">Assigned</button>
+      <button class="filter-btn" data-filter="On Trip">On Trip</button>
+      <button class="filter-btn" data-filter="Under Maintenance">Under Maintenance</button>
+      <button class="filter-btn" data-filter="Unavailable">Unavailable</button>
       <div class="ms-auto">
         <input type="text" id="truckSearch" class="form-control form-control-sm" data-persist-state
                placeholder="Search plate, brand, model…" style="width:220px;">
@@ -193,18 +133,19 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
         </tr>
         <?php else: ?>
         <?php foreach ($trucks as $truck):
-          $warrantyDaysRemaining = $truck['warranty_expiry']
-            ? (int)(new DateTimeImmutable('today'))->diff(new DateTimeImmutable($truck['warranty_expiry']))->format('%r%a')
-            : null;
+          // Expiry date − current date (includes/metrics.php).
+          $warrantyDaysRemaining = daysUntilExpiry($truck['warranty_expiry'] ?? null);
+          $registrationDays = daysUntilExpiry($truck['registration_expiry'] ?? null);
+          $insuranceDays = daysUntilExpiry($truck['insurance_expiry'] ?? null);
           $badgeClass = match($truck['status']) {
             'Available'         => 'available',
-            'Deployed'          => 'deployed',
+            'Assigned', 'On Trip' => 'deployed',
             'Under Maintenance' => 'maintenance',
             default             => 'inactive',
           };
           $dot = match($truck['status']) {
             'Available'         => '🟢',
-            'Deployed'          => '🔵',
+            'Assigned', 'On Trip' => '🔵',
             'Under Maintenance' => '🟡',
             default             => '⚫',
           };
@@ -216,8 +157,8 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
               <?= htmlspecialchars($truck['plate_number']) ?>
             </span>
             <?php if ($truck['unit_number']): ?><br><span class="text-muted small">Unit <?= htmlspecialchars($truck['unit_number']) ?></span><?php endif; ?>
-            <?php if ($truck['registration_expiry']): ?><br><span class="text-muted small">OR/CR due <?= htmlspecialchars($truck['registration_expiry']) ?></span><?php endif; ?>
-            <?php if ($truck['insurance_expiry']): ?><br><span class="text-muted small">Insurance due <?= htmlspecialchars($truck['insurance_expiry']) ?></span><?php endif; ?>
+            <?php if ($registrationDays !== null): ?><br><span class="small <?= $registrationDays < 0 ? 'text-danger fw-semibold' : ($registrationDays <= 30 ? 'text-warning fw-semibold' : 'text-muted') ?>">OR/CR due <?= htmlspecialchars($truck['registration_expiry']) ?> (<?= htmlspecialchars(expiryDaysText($registrationDays)) ?>)</span><?php endif; ?>
+            <?php if ($insuranceDays !== null): ?><br><span class="small <?= $insuranceDays < 0 ? 'text-danger fw-semibold' : ($insuranceDays <= 30 ? 'text-warning fw-semibold' : 'text-muted') ?>">Insurance due <?= htmlspecialchars($truck['insurance_expiry']) ?> (<?= htmlspecialchars(expiryDaysText($insuranceDays)) ?>)</span><?php endif; ?>
             <?php if ($warrantyDaysRemaining !== null): ?><br><span class="small <?= $warrantyDaysRemaining < 0 ? 'text-danger fw-semibold' : ($warrantyDaysRemaining <= 30 ? 'text-warning fw-semibold' : 'text-muted') ?>">Warranty <?= $warrantyDaysRemaining < 0 ? 'expired' : ($warrantyDaysRemaining <= 30 ? 'due soon' : 'expires') ?> <?= htmlspecialchars($truck['warranty_expiry']) ?></span><?php endif; ?>
           </td>
           <td>
@@ -238,7 +179,7 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
             </span>
           </td>
           <td>
-            <?php if ($truck['status'] === 'Deployed' && $truck['trip_number']): ?>
+            <?php if (in_array($truck['status'], ['Assigned', 'On Trip'], true) && $truck['trip_number']): ?>
             <div style="font-size:.82rem;">
               <span class="fw-600"><?= htmlspecialchars($truck['trip_number']) ?></span><br>
               <span class="text-muted">Driver: <?= htmlspecialchars($truck['driver_name'] ?? '—') ?></span><br>
@@ -563,20 +504,6 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
               <?php endforeach; ?>
             </div>
           </div>
-          <div class="col-md-4">
-            <label class="fleet-label">Status</label>
-            <select class="form-select fleet-input" id="et_status">
-              <option value="Available">Available</option>
-              <option value="Deployed">Deployed</option>
-              <option value="Under Maintenance">Under Maintenance</option>
-              <option value="Inactive">Inactive</option>
-            </select>
-          </div>
-          <div class="col-12">
-            <label class="fleet-label" for="et_status_reason">Reason for status change (required if status changes)</label>
-            <textarea class="form-control fleet-input" id="et_status_reason" rows="2" maxlength="500"
-                      placeholder="Briefly explain the status change"></textarea>
-          </div>
         </div>
       </div>
       <div class="modal-footer fleet-modal-footer">
@@ -610,10 +537,10 @@ layoutHead('Fleet Status', APP_BASE . '/assets/css/fleet_status.css');
         <input type="hidden" id="modalTruckId">
         <label class="fleet-label">New Status</label>
         <select class="form-select fleet-input" id="modalStatus">
-          <option value="Available">Available</option>
-          <option value="Deployed">Deployed</option>
-          <option value="Under Maintenance">Under Maintenance</option>
-          <option value="Inactive">Inactive</option>
+          <?php /* Assigned / On Trip are set by the trip workflow only. */ ?>
+          <?php foreach (TRUCK_MANUAL_STATUSES as $manualStatus): ?>
+          <option value="<?= htmlspecialchars($manualStatus) ?>"><?= htmlspecialchars($manualStatus) ?></option>
+          <?php endforeach; ?>
         </select>
         <label class="fleet-label mt-3" for="modalStatusReason">Reason for change</label>
         <textarea class="form-control fleet-input" id="modalStatusReason" rows="2" maxlength="500"

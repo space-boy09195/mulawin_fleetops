@@ -3,12 +3,26 @@
 // pages/automation.php
 // Safe control center for read-only system automations.
 // ============================================================
+http_response_code(404);
+exit;
+
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/csrf.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+// Admin only, by the validated role key (isAdmin), not a legacy role grant.
+// Unauthorized responses match requireRole(): login check first, then a 403
+// JSON reply for JSON/AJAX requests, otherwise the 403 page.
+requireLogin();
+if (!isAdmin()) {
+    if (isJsonRequest()) {
+        sendJsonAccessResponse(403, 'You do not have permission to perform this action.');
+    }
+    http_response_code(403);
+    include __DIR__ . '/403.php';
+    exit;
+}
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/automation.js';
 layoutHead('Automation', APP_BASE . '/assets/css/automation.css');

@@ -5,12 +5,20 @@ require_once __DIR__ . '/../config/database.php';
 
 requirePermission('purchasing.view');
 $pdo = getDBConnection();
-$suppliers = $pdo->query('SELECT supplier_id, supplier_name FROM suppliers WHERE is_active = 1 ORDER BY supplier_name')->fetchAll(PDO::FETCH_ASSOC);
-$parts = $pdo->query('SELECT part_id, part_number, part_name, unit, unit_cost FROM parts_inventory ORDER BY part_name')->fetchAll(PDO::FETCH_ASSOC);
+$suppliers = $pdo->query("SELECT supplier_id, supplier_name FROM suppliers WHERE status = 'Active' ORDER BY supplier_name")->fetchAll(PDO::FETCH_ASSOC);
+$parts = $pdo->query('SELECT part_id, part_number, part_name, unit, unit_cost FROM parts WHERE is_active = 1 ORDER BY part_name')->fetchAll(PDO::FETCH_ASSOC);
+// Status: the purchase request's while it awaits (or failed) approval, the
+// purchase order's afterwards.
 $orders = $pdo->query(
-    "SELECT po.po_number, po.status, po.total_amount, po.expected_at, s.supplier_name, u.full_name AS requester
-     FROM purchase_order_headers po JOIN suppliers s ON s.supplier_id = po.supplier_id
-     JOIN users u ON u.user_id = po.requested_by ORDER BY po.created_at DESC LIMIT 100"
+    "SELECT po.po_number,
+            IF(pr.status IN ('Pending Approval', 'Rejected'), pr.status, po.status) AS status,
+            po.total_amount, po.expected_delivery_date AS expected_at, s.supplier_name,
+            COALESCE(e.full_name, u.username) AS requester
+     FROM purchase_orders po JOIN suppliers s ON s.supplier_id = po.supplier_id
+     JOIN users u ON u.user_id = po.created_by
+     LEFT JOIN employees e ON e.employee_id = u.employee_id
+     LEFT JOIN purchase_requests pr ON pr.purchase_request_id = po.purchase_request_id
+     ORDER BY po.created_at DESC LIMIT 100"
 )->fetchAll(PDO::FETCH_ASSOC);
 layoutHead('Purchasing');
 ?>
@@ -24,7 +32,7 @@ layoutHead('Purchasing');
   <div class="card-header-custom"><h2 class="card-title-custom">Add supplier</h2></div>
   <div class="card-body-custom">
     <form id="supplierForm" class="row g-3">
-      <div class="col-md-4"><label class="form-label" for="supplierName">Supplier name</label><input id="supplierName" class="form-control" maxlength="150" required></div>
+      <div class="col-md-4"><label class="form-label" for="supplierName">Supplier name</label><input id="supplierName" class="form-control" maxlength="180" required></div>
       <div class="col-md-3"><label class="form-label" for="supplierContact">Contact person</label><input id="supplierContact" class="form-control" maxlength="150"></div>
       <div class="col-md-2"><label class="form-label" for="supplierPhone">Phone</label><input id="supplierPhone" class="form-control" maxlength="50"></div>
       <div class="col-md-3"><label class="form-label" for="supplierEmail">Email</label><input id="supplierEmail" class="form-control" type="email" maxlength="150"></div>

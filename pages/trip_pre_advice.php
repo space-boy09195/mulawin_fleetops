@@ -4,34 +4,29 @@
 // print and carry before departure. Read-only; does not change trip state.
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/crew_trip_access.php';
+require_once __DIR__ . '/../includes/trip_queries.php';
 
-requirePermission('trips.view');
+// trips.view, or a Helper limited to trips assigned to them.
+$helperEmployeeId = tripPageAccess(['trips.view']);
 
 $tripId = filter_var($_GET['trip_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
 if ($tripId === false) {
     http_response_code(400);
     exit('Invalid trip.');
 }
+if ($helperEmployeeId !== null) {
+    requireHelperAssignedToTrip((int)$tripId, $helperEmployeeId);
+}
 
 $pdo = getDBConnection();
+// Shared trip SELECT + the driver's license number. Cargo description and
+// weight have no target column and are shown as not recorded.
 $stmt = $pdo->prepare(
-    'SELECT t.trip_id, t.trip_number, t.status, t.cargo_description, t.cargo_weight_tons,
-            dr.dispatch_id, dr.client_name, dr.booking_reference, dr.waybill_reference,
-            dr.unit_count, dr.scheduled_at, dr.expected_arrival, dr.remarks,
-            tr.plate_number, tr.brand, tr.model, tr.truck_type,
-            driver.full_name AS driver_name, driver.license_number AS driver_license,
-            second.full_name AS second_driver_name,
-            helper.full_name AS helper_name,
-            route.route_name, route.origin, route.destination,
-            approver.full_name AS approved_by_name
-     FROM trips t
-     JOIN dispatch_requests dr ON dr.dispatch_id = t.dispatch_id
-     JOIN trucks tr ON tr.truck_id = dr.truck_id
-     JOIN employees driver ON driver.employee_id = dr.driver_id
-     LEFT JOIN employees second ON second.employee_id = dr.second_driver_id
-     LEFT JOIN employees helper ON helper.employee_id = dr.helper_id
-     JOIN routes route ON route.route_id = dr.route_id
-     LEFT JOIN users approver ON approver.user_id = dr.approved_by
+    'SELECT ' . tripSelectColumnsSql() . ',
+            e_d.license_number AS driver_license,
+            NULL AS cargo_description, NULL AS cargo_weight_tons, NULL AS waybill_reference
+     ' . tripFromSql() . '
      WHERE t.trip_id = ?'
 );
 $stmt->execute([$tripId]);
@@ -39,6 +34,12 @@ $trip = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$trip) {
     http_response_code(404);
     exit('Trip not found.');
+}
+// Target trips exist from submission (D2); a pre-advice is only issued for an
+// approved trip, as before.
+if ($trip['status'] === 'Pending Approval' || in_array($trip['dispatch_status'], ['Pending', 'Rejected', 'Cancelled'], true)) {
+    http_response_code(409);
+    exit('A pre-advice is available only after the trip is approved.');
 }
 ?>
 <!doctype html>

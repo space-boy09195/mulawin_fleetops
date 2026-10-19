@@ -2,37 +2,52 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
+require_once __DIR__ . '/../includes/finance_records.php';
 
-requireAnyPermission(['finance.funds.view', 'finance.disbursements.view']);
+requireAnyPermission(['finance.funds.view', 'finance.disbursements.view', 'finance.ap.view']);
 $pdo = getDBConnection();
 $canManageFunds = currentUserHasAnyPermission(['finance.funds.manage']);
 $canManageDisbursements = currentUserHasAnyPermission(['finance.disbursements.manage']);
 $canManagePayables = currentUserHasAnyPermission(['finance.ap.manage']);
+// Target tables (see ajax/finance_handler.php). Figures follow
+// includes/finance_records.php.
 $funds = $pdo->query(
-    "SELECT fr.request_number, fr.request_type, fr.purpose, fr.amount, fr.status,
-            fr.requested_at, u.full_name AS requester
-     FROM fund_requests fr JOIN users u ON u.user_id = fr.requested_by
-     ORDER BY fr.requested_at DESC LIMIT 200"
+    "SELECT fr.fund_request_id, fr.request_number, fr.request_type, fr.purpose, fr.amount, fr.status,
+            COALESCE(fr.submitted_at, fr.created_at) AS requested_at,
+            COALESCE(ue.full_name, u.username) AS requester
+     FROM fund_requests fr
+     JOIN users u ON u.user_id = fr.requested_by
+     LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+     ORDER BY fr.created_at DESC LIMIT 200"
 )->fetchAll(PDO::FETCH_ASSOC);
 $disbursements = $pdo->query(
-    "SELECT disbursement_number, payee_name, amount, payment_mode, disbursed_at
-     FROM finance_disbursements ORDER BY disbursed_at DESC, disbursement_id DESC LIMIT 200"
+    "SELECT CONCAT('DISB-', LPAD(disbursement_id, 6, '0')) AS disbursement_number,
+            transaction_reference AS payee_name, amount, payment_method AS payment_mode,
+            payment_date AS disbursed_at
+     FROM disbursements ORDER BY payment_date DESC, disbursement_id DESC LIMIT 200"
 )->fetchAll(PDO::FETCH_ASSOC);
 $payables = $pdo->query(
-    "SELECT payable_id, payable_number, supplier_name, invoice_number, description, amount, due_date, status
-     FROM accounts_payable ORDER BY due_date IS NULL, due_date ASC, payable_id DESC LIMIT 200"
+    "SELECT ap.ap_id AS payable_id, CONCAT('AP-', LPAD(ap.ap_id, 6, '0')) AS payable_number,
+            COALESCE(s.supplier_name, '—') AS supplier_name, ap.reference_number AS invoice_number,
+            ap.description, ap.amount, ap.due_date, ap.status
+     FROM accounts_payable ap LEFT JOIN suppliers s ON s.supplier_id = ap.supplier_id
+     ORDER BY ap.due_date IS NULL, ap.due_date ASC, ap.ap_id DESC LIMIT 200"
 )->fetchAll(PDO::FETCH_ASSOC);
 $vouchers = $pdo->query(
-    "SELECT pv.voucher_number, ap.payable_number, pv.amount, pv.status
-     FROM payment_vouchers pv JOIN accounts_payable ap ON ap.payable_id = pv.payable_id
+    "SELECT pv.voucher_id, pv.voucher_number, CONCAT('AP-', LPAD(pv.reference_id, 6, '0')) AS payable_number,
+            pv.amount, pv.status
+     FROM payment_vouchers pv
+     WHERE pv.reference_type = 'accounts_payable'
      ORDER BY pv.voucher_id DESC LIMIT 200"
 )->fetchAll(PDO::FETCH_ASSOC);
 $summary = $pdo->query(
     "SELECT
-       (SELECT COALESCE(SUM(amount), 0) FROM billings WHERE status <> 'Paid') AS outstanding_billings,
-       (SELECT COALESCE(SUM(amount), 0) FROM trip_expenses) AS recorded_expenses,
-       (SELECT COALESCE(SUM(amount), 0) FROM finance_disbursements) AS disbursed_total,
-       (SELECT COALESCE(SUM(amount), 0) FROM accounts_payable WHERE status IN ('Open','Partially Paid')) AS open_payables"
+       (SELECT COALESCE(SUM(b.total_amount - " . billingCollectedSql('b') . "), 0)
+          FROM billings b WHERE b.status IN ('Issued', 'Partially Paid', 'Overdue')) AS outstanding_billings,
+       (SELECT COALESCE(SUM(amount), 0) FROM expense_records WHERE reference_type = 'trip') AS recorded_expenses,
+       (SELECT COALESCE(SUM(amount), 0) FROM disbursements) AS disbursed_total,
+       (SELECT COALESCE(SUM(amount), 0) FROM accounts_payable WHERE status IN ('Open','Partially Paid','Overdue')) AS open_payables"
 )->fetch(PDO::FETCH_ASSOC);
 layoutHead('Finance');
 ?>
@@ -84,7 +99,7 @@ layoutHead('Finance');
 <div class="col-md-2"><label class="form-label">Payment voucher ID</label><input id="disbVoucher" class="form-control" type="number" min="1"></div>
 <div class="col-md-3"><label class="form-label">Payee</label><input id="disbPayee" class="form-control" maxlength="150" required></div>
 <div class="col-md-2"><label class="form-label">Amount</label><input id="disbAmount" class="form-control" type="number" min="0.01" step="0.01" required></div>
-<div class="col-md-2"><label class="form-label">Payment mode</label><input id="disbMode" class="form-control" maxlength="50" placeholder="Cash / Bank" required></div>
+<div class="col-md-2"><label class="form-label">Payment mode</label><select id="disbMode" class="form-select" required><?php foreach (PAYMENT_MODES as $mode): ?><option><?= htmlspecialchars($mode) ?></option><?php endforeach; ?></select></div>
 <div class="col-md-2"><label class="form-label">Date</label><input id="disbDate" class="form-control" type="date" value="<?= date('Y-m-d') ?>" required></div>
 <div class="col-12"><button class="btn btn-outline-primary">Record disbursement</button></div>
 </form></div></div>
@@ -92,11 +107,11 @@ layoutHead('Finance');
 <?php foreach ($payables as $payable): ?><tr><td><?= htmlspecialchars($payable['payable_number']) ?><br><span class="text-muted small">ID <?= (int)$payable['payable_id'] ?></span></td><td><?= htmlspecialchars($payable['supplier_name']) ?></td><td><?= htmlspecialchars($payable['invoice_number'] ?? '—') ?></td><td><?= htmlspecialchars($payable['description']) ?></td><td>₱<?= number_format((float)$payable['amount'], 2) ?></td><td><?= htmlspecialchars($payable['due_date'] ?? '—') ?></td><td><?= htmlspecialchars($payable['status']) ?></td></tr><?php endforeach; ?>
 <?php if (!$payables): ?><tr><td colspan="7" class="text-center text-muted py-4">No accounts payable records found.</td></tr><?php endif; ?></tbody></table></div></div>
 <div class="card mb-4"><div class="card-header-custom"><h2 class="card-title-custom">Payment vouchers</h2></div><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>Voucher</th><th>Payable</th><th>Amount</th><th>Status</th></tr></thead><tbody>
-<?php foreach ($vouchers as $voucher): ?><tr><td><?= htmlspecialchars($voucher['voucher_number']) ?></td><td><?= htmlspecialchars($voucher['payable_number']) ?></td><td>₱<?= number_format((float)$voucher['amount'], 2) ?></td><td><?= htmlspecialchars($voucher['status']) ?></td></tr><?php endforeach; ?>
+<?php foreach ($vouchers as $voucher): ?><tr><td><?= htmlspecialchars($voucher['voucher_number']) ?><br><span class="text-muted small">ID <?= (int)$voucher['voucher_id'] ?></span></td><td><?= htmlspecialchars($voucher['payable_number']) ?></td><td>₱<?= number_format((float)$voucher['amount'], 2) ?></td><td><?= htmlspecialchars($voucher['status']) ?></td></tr><?php endforeach; ?>
 <?php if (!$vouchers): ?><tr><td colspan="4" class="text-center text-muted py-4">No payment vouchers found.</td></tr><?php endif; ?></tbody></table></div></div>
 <?php endif; ?>
 <div class="card mb-4"><div class="card-header-custom"><h2 class="card-title-custom">Fund requests</h2></div><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>Request</th><th>Type</th><th>Purpose</th><th>Amount</th><th>Status</th><th>Requester</th></tr></thead><tbody>
-<?php foreach ($funds as $fund): ?><tr><td><?= htmlspecialchars($fund['request_number']) ?></td><td><?= htmlspecialchars($fund['request_type']) ?></td><td><?= htmlspecialchars($fund['purpose']) ?></td><td>₱<?= number_format((float)$fund['amount'], 2) ?></td><td><?= htmlspecialchars($fund['status']) ?></td><td><?= htmlspecialchars($fund['requester']) ?></td></tr><?php endforeach; ?>
+<?php foreach ($funds as $fund): ?><tr><td><?= htmlspecialchars($fund['request_number']) ?><br><span class="text-muted small">ID <?= (int)$fund['fund_request_id'] ?></span></td><td><?= htmlspecialchars($fund['request_type']) ?></td><td><?= htmlspecialchars($fund['purpose']) ?></td><td>₱<?= number_format((float)$fund['amount'], 2) ?></td><td><?= htmlspecialchars($fund['status']) ?></td><td><?= htmlspecialchars($fund['requester']) ?></td></tr><?php endforeach; ?>
 <?php if (!$funds): ?><tr><td colspan="6" class="text-center text-muted py-4">No fund requests found.</td></tr><?php endif; ?></tbody></table></div></div>
 <div class="card"><div class="card-header-custom"><h2 class="card-title-custom">Disbursements</h2></div><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>Number</th><th>Payee</th><th>Amount</th><th>Mode</th><th>Date</th></tr></thead><tbody>
 <?php foreach ($disbursements as $item): ?><tr><td><?= htmlspecialchars($item['disbursement_number']) ?></td><td><?= htmlspecialchars($item['payee_name']) ?></td><td>₱<?= number_format((float)$item['amount'], 2) ?></td><td><?= htmlspecialchars($item['payment_mode']) ?></td><td><?= htmlspecialchars($item['disbursed_at']) ?></td></tr><?php endforeach; ?>

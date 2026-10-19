@@ -2,6 +2,8 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/document_upload.php';
+require_once __DIR__ . '/../includes/metrics.php';
 
 requirePermission('documents.view');
 
@@ -13,7 +15,7 @@ $pdo = getDBConnection();
 
 // ── Period filter (scopes by upload date) ─────────────────────────────────────
 $periods = [
-    'today' => 'Today', '1w' => 'This Week', '1m' => 'This Month',
+    'today' => 'Today', '1w' => 'Last 7 Days', '1m' => 'Last 1 Month',
     '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months', 'all' => 'All Time',
 ];
 $period = $_GET['period'] ?? 'all';
@@ -28,56 +30,43 @@ $rangeStart = match ($period) {
     default => null,
 };
 $rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
-$docDateFilter = $rangeStartSql ? "AND d.uploaded_at >= ?" : '';
-$visibilityScopes = currentUserHasAnyPermission(['legacy.role.1']) ? null : [];
-if ($visibilityScopes !== null) {
-    if (currentUserHasAnyPermission(['legacy.role.2'])) $visibilityScopes[] = 'operations';
-    if (currentUserHasAnyPermission(['legacy.role.3'])) $visibilityScopes[] = 'maintenance';
-    if (currentUserHasAnyPermission(['legacy.role.4'])) $visibilityScopes[] = 'accounting';
-}
-$visibilityFilter = '';
-
-if ($visibilityScopes !== null) {
-    if ($visibilityScopes === []) {
-        $visibilityFilter = "AND d.visibility_scope = 'all'";
-    } else {
-        $placeholders = implode(',', array_fill(0, count($visibilityScopes), '?'));
-
-        $visibilityFilter = "AND (
-            d.visibility_scope = 'all'
-            OR d.visibility_scope IN ($placeholders)
-        )";
-    }
-}
+$docDateFilter = $rangeStartSql ? "AND f.uploaded_at >= ?" : '';
+$params = [];
+if ($rangeStartSql) $params[] = $rangeStartSql;
+$visibilityFilter = documentVisibilitySql(documentVisibilityScopesForCurrentUser(), 'd', $params);
 
 // ── All documents ─────────────────────────────────────────────────────────────
+// Target tables: files (physical file) + documents (metadata) + the first
+// linked trip from document_links. Columns keep the names the view uses.
 $docsSql = "
     SELECT
         d.document_id,
-        d.doc_type,
-        d.file_name,
-        d.stored_name,
-        d.file_path,
-        d.file_size,
-        d.mime_type,
+        d.document_category AS doc_type,
+        f.original_name     AS file_name,
+        f.stored_name,
+        f.storage_path      AS file_path,
+        f.file_size,
+        f.mime_type,
         d.description,
-        d.uploaded_at,
-        u.full_name  AS uploaded_by_name,
+        d.expiry_date,
+        f.uploaded_at,
+        COALESCE(ue.full_name, u.username) AS uploaded_by_name,
         t.trip_id, t.trip_number
     FROM documents d
-    JOIN users u       ON d.uploaded_by = u.user_id
-    LEFT JOIN trips t  ON d.trip_id     = t.trip_id
+    JOIN files f            ON f.file_id = d.file_id
+    JOIN users u            ON u.user_id = d.created_by
+    LEFT JOIN employees ue  ON ue.employee_id = u.employee_id
+    LEFT JOIN (
+        SELECT document_id, MIN(entity_id) AS trip_id
+        FROM document_links
+        WHERE entity_type = 'trip'
+        GROUP BY document_id
+    ) dl                    ON dl.document_id = d.document_id
+    LEFT JOIN trips t       ON t.trip_id = dl.trip_id
     WHERE 1=1 $docDateFilter $visibilityFilter
-    ORDER BY d.uploaded_at DESC
+    ORDER BY f.uploaded_at DESC, d.document_id DESC
 ";
 $docsStmt = $pdo->prepare($docsSql);
-$params = [];
-if ($rangeStartSql) $params[] = $rangeStartSql;
-if ($visibilityScopes !== null) {
-    foreach ($visibilityScopes as $scope) {
-        $params[] = $scope;
-    }
-}
 $docsStmt->execute($params);
 $documents = $docsStmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -148,9 +137,11 @@ function mimeIcon(?string $mime): string {
           <?php endforeach; ?>
         </select>
       </form>
+      <?php if (currentUserHasAnyPermission(['documents.upload'])): ?>
       <button class="btn btn-doc-primary" data-bs-toggle="modal" data-bs-target="#uploadModal">
         <i class="bi bi-upload me-1"></i> Upload Document
       </button>
+      <?php endif; ?>
     </div>
   </div>
 
@@ -222,6 +213,12 @@ function mimeIcon(?string $mime): string {
         <?php endif; ?>
         <span><i class="bi bi-hdd"></i> <?= $size ?></span>
         <span><i class="bi bi-calendar3"></i> <?= date('M d, Y', strtotime($doc['uploaded_at'])) ?></span>
+        <?php $expiryDays = daysUntilExpiry($doc['expiry_date'] ?? null); if ($expiryDays !== null): ?>
+        <span class="<?= $expiryDays < 0 ? 'text-danger fw-semibold' : ($expiryDays <= 30 ? 'text-warning fw-semibold' : '') ?>"
+              title="Expiry date − current date">
+          <i class="bi bi-hourglass-split"></i> Expires <?= htmlspecialchars(date('M d, Y', strtotime($doc['expiry_date']))) ?> (<?= htmlspecialchars(expiryDaysText($expiryDays)) ?>)
+        </span>
+        <?php endif; ?>
       </div>
 
       <!-- Actions -->
@@ -237,8 +234,7 @@ function mimeIcon(?string $mime): string {
           <i class="bi bi-eye"></i>
         </a>
         <?php endif; ?>
-        <?php if (in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING])
-               || $doc['uploaded_by_name'] === ''): ?>
+        <?php if (currentUserHasAnyPermission(['documents.manage'])): ?>
         <button class="btn btn-doc-action btn-doc-delete"
                 data-id="<?= $doc['document_id'] ?>"
                 data-name="<?= htmlspecialchars($doc['file_name']) ?>"

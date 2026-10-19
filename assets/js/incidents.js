@@ -106,6 +106,7 @@
     const tripId = tripSelect?.value          ?? '';
     const type   = incidentType?.value        ?? '';
     const desc   = incidentDesc?.value.trim() ?? '';
+    const severity = document.getElementById('incidentSeverity')?.value ?? 'Low';
 
     if (!tripId || !type || !desc) {
       showAlert(incFormAlert, 'Please fill in all fields.');
@@ -114,7 +115,7 @@
 
     setBusy(submitBtn, submitSpinner, true);
 
-    postAjax({ action: 'log', trip_id: tripId, type, description: desc })
+    postAjax({ action: 'log', trip_id: tripId, type, severity, description: desc })
       .then(res => {
         setBusy(submitBtn, submitSpinner, false);
         if (res.success) {

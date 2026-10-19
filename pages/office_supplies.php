@@ -5,20 +5,32 @@ require_once __DIR__ . '/../config/database.php';
 requireAnyPermission(['admin.supplies.view', 'admin.supplies.manage']);
 $pdo = getDBConnection();
 $canManage = currentUserHasAnyPermission(['admin.supplies.manage']);
-$items = $pdo->query('SELECT item_id,item_name,unit,quantity,reorder_level FROM office_supply_items WHERE is_active=1 ORDER BY item_name')->fetchAll(PDO::FETCH_ASSOC);
+$items = $pdo->query("SELECT supply_id AS item_id, item_name, unit, quantity_on_hand AS quantity, reorder_level FROM office_supplies WHERE status = 'Active' ORDER BY item_name")->fetchAll(PDO::FETCH_ASSOC);
+// Signed change and reference come from the transaction type and the
+// remarks prefix written by ajax/office_supplies_handler.php.
 $movements = $pdo->query(
-    'SELECT m.movement_type,m.quantity,m.quantity_change,m.reference_number,m.notes,m.created_at,
-            i.item_name,i.unit,u.full_name AS recorded_by
-     FROM office_supply_movements m JOIN office_supply_items i ON i.item_id=m.item_id
-     JOIN users u ON u.user_id=m.recorded_by ORDER BY m.created_at DESC,m.movement_id DESC LIMIT 100'
+    "SELECT IF(m.transaction_type = 'Stock Out', 'Issue', m.transaction_type) AS movement_type,
+            m.quantity,
+            CASE WHEN m.transaction_type = 'Stock Out' OR m.remarks LIKE '[Decrease]%'
+                 THEN -m.quantity ELSE m.quantity END AS quantity_change,
+            m.remarks AS notes, m.transaction_date AS created_at,
+            i.item_name, i.unit, COALESCE(ue.full_name, u.username) AS recorded_by
+     FROM office_supply_transactions m JOIN office_supplies i ON i.supply_id = m.supply_id
+     JOIN users u ON u.user_id = m.performed_by
+     LEFT JOIN employees ue ON ue.employee_id = u.employee_id
+     ORDER BY m.transaction_date DESC, m.transaction_id DESC LIMIT 100"
 )->fetchAll(PDO::FETCH_ASSOC);
+foreach ($movements as &$movementRow) {
+    $movementRow['reference_number'] = preg_match('/(?:^|\] )Ref: ([^.]*)\./', (string)$movementRow['notes'], $m) ? $m[1] : null;
+}
+unset($movementRow);
 layoutHead('Office Supplies');
 ?>
 <div class="page-header"><h1 class="page-title">Office Supplies</h1><p class="page-subtitle">Track office consumables separately from vehicle parts inventory.</p></div>
 <div id="supplyFeedback" class="alert d-none" role="alert"></div>
 <?php if ($canManage): ?>
 <div class="row g-4 mb-4"><div class="col-lg-5"><div class="card h-100"><div class="card-header-custom"><h2 class="card-title-custom">Add supply item</h2></div><div class="card-body-custom">
-<form id="supplyItemForm" class="vstack gap-3"><div><label class="form-label">Item name</label><input id="supplyName" class="form-control" maxlength="150" required></div><div><label class="form-label">Unit</label><input id="supplyUnit" class="form-control" maxlength="50" value="piece" required></div><div><label class="form-label">Reorder level</label><input id="supplyReorder" class="form-control" type="number" min="0" step="0.01" value="0"></div><button class="btn btn-primary">Add item</button></form>
+<form id="supplyItemForm" class="vstack gap-3"><div><label class="form-label">Item name</label><input id="supplyName" class="form-control" maxlength="150" required></div><div><label class="form-label">Unit</label><input id="supplyUnit" class="form-control" maxlength="30" value="piece" required></div><div><label class="form-label">Reorder level</label><input id="supplyReorder" class="form-control" type="number" min="0" step="0.01" value="0"></div><button class="btn btn-primary">Add item</button></form>
 </div></div></div><div class="col-lg-7"><div class="card h-100"><div class="card-header-custom"><h2 class="card-title-custom">Record stock movement</h2></div><div class="card-body-custom">
 <form id="supplyMovementForm" class="row g-3"><div class="col-md-6"><label class="form-label">Item</label><select id="movementItem" class="form-select" required><option value="">Select item</option><?php foreach($items as $item): ?><option value="<?= (int)$item['item_id'] ?>"><?= htmlspecialchars($item['item_name']) ?></option><?php endforeach; ?></select></div><div class="col-md-6"><label class="form-label">Movement</label><select id="movementType" class="form-select" required><option>Stock In</option><option>Issue</option><option>Adjustment</option></select></div><div class="col-md-4 d-none" id="adjustmentDirectionWrap"><label class="form-label">Adjustment direction</label><select id="adjustmentDirection" class="form-select"><option>Increase</option><option>Decrease</option></select></div><div class="col-md-4"><label class="form-label">Quantity</label><input id="movementQuantity" class="form-control" type="number" min="0.01" step="0.01" required></div><div class="col-md-4"><label class="form-label">Reference</label><input id="movementReference" class="form-control" maxlength="100"></div><div class="col-md-4"><label class="form-label">Notes</label><input id="movementNotes" class="form-control" maxlength="500"></div><div class="col-12"><button class="btn btn-outline-primary">Save movement</button></div></form>
 </div></div></div></div>

@@ -105,8 +105,16 @@ function requireLogin(): void {
 
     require_once __DIR__ . '/../config/database.php';
     try {
+        // LEFT JOIN so a user whose role row is missing is still found and
+        // then rejected below (role_active is NULL), instead of looking deleted.
+        // roles.system_key (P21-7M) is the only source of Admin identity. If
+        // the column is missing this query fails and the request is refused.
         $stmt = getDBConnection()->prepare(
-            'SELECT role_id, is_active, auth_version FROM users WHERE user_id = ?'
+            'SELECT u.role_id, u.is_active, u.auth_version, r.is_active AS role_active,
+                    r.system_key AS role_key
+             FROM users u
+             LEFT JOIN roles r ON r.role_id = u.role_id
+             WHERE u.user_id = ?'
         );
         $stmt->execute([$userId]);
         $user = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -121,6 +129,7 @@ function requireLogin(): void {
 
     if (!$user
         || !(int)$user['is_active']
+        || !(int)($user['role_active'] ?? 0)
         || (int)$user['role_id'] !== currentRoleId()
         || !isset($_SESSION['auth_version'])
         || (int)$user['auth_version'] !== (int)$_SESSION['auth_version']) {
@@ -133,7 +142,49 @@ function requireLogin(): void {
         exit;
     }
 
+    // The role key is kept for this request only, never in $_SESSION, so a
+    // changed key takes effect on the next request.
+    validatedRoleKey($user['role_key'] ?? null, true);
     $validatedUserId = $userId;
+}
+
+// ============================================================
+// Stable role identity (roles.system_key)
+// ============================================================
+// Request-scoped store for the role key validated by requireLogin().
+function validatedRoleKey(?string $key = null, bool $set = false): ?string {
+    static $roleKey = null;
+    if ($set) {
+        $roleKey = ($key === null || $key === '') ? null : $key;
+    }
+    return $roleKey;
+}
+
+// The signed-in user's role key, validated against the database in this
+// request. Null when signed out or when the role has no system key.
+function currentRoleKey(): ?string {
+    if (!isLoggedIn()) {
+        return null;
+    }
+    requireLogin();
+    return validatedRoleKey();
+}
+
+// Admin identity comes only from the validated system key, never from a
+// role ID or role name. No role with key 'admin' means nobody is Admin.
+function isAdmin(): bool {
+    return currentRoleKey() === 'admin';
+}
+
+// Database lookup of any role, used for decisions about a target role.
+function roleRowForId(PDO $pdo, int $roleId, bool $forUpdate = false): ?array {
+    $stmt = $pdo->prepare(
+        'SELECT role_id, is_active, system_key FROM roles WHERE role_id = ?'
+        . ($forUpdate ? ' FOR UPDATE' : '')
+    );
+    $stmt->execute([$roleId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
 }
 
 // ============================================================
@@ -181,6 +232,12 @@ function requireAnyPermission(array $permissionKeys): void {
 }
 
 function currentUserHasAnyPermission(array $permissionKeys): bool {
+    // Admin holds every current and future permission. Every other role is
+    // checked against its own grants below, unchanged.
+    if (isAdmin()) {
+        return true;
+    }
+
     // One query per request loads the role's full permission set, instead of
     // one query per checked permission (the sidebar alone checks ~30).
     static $roleKeysCache = [];
@@ -250,9 +307,27 @@ function currentRoleId(): int {
 
 // Admin keeps the Admin dashboard; every other role (existing or created
 // later) shares the common, permission-driven dashboard.
+// Each department role has its own dashboard; every dashboard page still
+// checks its own permission on the server. Unmapped roles use the general
+// dashboard, which shows only the cards the user's permissions allow.
+const ROLE_KEY_DASHBOARDS = [
+    'admin'                         => '/pages/dashboard_head.php',
+    'operations_head'               => '/pages/dashboard_operations_head.php',
+    'car_carrier_dispatcher'        => '/pages/dashboard_dispatcher.php',
+    'container_wing_van_dispatcher' => '/pages/dashboard_dispatcher.php',
+    'maintenance'                   => '/pages/dashboard_maintenance.php',
+    'finance'                       => '/pages/dashboard_accounting.php',
+    'billing_collection'            => '/pages/dashboard_accounting.php',
+];
+
+function dashboardUrlForRoleKey(?string $roleKey): string {
+    return APP_BASE . (ROLE_KEY_DASHBOARDS[(string)$roleKey] ?? '/pages/dashboard.php');
+}
+
+// Kept for existing callers. The role name and ID are no longer used: the
+// decision comes from the validated role key of the signed-in user.
 function dashboardUrlForRole(string $roleName, int $roleId): string {
-    $isAdmin = $roleId === ROLE_ADMIN;
-    return APP_BASE . ($isAdmin ? '/pages/dashboard_head.php' : '/pages/dashboard.php');
+    return dashboardUrlForRoleKey(currentRoleKey());
 }
 
 // ============================================================

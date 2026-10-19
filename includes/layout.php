@@ -7,6 +7,7 @@
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/csrf.php';
+require_once __DIR__ . '/notifications.php';
 
 // ---- Role → dashboard URL map ----------------------------
 function roleDashboardUrl(): string {
@@ -17,45 +18,33 @@ function roleDashboardUrl(): string {
 }
 
 // ---- Navigation definition --------------------------------
-// roles: [] means ALL roles can see it
-// sections are only rendered if at least one child is visible
 function getNavItems(): array {
     return [
-        ['section' => 'Insights'],
-        ['label' => 'Operations Performance', 'href' => '/pages/operations_performance.php', 'icon' => 'bi-bar-chart-line', 'permission' => 'operations.reports.view'],
-        ['label' => 'Analytics',           'href' => '/pages/analytics.php',    'icon' => 'bi-graph-up-arrow',      'permission' => 'reports.view'],
-        ['section' => 'Operations'],
+        ['label' => 'Analytics',           'href' => '/pages/analytics.php',    'icon' => 'bi-graph-up-arrow',      'permissions' => ['reports.view', 'operations.reports.view', 'maintenance.reports.view', 'billing.view']],
+        ['label' => 'Dispatcher Reports', 'href' => '/pages/dispatcher_reports.php', 'icon' => 'bi-bar-chart-line', 'permission' => 'dispatch.reports.view'],
         ['label' => 'Fleet Status',        'href' => '/pages/fleet_status.php', 'icon' => 'bi-truck',               'permission' => 'fleet.view'],
         ['label' => 'Trip Monitoring',     'href' => '/pages/trip_monitor.php', 'icon' => 'bi-map',                 'permission' => 'trips.view'],
         ['label' => 'Dispatch',            'href' => '/pages/dispatch.php',     'icon' => 'bi-send',                'permission' => 'trips.view'],
-        ['label' => 'Dispatch Planning',   'href' => '/pages/dispatch_planning.php', 'icon' => 'bi-list-check',    'permission' => 'dispatch.instructions.manage'],
-        ['label' => 'Dispatcher Queue',    'href' => '/pages/dispatch_inbox.php', 'icon' => 'bi-inbox',             'permission' => 'dispatch.instructions.encode'],
+        ['label' => 'Dispatch Planning',   'href' => '/pages/dispatch_planning.php', 'icon' => 'bi-list-check',    'permission' => 'dispatch.instructions.manage', 'excluded_roles' => ['admin']],
+        ['label' => 'Dispatcher Queue',    'href' => '/pages/dispatch_inbox.php', 'icon' => 'bi-inbox',             'permission' => 'dispatch.instructions.encode', 'excluded_roles' => ['admin']],
         ['label' => 'Requests',            'href' => '/pages/requests.php',     'icon' => 'bi-inbox',               'permission' => 'approvals.review'],
-        ['label' => 'Trip Problem Reports', 'href' => '/pages/incidents.php',    'icon' => 'bi-exclamation-triangle','permission' => 'incidents.manage'],
-        ['section' => 'Maintenance'],
-        //['label' => 'Checklists',          'href' => '/pages/checklists.php',   'icon' => 'bi-clipboard-check',     'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_MAINTENANCE]],
         ['label' => 'Maintenance Records', 'href' => '/pages/maintenance.php',  'icon' => 'bi-tools',               'permission' => 'maintenance.view'],
-        ['label' => 'Maintenance Reports', 'href' => '/pages/maintenance_reports.php', 'icon' => 'bi-clipboard-data', 'permission' => 'maintenance.reports.view'],
+        ['label' => 'Operations Maintenance Report', 'href' => '/pages/operations_maintenance_report.php', 'icon' => 'bi-wrench-adjustable', 'permission' => 'maintenance.reports.operations.view'],
         ['label' => 'Parts Inventory',     'href' => '/pages/parts.php',        'icon' => 'bi-box-seam',            'permission' => 'parts.view'],
-        ['label' => 'Purchasing',          'href' => '/pages/purchasing.php',   'icon' => 'bi-cart-check',          'permission' => 'purchasing.view'],
-        ['section' => 'People & Admin'],
-        ['label' => 'Attendance',          'href' => '/pages/attendance.php',   'icon' => 'bi-calendar-check',     'permission' => 'hr.attendance.view', 'also_linked_employee' => true],
-        ['label' => 'Recruitment',         'href' => '/pages/recruitment.php',  'icon' => 'bi-person-plus',        'permission' => 'hr.recruitment.view'],
-        ['label' => 'Office Supplies',     'href' => '/pages/office_supplies.php', 'icon' => 'bi-clipboard2-check','permission' => 'admin.supplies.view'],
-        ['section' => 'Accounting'],
+        ['label' => 'Purchasing',          'href' => '/pages/purchasing.php',   'icon' => 'bi-cart-check',          'permission' => 'purchasing.view', 'excluded_roles' => ['admin']],
+        ['label' => 'Attendance',          'href' => '/pages/attendance.php',   'icon' => 'bi-calendar-check',     'permission' => 'hr.attendance.view', 'also_linked_employee' => true, 'excluded_roles' => ['operations_head', 'car_carrier_dispatcher', 'container_wing_van_dispatcher', 'maintenance', 'purchasing_officer', 'finance', 'billing_collection', 'audit', 'driver', 'helper']],
+        ['label' => 'Office Supplies',     'href' => '/pages/office_supplies.php', 'icon' => 'bi-clipboard2-check','permissions' => ['admin.supplies.view', 'admin.supplies.manage'], 'excluded_roles' => ['admin']],
         ['label' => 'Billing',             'href' => '/pages/billing.php',      'icon' => 'bi-receipt',             'permission' => 'billing.view'],
         ['label' => 'Payroll',             'href' => '/pages/payroll.php',      'icon' => 'bi-cash-stack',          'permission' => 'payroll.view'],
+        ['label' => 'Trip Pay',            'href' => '/pages/trip_pay.php',     'icon' => 'bi-person-workspace',    'permission' => 'payroll.manage'],
         ['label' => 'Clients',             'href' => '/pages/clients.php',      'icon' => 'bi-person-vcard',         'permission' => 'clients.view'],
         ['label' => 'Trip Costs',           'href' => '/pages/trip_costs.php',    'icon' => 'bi-fuel-pump',            'permission' => 'finance.view'],
-        ['label' => 'Finance',              'href' => '/pages/finance.php',       'icon' => 'bi-wallet2',               'permission' => 'finance.funds.view'],
-        //['label' => 'Collections',         'href' => '/pages/collections.php',  'icon' => 'bi-cash-stack',          'roles' => [ROLE_HEAD_MANAGEMENT, ROLE_ACCOUNTING]],
-        ['section' => 'Repository'],
-        ['label' => 'Documents',           'href' => '/pages/documents.php',    'icon' => 'bi-folder2-open',        'roles' => []],
-        ['section' => 'Admin'],
+        ['label' => 'Finance',              'href' => '/pages/finance.php',       'icon' => 'bi-wallet2',               'permission' => 'finance.funds.view', 'excluded_roles' => ['admin']],
+        ['label' => 'Trip Problem Reports', 'href' => '/pages/incidents.php',    'icon' => 'bi-exclamation-triangle', 'permissions' => ['incidents.manage', 'legacy.role.3']],
+        ['label' => 'Documents',           'href' => '/pages/documents.php',    'icon' => 'bi-folder2-open',        'permission' => 'documents.view'],
+        ['label' => 'Audit History',       'href' => '/pages/audit_history.php', 'icon' => 'bi-journal-text',       'permission' => 'audit.view'],
         ['label' => 'User Management',     'href' => '/pages/users.php',        'icon' => 'bi-people',              'permission' => 'users.manage'],
-        ['label' => 'Role Permissions',    'href' => '/pages/permissions.php',  'icon' => 'bi-shield-lock',         'roles' => [], 'permission' => 'permissions.manage'],
-        ['label' => 'Recycle Bin',         'href' => '/pages/recycle_bin.php',  'icon' => 'bi-trash3',              'permission' => 'audit.view'],
-        ['label' => 'Automation',          'href' => '/pages/automation.php',   'icon' => 'bi-gear-wide-connected','permission' => 'roles.manage'],
+        ['label' => 'Recycle Bin',         'href' => '/pages/recycle_bin.php',  'icon' => 'bi-trash3',              'admin_only' => true],
     ];
 }
 
@@ -65,7 +54,7 @@ function currentUserHasActiveEmployee(): bool {
         return $linked;
     }
     $stmt = getDBConnection()->prepare(
-        'SELECT COUNT(*) FROM employees WHERE user_id = ? AND is_active = 1'
+        "SELECT COUNT(*) FROM employees WHERE user_id = ? AND employment_status = 'Active'"
     );
     $stmt->execute([currentUserId()]);
     return $linked = (int)$stmt->fetchColumn() === 1;
@@ -83,46 +72,33 @@ function userInitials(): string {
 
 // ---- Whether the current user may see a nav item ---------
 function navItemVisible(array $item): bool {
-    if (isset($item['permission'])) {
-        return currentUserHasAnyPermission([$item['permission']])
+    if (!empty($item['admin_only'])) {
+        return isAdmin();
+    }
+    $roleKey = currentRoleKey();
+    if ($roleKey !== null && in_array($roleKey, (array)($item['excluded_roles'] ?? []), true)) {
+        return false;
+    }
+
+    if (isset($item['permission']) || isset($item['permissions'])) {
+        $permissions = (array)($item['permissions'] ?? $item['permission']);
+        return currentUserHasAnyPermission($permissions)
             || (($item['also_linked_employee'] ?? false) && currentUserHasActiveEmployee());
     }
     // Transitional role-based links remain available for legacy pages.
     return empty($item['roles']) || in_array(currentRoleId(), $item['roles'], true);
 }
 
-// ---- Build sidebar nav HTML (sections hidden if no visible children)
+// ---- Build sidebar nav HTML --------------------------------
 function buildSidebarNav(): string {
     $navItems    = getNavItems();
     $currentPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
     $html        = '';
 
-    $pendingSection = '';   // buffer current section label
-    $sectionHasItems = false;
-
     foreach ($navItems as $item) {
-        // Section header — buffer it, only flush when a visible item follows
-        if (isset($item['section'])) {
-            if ($pendingSection !== '' && $sectionHasItems) {
-                $html .= $pendingSection;
-            } elseif ($pendingSection !== '' && !$sectionHasItems) {
-                // previous section had no visible items — discard it
-            }
-            $pendingSection  = '<div class="nav-section-label">' . htmlspecialchars($item['section']) . '</div>';
-            $sectionHasItems = false;
-            continue;
-        }
-
         if (!navItemVisible($item)) {
             continue;
         }
-
-        // Flush buffered section label now that we have a visible item
-        if ($pendingSection !== '') {
-            $html .= $pendingSection;
-            $pendingSection = '';
-        }
-        $sectionHasItems = true;
 
         $href     = APP_BASE . $item['href'];
         $active   = str_ends_with($currentPath, $item['href']) ? ' active' : '';
@@ -137,11 +113,6 @@ function buildSidebarNav(): string {
                . '</a></div>';
     }
 
-    // Flush last section if it had items
-    if ($pendingSection !== '' && $sectionHasItems) {
-        // already flushed inline above — nothing to do
-    }
-
     return $html;
 }
 
@@ -149,7 +120,7 @@ function buildSidebarNav(): string {
 function getLatestNotifications(): array {
     try {
         $stmt = getDBConnection()->prepare("
-            SELECT notification_id, title, message, link, created_at
+            SELECT notification_id, title, message, entity_type, entity_id, created_at
             FROM notifications
             WHERE user_id = ? AND is_read = 0
             ORDER BY created_at DESC
@@ -163,31 +134,58 @@ function getLatestNotifications(): array {
     }
 }
 
+// Announcement audience for a role key: operations, maintenance or accounting.
+// Null means the role has no department audience.
+function announcementAudienceForRoleKey(?string $roleKey): ?string {
+    return match ($roleKey) {
+        'operations_head', 'car_carrier_dispatcher', 'container_wing_van_dispatcher' => 'operations',
+        'maintenance' => 'maintenance',
+        'finance', 'billing_collection' => 'accounting',
+        default => null,
+    };
+}
+
+// Audience of the signed-in user, from the validated role key. A role without
+// a key (legacy database) falls back to its legacy department grants. Admin
+// sees every announcement, so callers skip the audience filter for Admin.
+function currentAnnouncementAudience(): ?string {
+    $roleKey = currentRoleKey();
+    if ($roleKey !== null) {
+        return announcementAudienceForRoleKey($roleKey);
+    }
+    if (currentUserHasAnyPermission(['legacy.role.3'])) return 'maintenance';
+    if (currentUserHasAnyPermission(['legacy.role.4'])) return 'accounting';
+    if (currentUserHasAnyPermission(['legacy.role.2'])) return 'operations';
+    return ($_SESSION['role_name'] ?? '') === 'Operations Head' ? 'operations' : null;
+}
+
 function getLatestAnnouncements(): array {
     try {
         $pdo  = getDBConnection();
         $where = [
-            '(a.ends_at IS NULL OR a.ends_at >= NOW())',
+            'a.is_active = 1',
+            '(a.start_date IS NULL OR a.start_date <= NOW())',
+            '(a.end_date IS NULL OR a.end_date >= NOW())',
         ];
         $params = [];
-        $role = currentRoleId();
-        if ($role !== ROLE_HEAD_MANAGEMENT) {
-            $audience = match ($role) {
-                ROLE_MAINTENANCE => 'maintenance',
-                ROLE_ACCOUNTING  => 'accounting',
-                ROLE_DISPATCHER  => 'operations',
-                default          => ($_SESSION['role_name'] ?? '') === 'Operations Head' ? 'operations' : 'all',
-            };
+        if (!isAdmin()) {
+            $audience = currentAnnouncementAudience() ?? 'all';
             $where[] = "(a.audience = 'all' OR a.audience = :audience)";
             $params[':audience'] = $audience;
         }
 
         $stmt = $pdo->prepare(
-            "SELECT a.announcement_id, a.title, a.body, a.is_pinned, a.priority,
-                    a.audience, a.starts_at, a.ends_at, a.created_at,
-                    u.full_name AS author
+            "SELECT a.announcement_id, a.title, a.content AS body, a.is_pinned, a.priority,
+                    a.audience, a.start_date AS starts_at, a.end_date AS ends_at, a.created_at,
+                    COALESCE(NULLIF(TRIM(CONCAT_WS(' ',
+        NULLIF(TRIM(ue.first_name), ''),
+        NULLIF(TRIM(ue.middle_name), ''),
+        NULLIF(TRIM(ue.last_name), ''),
+        NULLIF(TRIM(ue.suffix), '')
+    )), ''), u.username) AS author
                FROM announcements a
                JOIN users u ON a.created_by = u.user_id
+               LEFT JOIN employees ue ON ue.employee_id = u.employee_id
               WHERE " . implode(' AND ', $where) . "
               ORDER BY a.is_pinned DESC, FIELD(a.priority, 'high', 'medium', 'low'), a.created_at DESC
               LIMIT 3"
@@ -222,13 +220,13 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     $announcements  = getLatestAnnouncements();
     $unreadCount    = count($announcements);
     $badgeClass     = $unreadCount > 0 ? '' : 'd-none';
-    $isHead         = currentRoleId() === ROLE_HEAD_MANAGEMENT ? 'true' : 'false';
+    $isHead         = isAdmin() ? 'true' : 'false';
     $notifications  = getLatestNotifications();
     $notificationCount = count($notifications);
     $notificationItems = '';
     foreach ($notifications as $notification) {
         $notificationItems .= '<a class="dropdown-item small" href="'
-            . htmlspecialchars($notification['link'] ?: '#')
+            . htmlspecialchars(notificationLinkFor($notification['entity_type'], $notification['entity_id']) ?? '#')
             . '"><strong>' . htmlspecialchars($notification['title']) . '</strong><br>'
             . htmlspecialchars($notification['message']) . '</a>';
     }
@@ -257,12 +255,6 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
   {$csrfJs}
   <script>window.IS_HEAD_MANAGEMENT = {$isHead};</script>
   <script>
-    (function(){
-      var t = localStorage.getItem('mulawin_theme_' + window.CURRENT_USER_ID);
-      if (t === 'dark') document.documentElement.setAttribute('data-theme','dark');
-    })();
-  </script>
-  <script>
     // Marks <html> itself, before ANY body content parses. This is the
     // earliest possible point in the whole page load — nothing below this
     // depends on script execution order or element existence, which is
@@ -283,11 +275,8 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
        nothing without these. If the real collapsed-state rules in
        layout.css ever change, these need to be updated to match. */
     html.sidebar-precollapsed #appSidebar { width: var(--sidebar-collapsed); }
-    html.sidebar-precollapsed #appSidebar .nav-section-label,
-    html.sidebar-precollapsed #appSidebar .nav-section-chevron { opacity: 0; width: 0; overflow: hidden; }
     html.sidebar-precollapsed #appSidebar .nav-label { opacity: 0; width: 0; }
     html.sidebar-precollapsed #appSidebar .nav-link { padding: 10px 0; justify-content: center; }
-    html.sidebar-precollapsed #appSidebar .theme-toggle-label { opacity: 0; width: 0; }
     html.sidebar-precollapsed #appSidebar .sidebar-user-info { opacity: 0; width: 0; }
     html.sidebar-precollapsed #appSidebar .sidebar-logout-btn { display: none; }
     html.sidebar-precollapsed #appShell .main-wrapper { margin-left: var(--sidebar-collapsed); }
@@ -332,7 +321,7 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
       {$navHtml}
     </nav>
 
-    <!-- Footer: user + theme toggle + logout -->
+    <!-- Footer: user + logout -->
     <div class="sidebar-footer">
       <div class="sidebar-user">
         <div class="sidebar-avatar">{$initials}</div>
@@ -341,10 +330,6 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
           <div class="sidebar-user-role">{$roleName}</div>
         </div>
       </div>
-      <button class="theme-toggle-btn mt-2" id="themeToggleBtn" type="button">
-        <i class="bi bi-moon-fill toggle-icon" id="themeIcon"></i>
-        <span class="theme-toggle-label" id="themeLabel">Dark Mode</span>
-      </button>
       <form method="post" action="{$base}/auth/login_handler.php" class="mt-2"
             onsubmit="return confirm('Log out of Mulawin FleetOps?')">
         <input type="hidden" name="action" value="logout">
@@ -398,7 +383,7 @@ HTML;
 
 // ---- Announcements offcanvas panel -----------------------
 function self_announcements_panel(array $announcements): void {
-    $isHead  = currentRoleId() === ROLE_HEAD_MANAGEMENT;
+    $isHead  = isAdmin(); // Admin-only, matching ajax/announcement_handler.php
     $base    = APP_BASE;
     $minDateTime = date('Y-m-d\TH:i');
 
@@ -444,7 +429,7 @@ ITEM;
         $addFormHtml = <<<FORM
 <div class="ann-add-form mt-3" id="annAddForm" style="display:none;">
   <div class="mb-2">
-    <input type="text" class="form-control form-control-sm" id="annTitle" placeholder="Title *" maxlength="200">
+    <input type="text" class="form-control form-control-sm" id="annTitle" placeholder="Title *" maxlength="180">
   </div>
   <div class="mb-2">
     <textarea class="form-control form-control-sm" id="annBody" rows="3" placeholder="Message *"></textarea>

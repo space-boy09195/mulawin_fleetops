@@ -1,0 +1,78 @@
+-- ============================================================
+-- S-36: employee fields kept from the legacy schema (DRAFT FOR REVIEW)
+-- File: db/target_migrations/20261010_s36_employee_fields.sql
+--
+-- TARGET DATABASE: mulawin_fleetops_new ONLY.
+--   Do NOT apply to the current application database (mulawin_fleetops),
+--   which already has these columns.
+--   This file deliberately lives outside db/*_migration.sql so the existing
+--   "apply every db/*_migration.sql" setup step never picks it up.
+--   It contains no USE statement: the operator must select the target
+--   database explicitly before running it.
+--
+-- STATUS: reviewed draft. Saving this file is NOT approval to execute it.
+--   Execute only after explicit approval, against a disposable scratch copy
+--   of the target schema first, with a backup taken beforehand.
+--
+-- SCOPE: one ALTER TABLE on the existing target table employees, adding:
+--   employee_code      VARCHAR(30)  NULL, UNIQUE
+--   license_type       VARCHAR(20)  NULL
+--   resignation_reason VARCHAR(500) NULL
+--   Sizes match the legacy columns, so legacy values fit without truncation.
+--   It does not DROP, TRUNCATE, INSERT, UPDATE or DELETE anything.
+--
+-- WHY THESE FIELDS ARE KEPT (no safe equivalent in the target schema):
+--   employee_code: stable internal identifier. Required and checked for
+--     duplicates when HR adds or edits an employee (ajax/users_handler.php).
+--     NULL is allowed because auth/seed_users.php creates the seeded Admin's
+--     employee row without a code. UNIQUE allows any number of NULLs in
+--     both MySQL and MariaDB, so only real codes must be distinct.
+--   license_type: driver qualification. Required for drivers by
+--     validateEmpFields() in ajax/users_handler.php.
+--   resignation_reason: required when a resignation date is recorded
+--     (validateEmpFields). employees.notes is NOT used instead: it is a
+--     general free-text field with a different purpose, and merging the two
+--     would lose the "reason is required" check on a dedicated value.
+--
+-- PREREQUISITES:
+--   - The target schema exists, including table employees.
+--   - Works on MySQL 8.x and MariaDB. Uses no ADD COLUMN IF NOT EXISTS
+--     (not supported by MySQL 8).
+--
+-- NOTE: SQL examples in these comments intentionally have no statement
+--   terminators, so no tool that splits on terminators can turn a comment
+--   into an executable statement.
+--
+-- READ-ONLY PRE-CHECKS (run first, expected result in brackets):
+--   SELECT DATABASE()                                       -- [mulawin_fleetops_new]
+--   SELECT COLUMN_NAME FROM information_schema.COLUMNS
+--    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'employees'
+--      AND COLUMN_NAME IN ('employee_code', 'license_type', 'resignation_reason')
+--                                                           -- [no rows]
+--   SELECT INDEX_NAME FROM information_schema.STATISTICS
+--    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'employees'
+--      AND INDEX_NAME = 'uq_employees_employee_code'      -- [no rows]
+--
+-- EXISTING DATA:
+--   The new column is NULL for every existing target row, so the UNIQUE key
+--   cannot conflict when this runs. A later copy of legacy employees is safe
+--   for uniqueness: the legacy column is NOT NULL UNIQUE VARCHAR(30). Whether
+--   the target already holds rows is UNVERIFIED (no database was queried).
+--
+-- RERUN / RECOVERY:
+--   This is a single ALTER TABLE statement, so the three columns and the key
+--   are added together or not at all. A rerun fails with a duplicate-column
+--   error and changes nothing. If it fails, stop and investigate. Do not
+--   drop or alter columns without explicit approval.
+--
+-- ROLLBACK (only with explicit approval, and only before any value is stored):
+--   ALTER TABLE employees DROP INDEX uq_employees_employee_code,
+--     DROP COLUMN employee_code, DROP COLUMN license_type,
+--     DROP COLUMN resignation_reason
+-- ============================================================
+
+ALTER TABLE employees
+    ADD COLUMN employee_code      VARCHAR(30)  NULL AFTER user_id,
+    ADD COLUMN license_type       VARCHAR(20)  NULL AFTER license_expiry,
+    ADD COLUMN resignation_reason VARCHAR(500) NULL AFTER date_resigned,
+    ADD UNIQUE KEY uq_employees_employee_code (employee_code);

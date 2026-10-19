@@ -1,7 +1,14 @@
 <?php
 // ============================================================
 // ajax/submit_dispatch.php
-// Creates a new dispatch_request row (status = Pending)
+// Dispatcher submits a trip for Operations Head approval.
+//
+// Target schema (decision D2): the trip is created now, with status
+// 'Pending Approval' and its trip number; dispatch_requests is its approval
+// record and approval_requests (workflow 'dispatch') drives the decision.
+// An Operations Head instruction is a client_bookings row (T-C1); encoding it
+// moves the booking from Pending to Confirmed and links trips.booking_id.
+// Everything below commits or rolls back together.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/audit.php';
@@ -15,6 +22,7 @@ require_once __DIR__ . '/../includes/idempotency.php';
 require_once __DIR__ . '/../includes/dispatch_assignment.php';
 require_once __DIR__ . '/../includes/dispatcher_scope.php';
 require_once __DIR__ . '/../includes/trip_workflow.php';
+require_once __DIR__ . '/../includes/trip_queries.php';
 
 header('Content-Type: application/json');
 
@@ -28,20 +36,17 @@ $driverId    = requiredInt('driver_id', 'Driver', 1);
 $helperId    = filter_input(INPUT_POST, 'helper_id', FILTER_VALIDATE_INT) ?: null;
 $secondDriverId = filter_input(INPUT_POST, 'second_driver_id', FILTER_VALIDATE_INT) ?: null;
 $clientId    = requiredInt('client_id', 'Client', 1);
-$billingClientId = filter_input(INPUT_POST, 'billing_client_id', FILTER_VALIDATE_INT) ?: null;
 $originLocationId = filter_input(INPUT_POST, 'origin_location_id', FILTER_VALIDATE_INT) ?: null;
 $destinationLocationId = filter_input(INPUT_POST, 'destination_location_id', FILTER_VALIDATE_INT) ?: null;
-$bookingReference = optionalString('booking_reference', null, 100);
-$waybillReference = optionalString('waybill_reference', null, 100);
-$unitCountRaw = $_POST['unit_count'] ?? '';
-$unitCount = $unitCountRaw === '' ? null : (is_numeric($unitCountRaw) ? (float)$unitCountRaw : null);
-if ($unitCountRaw !== '' && ($unitCount === null || $unitCount <= 0 || $unitCount > 1000000)) {
-    jsonFail('Unit count must be a positive number no greater than 1,000,000.');
-}
 $scheduledAt = requiredString('scheduled_at', 'Scheduled date/time');
 $shift       = requiredEnum('shift', ['Day', 'Night'], 'Shift');
+// instruction_id is the client_bookings.booking_id of an Operations Head
+// instruction (form field name kept).
 $instructionId = filter_input(INPUT_POST, 'instruction_id', FILTER_VALIDATE_INT) ?: null;
-$isAdmin = currentRoleId() === ROLE_ADMIN;
+$isAdmin = isAdmin();
+// Admin may submit without an Operations Head instruction; that is an
+// override and needs a reason (checked after the routine validation below).
+$adminWithoutInstruction = $isAdmin && $instructionId === null;
 if (!$isAdmin) {
     requirePermission('dispatch.instructions.encode');
 }
@@ -72,6 +77,7 @@ if ($expectedArrivalRaw !== '') {
     }
     $expectedArrival = $expectedArrivalDate->format('Y-m-d H:i:s');
 }
+$scheduledSql = $scheduledDate->format('Y-m-d H:i:s');
 
 $pdo = getDBConnection();
 
@@ -85,27 +91,20 @@ $truck = $truckQuery->fetch(PDO::FETCH_ASSOC);
 if (!$truck || $truck['status'] !== 'Available') {
     jsonFail('The selected truck is no longer available.', 409);
 }
-enforceDispatcherScope($shift, (string)$truck['truck_type']);
+enforceDispatcherScope($shift, (string)$truck['truck_type'], $scheduledDate->format('Y-m-d'));
 
-$clientStmt = $pdo->prepare('SELECT client_id, client_name, parent_client_id FROM clients WHERE client_id = ? AND is_active = 1');
+$clientStmt = $pdo->prepare("SELECT client_id, client_name FROM clients WHERE client_id = ? AND status = 'Active'");
 $clientStmt->execute([$clientId]);
 $client = $clientStmt->fetch(PDO::FETCH_ASSOC);
 if (!$client) {
     jsonFail('Select a registered active client.');
 }
-$clientName = $client['client_name'];
-$billingClientId ??= $client['parent_client_id'] !== null
-    ? (int)$client['parent_client_id']
-    : $clientId;
-if ($billingClientId !== null) {
-    $billingClient = $pdo->prepare('SELECT client_id FROM clients WHERE client_id = ? AND is_active = 1');
-    $billingClient->execute([$billingClientId]);
-    if (!$billingClient->fetchColumn()) {
-        jsonFail('Select an active billing client.');
-    }
-}
 
-$driverStmt = $pdo->prepare("SELECT full_name FROM employees WHERE employee_id = ? AND is_active = 1 AND license_number IS NOT NULL");
+$driverStmt = $pdo->prepare(
+    "SELECT employee_id
+     FROM employees
+     WHERE employee_id = ? AND employment_status = 'Active' AND license_number IS NOT NULL"
+);
 $driverStmt->execute([$driverId]);
 if (!$driverStmt->fetchColumn()) {
     jsonFail('The selected driver is not active or does not have a valid license.');
@@ -116,8 +115,8 @@ foreach ([
 ] as $crewLabel => $crewId) {
     if ($crewId !== null) {
         $crewStmt = $pdo->prepare(
-            'SELECT employee_id, license_number, position
-             FROM employees WHERE employee_id = ? AND is_active = 1'
+            "SELECT employee_id, license_number, position
+             FROM employees WHERE employee_id = ? AND employment_status = 'Active'"
         );
         $crewStmt->execute([$crewId]);
         $crew = $crewStmt->fetch(PDO::FETCH_ASSOC);
@@ -129,211 +128,211 @@ foreach ([
         }
     }
 }
-$crewIds = array_filter([$driverId, $secondDriverId, $helperId], static fn($id) => $id !== null);
+$crewIds = array_values(array_filter([$driverId, $secondDriverId, $helperId], static fn($id) => $id !== null));
 if (count($crewIds) !== count(array_unique($crewIds))) {
     jsonFail('Each assigned crew member must be different.');
 }
 
-if ($originLocationId === null || $destinationLocationId === null) {
-    jsonFail('Choose an origin and destination location for this dispatch.');
-}
-if ($originLocationId !== null) {
-    $locations = $pdo->prepare(
-        'SELECT location_id, location_type
-         FROM client_locations
-         WHERE location_id = ? AND client_id = ? AND is_active = 1'
-    );
-    $locations->execute([$originLocationId, $clientId]);
-    $origin = $locations->fetch(PDO::FETCH_ASSOC);
-    $locations->execute([$destinationLocationId, $clientId]);
-    $destination = $locations->fetch(PDO::FETCH_ASSOC);
-    if (!$origin || !$destination) {
-        jsonFail('Choose active origin and destination locations belonging to the selected client.');
-    }
-    if (!in_array($origin['location_type'], ['Pickup', 'Both'], true)) {
-        jsonFail('The selected origin location is not configured for pickup.');
-    }
-    if (!in_array($destination['location_type'], ['Delivery', 'Both'], true)) {
-        jsonFail('The selected destination location is not configured for delivery.');
-    }
-}
-
-// Ensure the selected route is approved and still available.
+// Route must be active. In the target a requested route stays inactive until
+// its route_request approval, so is_active = 1 means approved.
 $route = findOrFail($pdo, 'routes', 'route_id', $routeId, 'Route not found.');
-if ((string)($route['approval_status'] ?? 'Approved') !== 'Approved' || !(int)$route['is_active']) {
+if (!(int)$route['is_active']) {
     jsonFail('The selected route is not approved for dispatch.');
 }
 
-$pdo->beginTransaction();
+// trips.origin / trips.destination: the selected client locations (name and
+// address), otherwise the route's origin and destination.
+$origin = (string)$route['origin'];
+$destination = (string)$route['destination'];
+if ($originLocationId === null || $destinationLocationId === null) {
+    jsonFail('Choose an origin and destination location for this dispatch.');
+}
+$locations = $pdo->prepare(
+    'SELECT location_id, location_name, address
+     FROM client_locations
+     WHERE location_id = ? AND client_id = ? AND is_active = 1'
+);
+$locations->execute([$originLocationId, $clientId]);
+$originLocation = $locations->fetch(PDO::FETCH_ASSOC);
+$locations->execute([$destinationLocationId, $clientId]);
+$destinationLocation = $locations->fetch(PDO::FETCH_ASSOC);
+if (!$originLocation || !$destinationLocation) {
+    jsonFail('Choose active origin and destination locations belonging to the selected client.');
+}
+if ($originLocationId === $destinationLocationId) {
+    jsonFail('Origin and destination must be different locations.');
+}
+$locationText = static fn(array $location): string => mb_substr(
+    trim($location['location_name'] . ' — ' . preg_replace('/\s+/u', ' ', (string)$location['address'])),
+    0,
+    255,
+    'UTF-8'
+);
+$origin = $locationText($originLocation);
+$destination = $locationText($destinationLocation);
+
+$overrideBypassed = ['restriction' => 'instruction_required'];
+$overrideReason = null;
+if ($adminWithoutInstruction) {
+    $overrideReason = adminOverrideReason();
+    if ($overrideReason === null) {
+        adminOverrideRefused('trips', null, $overrideBypassed);
+        jsonFail('An Admin override reason (1-500 characters) is required to submit a dispatch without an Operations Head instruction.', 422);
+    }
+}
+
 $requestKey = requestIdempotencyKey();
 if ($requestKey === null) {
-    $pdo->rollBack();
     jsonFail('Missing or invalid request idempotency key.', 400);
 }
+$pdo->beginTransaction();
+if ($adminWithoutInstruction) {
+    // The new trip may roll back, so the event's entity ID stays null and the
+    // trip ID is recorded as trip_id on success.
+    adminOverrideBegin('trips', null, $overrideBypassed, $overrideReason);
+}
 try {
-    $instruction = null;
+    $booking = null;
     if ($instructionId !== null) {
-        $instructionQuery = $pdo->prepare(
-            "SELECT instruction_id, client_id, route_id, scheduled_at, shift,
-                    unit_count, status
-             FROM dispatch_instructions
-             WHERE instruction_id = ? FOR UPDATE"
+        $bookingQuery = $pdo->prepare(
+            "SELECT booking_id, booking_reference, client_id, route_id, scheduled_departure,
+                    shift, truck_type, quantity, status
+             FROM client_bookings
+             WHERE booking_id = ? FOR UPDATE"
         );
-        $instructionQuery->execute([$instructionId]);
-        $instruction = $instructionQuery->fetch(PDO::FETCH_ASSOC);
-        if (!$instruction || $instruction['status'] !== 'Open') {
+        $bookingQuery->execute([$instructionId]);
+        $booking = $bookingQuery->fetch(PDO::FETCH_ASSOC);
+        if (!$booking || $booking['status'] !== 'Pending') {
             $pdo->rollBack();
             jsonFail('This dispatch instruction is no longer available to encode.', 409);
         }
-        if ((int)$instruction['client_id'] !== $clientId
-            || (int)$instruction['route_id'] !== $routeId
-            || $instruction['shift'] !== $shift
-            || $instruction['scheduled_at'] !== $scheduledDate->format('Y-m-d H:i:s')) {
+        if ((int)$booking['client_id'] !== $clientId
+            || (int)$booking['route_id'] !== $routeId
+            || $booking['shift'] !== $shift
+            || $booking['scheduled_departure'] !== $scheduledSql) {
             $pdo->rollBack();
             jsonFail('Client, route, departure time, and shift must match the Operations Head instruction.', 409);
+        }
+        if ($booking['truck_type'] !== $truck['truck_type']) {
+            $pdo->rollBack();
+            jsonFail('The selected truck must be a ' . $booking['truck_type'] . ' as instructed by the Operations Head.', 409);
         }
     }
 
     lockDispatchResources($pdo, $truckId, $crewIds);
-    assertDispatchResourcesAvailable($pdo, $truckId, $crewIds, $scheduledDate->format('Y-m-d H:i:s'));
+    assertDispatchResourcesAvailable($pdo, $truckId, $crewIds, $scheduledSql);
 
     if (!claimIdempotencyKey($pdo, 'dispatch.create', $requestKey)) {
         $pdo->rollBack();
         jsonFail('This dispatch submission has already been processed.', 409);
     }
-    $rateId = null;
-    $rateAmount = null;
-    $rateCurrency = null;
-    $rateBasis = null;
-    if ($originLocationId !== null) {
-        $rateQuery = $pdo->prepare(
-            "SELECT rate_id, rate_amount, currency, rate_basis
-             FROM client_rates
-             WHERE client_id = ?
-               AND origin_location_id = ?
-               AND destination_location_id = ?
-               AND is_active = 1
-               AND effective_from <= DATE(?)
-               AND (effective_to IS NULL OR effective_to >= DATE(?))
-             ORDER BY effective_from DESC, rate_id DESC
-             LIMIT 1"
-        );
-        $rateQuery->execute([$clientId, $originLocationId, $destinationLocationId, $scheduledDate->format('Y-m-d'), $scheduledDate->format('Y-m-d')]);
-        $rate = $rateQuery->fetch(PDO::FETCH_ASSOC);
-        if ($rate) {
-            $rateId = (int)$rate['rate_id'];
-            $rateAmount = $rate['rate_amount'];
-            $rateCurrency = $rate['currency'];
-            $rateBasis = $rate['rate_basis'];
-        }
-    }
-    $stmt = $pdo->prepare(
-        "INSERT INTO dispatch_requests
-           (truck_id, driver_id, second_driver_id, helper_id, route_id, requested_by, scheduled_at, shift,
-              dispatch_instruction_id,
-              expected_arrival, status, remarks, client_name, client_id, billing_client_id,
-            origin_location_id, destination_location_id, client_rate_id, client_rate_amount,
-            client_rate_currency, client_rate_basis, booking_reference, waybill_reference, unit_count)
-         VALUES
-             (:truck, :driver, :second_driver, :helper, :route, :user, :scheduled, :shift,
-              :instruction_id, :expected_arrival,
-            'Pending', :remarks, :client_name, :client_id, :billing_client_id,
-            :origin_location_id, :destination_location_id, :client_rate_id, :client_rate_amount,
-            :client_rate_currency, :client_rate_basis, :booking_reference, :waybill_reference, :unit_count)"
-    );
-    $stmt->execute([
-        ':truck' => $truckId, ':driver' => $driverId, ':second_driver' => $secondDriverId,
-        ':helper' => $helperId,
-        ':route' => $routeId, ':user' => currentUserId(),
-        ':scheduled' => $scheduledDate->format('Y-m-d H:i:s'),
-        ':shift' => $shift, ':instruction_id' => $instructionId,
-        ':expected_arrival' => $expectedArrival, ':remarks' => $remarks,
-        ':client_name' => $clientName, ':client_id' => $clientId,
-        ':billing_client_id' => $billingClientId,
-        ':origin_location_id' => $originLocationId,
-        ':destination_location_id' => $destinationLocationId,
-        ':client_rate_id' => $rateId, ':client_rate_amount' => $rateAmount,
-        ':client_rate_currency' => $rateCurrency,
-        ':client_rate_basis' => $rateBasis,
-        ':booking_reference' => $bookingReference,
-        ':waybill_reference' => $waybillReference, ':unit_count' => $unitCount,
-    ]);
-    $newId = (int)$pdo->lastInsertId();
+
+    $tripNumber = nextTripNumber($pdo);
     $pdo->prepare(
-        'INSERT INTO trip_workflow_state (dispatch_id, current_step) VALUES (?, 1)'
-    )->execute([$newId]);
+        "INSERT INTO trips
+            (trip_number, trip_type, client_id, booking_id, route_id, origin, destination,
+             scheduled_departure, scheduled_arrival, truck_id, driver_id, second_driver_id,
+             helper_id, dispatcher_id, shift, status)
+         VALUES
+            (:number, :trip_type, :client_id, :booking_id, :route_id, :origin, :destination,
+             :departure, :arrival, :truck, :driver, :second_driver,
+             :helper, :dispatcher, :shift, 'Pending Approval')"
+    )->execute([
+        ':number'        => $tripNumber,
+        ':trip_type'     => $truck['truck_type'],
+        ':client_id'     => $clientId,
+        ':booking_id'    => $booking ? (int)$booking['booking_id'] : null,
+        ':route_id'      => $routeId,
+        ':origin'        => $origin,
+        ':destination'   => $destination,
+        ':departure'     => $scheduledSql,
+        ':arrival'       => $expectedArrival,
+        ':truck'         => $truckId,
+        ':driver'        => $driverId,
+        ':second_driver' => $secondDriverId,
+        ':helper'        => $helperId,
+        ':dispatcher'    => employeeIdForUser($pdo, currentUserId()),
+        ':shift'         => $shift,
+    ]);
+    $tripId = (int)$pdo->lastInsertId();
+
+    $pdo->prepare(
+        "INSERT INTO dispatch_requests (trip_id, submitted_by, status) VALUES (?, ?, 'Pending')"
+    )->execute([$tripId, currentUserId()]);
+    $dispatchId = (int)$pdo->lastInsertId();
+
+    $actor = currentUserId();
+    recordTripWorkflowEvent($pdo, $tripId, 1, 'request-prepared', $actor, 'Dispatcher prepared the trip request.');
+    recordTripWorkflowEvent($pdo, $tripId, 2, 'resources-checked', $actor, 'Truck and driver availability checked during submission.');
+    recordTripWorkflowEvent($pdo, $tripId, 3, 'trip-details-entered', $actor, 'Trip details entered and validated.');
     recordTripWorkflowEvent(
         $pdo,
-        $newId,
-        null,
-        1,
-        'request-prepared',
-        currentUserId(),
-        'Dispatcher prepared the trip request.'
-    );
-    recordTripWorkflowEvent(
-        $pdo,
-        $newId,
-        null,
-        2,
-        'resources-checked',
-        currentUserId(),
-        'Truck and driver availability checked during submission.'
-    );
-    recordTripWorkflowEvent(
-        $pdo,
-        $newId,
-        null,
-        3,
-        'trip-details-entered',
-        currentUserId(),
-        'Trip details entered and validated.'
-    );
-    recordTripWorkflowEvent(
-        $pdo,
-        $newId,
-        null,
+        $tripId,
         4,
         'request-submitted',
-        currentUserId(),
-        'Trip request submitted for Operations Head approval.'
+        $actor,
+        'Trip request submitted for Operations Head approval.' . ($remarks ? ' Remarks: ' . $remarks : ''),
+        null,
+        'Pending Approval'
     );
-    if ($instructionId !== null) {
+
+    if ($booking !== null) {
         $encoded = $pdo->prepare(
-            "UPDATE dispatch_instructions
-             SET status = 'Encoded', encoded_by = ?, dispatch_id = ?, encoded_at = NOW()
-             WHERE instruction_id = ? AND status = 'Open'"
+            "UPDATE client_bookings SET status = 'Confirmed'
+             WHERE booking_id = ? AND status = 'Pending'"
         );
-        $encoded->execute([currentUserId(), $newId, $instructionId]);
+        $encoded->execute([(int)$booking['booking_id']]);
         if ($encoded->rowCount() !== 1) {
             throw new DomainException('This dispatch instruction was already encoded.');
         }
-        auditLog('ENCODE_DISPATCH_INSTRUCTION', 'dispatch_instructions', $instructionId, ['status' => 'Open'], [
-            'status' => 'Encoded',
-            'dispatch_id' => $newId,
+        auditLog('ENCODE_DISPATCH_INSTRUCTION', 'client_bookings', (int)$booking['booking_id'], ['status' => 'Pending'], [
+            'status'  => 'Confirmed',
+            'trip_id' => $tripId,
         ]);
     }
+
     $approvalId = createApprovalRequest(
         $pdo,
         'dispatch',
         'dispatch_request',
-        $newId,
-        currentUserId()
+        $dispatchId,
+        $actor,
+        $remarks
     );
-    auditLog('CREATE', 'dispatch_requests', $newId, null, ['status' => 'Pending']);
-    auditLog('CREATE', 'approval_requests', $approvalId, null, [
-        'request_type' => 'dispatch',
-        'entity_type' => 'dispatch_request',
-        'entity_id' => $newId,
+    auditLog('CREATE', 'trips', $tripId, null, [
+        'trip_number' => $tripNumber,
+        'status'      => 'Pending Approval',
+        'booking_id'  => $booking ? (int)$booking['booking_id'] : null,
     ]);
+    auditLog('CREATE', 'dispatch_requests', $dispatchId, null, ['status' => 'Pending', 'trip_id' => $tripId]);
+    auditLog('CREATE', 'approval_requests', $approvalId, null, [
+        'workflow_key' => 'dispatch',
+        'entity_type'  => 'dispatch_request',
+        'entity_id'    => $dispatchId,
+    ]);
+    if ($adminWithoutInstruction) {
+        auditAdminOverride([
+            'action'      => 'create_dispatch_without_instruction',
+            'new_status'  => 'Pending Approval',
+            'dispatch_id' => $dispatchId,
+            'trip_id'     => $tripId,
+        ], $tripId);
+    }
     $pdo->commit();
+    if ($adminWithoutInstruction) adminOverrideSucceeded();
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     if ($e instanceof DomainException) {
         jsonFail($e->getMessage(), 409);
     }
     error_log('submit_dispatch: ' . $e->getMessage());
+    if ($e instanceof PDOException && in_array((int)($e->errorInfo[1] ?? 0), [1205, 1213], true)) {
+        jsonFail('Another dispatch was being saved at the same time. Nothing was saved; please try again.', 409);
+    }
     jsonFail('Could not confirm the dispatch.', 500);
 }
 
-jsonOk(['dispatch_id' => $newId], 'Dispatch encoded and submitted to the Operations Head for approval.');
+jsonOk(
+    ['dispatch_id' => $dispatchId, 'trip_id' => $tripId, 'trip_number' => $tripNumber],
+    'Dispatch encoded and submitted to the Operations Head for approval.'
+);

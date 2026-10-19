@@ -51,7 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const locationId = document.getElementById('locationId');
   const locationButton = document.getElementById('saveLocationButton');
   const cancelLocationEdit = document.getElementById('cancelLocationEdit');
-  const locationFields = ['locationName', 'locationType', 'locationAddress', 'locationContact', 'locationPhone', 'locationNotes'];
+  const locationFields = ['locationName', 'locationAddress', 'locationContact', 'locationPhone'];
 
   function resetLocationForm() {
     locationForm?.reset();
@@ -68,7 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.edit-location').forEach(button => {
     button.addEventListener('click', () => {
       if (locationId) locationId.value = button.dataset.id ?? '';
-      const keys = ['name', 'type', 'address', 'contact', 'phone', 'notes'];
+      const keys = ['name', 'address', 'contact', 'phone'];
       locationFields.forEach((id, index) => {
         const input = document.getElementById(id);
         if (input) input.value = button.dataset[keys[index]] ?? '';
@@ -104,11 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function resetRateForm() {
     rateForm?.reset();
     if (rateId) rateId.value = '';
-    const currency = document.getElementById('rateCurrency');
-    const service = document.getElementById('serviceName');
     const effectiveFrom = document.getElementById('effectiveFrom');
-    if (currency) currency.value = 'PHP';
-    if (service) service.value = 'Standard';
     if (effectiveFrom) {
       const today = new Date();
       effectiveFrom.value = new Date(today.getTime() - today.getTimezoneOffset() * 60000)
@@ -127,15 +123,12 @@ document.addEventListener('DOMContentLoaded', () => {
     button.addEventListener('click', () => {
       if (rateId) rateId.value = button.dataset.id ?? '';
       const values = {
-        originLocation: button.dataset.origin,
-        destinationLocation: button.dataset.destination,
-        serviceName: button.dataset.service,
-        rateBasis: button.dataset.basis,
+        rateRoute: button.dataset.route,
+        rateTruckType: button.dataset.truckType,
+        rateType: button.dataset.rateType,
         rateAmount: button.dataset.amount,
-        rateCurrency: button.dataset.currency,
         effectiveFrom: button.dataset.from,
         effectiveTo: button.dataset.to,
-        rateNotes: button.dataset.notes,
       };
       Object.entries(values).forEach(([id, value]) => {
         const input = document.getElementById(id);

@@ -1,26 +1,30 @@
 <?php
 // ============================================================
 // pages/trip_monitor.php
-// Trip Monitoring — active trips, status updates, late alerts
+// Trip Monitoring — active trips, status updates, and past-ETA alerts
 // Access is controlled by the trips.view permission.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
+require_once __DIR__ . '/../includes/crew_trip_access.php';
+require_once __DIR__ . '/../includes/trip_queries.php';
 
-requirePermission('trips.view');
+// trips.view, or a Helper limited to trips assigned to them (employee ID).
+$helperEmployeeId = tripPageAccess(['trips.view']);
 $canUpdateTrips = currentUserHasAnyPermission(['trips.update']);
 $tripColumnCount = $canUpdateTrips ? 9 : 8;
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/trip_monitor.js';
 
 $pdo = getDBConnection();
-$reportClients = $pdo->query('SELECT client_id, client_name FROM clients WHERE is_active = 1 ORDER BY client_name')->fetchAll(PDO::FETCH_ASSOC);
+$reportClients = $pdo->query("SELECT client_id, client_name FROM clients WHERE status = 'Active' ORDER BY client_name")->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Period filter (scopes historical Completed/Cancelled trips only —
 // active trips always show regardless, since they need eyes on them now) ────
 $periods = [
-    'today' => 'Today', '1w' => 'This Week', '1m' => 'This Month',
+    'today' => 'Today', '1w' => 'Last 7 Days', '1m' => 'Last 1 Month',
     '3m' => 'Last 3 Months', '6m' => 'Last 6 Months', '1y' => 'Last 12 Months', 'all' => 'All Time',
 ];
 $period = $_GET['period'] ?? 'all';
@@ -36,79 +40,47 @@ $rangeStart = match ($period) {
 };
 $rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
 
-// ---- Auto-flag late trips before fetching -----------------
-$pdo->exec(
-    "UPDATE trips
-        SET is_late = 1
-      WHERE expected_arrival < NOW()
-        AND status NOT IN ('Completed','Cancelled')
-        AND is_late = 0"
-);
-
-// ---- Summary counts ---------------------------------------
-$counts = $pdo->query(
-    "SELECT
-       COUNT(*)                                             AS total,
-       SUM(status NOT IN ('Completed','Cancelled'))        AS active,
-       SUM(status = 'Completed')                           AS completed,
-       SUM(is_late = 1 AND status NOT IN ('Completed','Cancelled')) AS late
-     FROM trips"
-)->fetch();
+// Past ETA is an operational alert based on the scheduled arrival, not a
+// client-reported delay metric.
+$operational = tripOperationalSql('t', 'dr');
 
 // ---- Fetch trips ------------------------------------------
+// Shared trip SELECT (includes/trip_queries.php) plus the incident flag.
 $tripStmt = $pdo->prepare(
-    "SELECT
-       t.trip_id,
-       t.trip_number,
-       t.status,
-       t.shift,
-       t.cargo_description,
-       t.expected_arrival,
-       t.actual_departure_at,
-       t.actual_arrival,
-       t.is_late,
-       t.created_at,
-       tr.plate_number,
-       tr.brand,
-       tr.model,
-       e_d.full_name  AS driver_name,
-       e_h.full_name  AS helper_name,
-       r.origin,
-       r.destination,
-       dr.scheduled_at AS etd,
-       dr.client_name,
-       dr.booking_reference,
-       dr.waybill_reference,
-       dr.unit_count,
-       dr.client_rate_amount,
-       dr.client_rate_currency,
-       dr.client_rate_basis,
-       e_sd.full_name AS second_driver_name,
-       origin.location_name AS origin_location_name,
-       destination.location_name AS destination_location_name,
+    'SELECT ' . tripSelectColumnsSql() . ",
+       t.scheduled_departure AS etd,
        EXISTS (
-         SELECT 1 FROM incidents i
+         SELECT 1 FROM trip_incidents i
          WHERE i.trip_id = t.trip_id
        ) AS has_problem
-     FROM trips t
-     JOIN dispatch_requests dr ON t.dispatch_id  = dr.dispatch_id
-     JOIN trucks tr             ON dr.truck_id    = tr.truck_id
-     JOIN employees e_d         ON dr.driver_id   = e_d.employee_id
-     LEFT JOIN employees e_sd   ON dr.second_driver_id = e_sd.employee_id
-     LEFT JOIN employees e_h    ON dr.helper_id   = e_h.employee_id
-     LEFT JOIN client_locations origin ON dr.origin_location_id = origin.location_id
-     LEFT JOIN client_locations destination ON dr.destination_location_id = destination.location_id
-     JOIN routes r              ON dr.route_id    = r.route_id
-     WHERE t.status NOT IN ('Completed','Cancelled') " .
-     ($rangeStartSql ? "OR (t.status IN ('Completed','Cancelled') AND t.created_at >= :rangeStart)" : "OR t.status IN ('Completed','Cancelled')") . "
+     " . tripFromSql() . "
+     WHERE $operational
+       AND (t.status NOT IN ('Completed','Cancelled') " .
+     ($rangeStartSql ? "OR (t.status IN ('Completed','Cancelled') AND t.created_at >= :rangeStart)" : "OR t.status IN ('Completed','Cancelled')") . ")
+" .
+     ($helperEmployeeId !== null ? " AND t.helper_id = :helperEmployeeId" : "") . "
      ORDER BY
-       FIELD(t.status,'In Transit','Loading','Unloading','Completed','Cancelled'),
-       t.is_late DESC,
-       t.expected_arrival ASC"
+       FIELD(t.status,'In Progress','Dispatched','Ready for Dispatch','Assigned','Approved','Delivered','Returned','Completed','Cancelled'),
+       is_late DESC,
+       t.scheduled_arrival ASC
+     LIMIT 1000"
 );
 if ($rangeStartSql) $tripStmt->bindValue(':rangeStart', $rangeStartSql);
+if ($helperEmployeeId !== null) $tripStmt->bindValue(':helperEmployeeId', $helperEmployeeId, PDO::PARAM_INT);
 $tripStmt->execute();
 $trips = $tripStmt->fetchAll();
+foreach ($trips as &$tripRow) {
+    // Keys the view uses. Client rates are looked up at billing time in the
+    // target (client_rates), not stored per dispatch.
+    $tripRow['origin_location_name'] = $tripRow['trip_origin'];
+    $tripRow['destination_location_name'] = $tripRow['trip_destination'];
+    $tripRow['waybill_reference'] = null;
+    $tripRow['client_rate_amount'] = null;
+    $tripRow['client_rate_currency'] = null;
+    $tripRow['client_rate_basis'] = null;
+    $tripRow['cargo_description'] = null;
+}
+unset($tripRow);
 
 layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
 ?>
@@ -118,36 +90,47 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
     <h1 class="page-title">Trip Monitoring</h1>
     <p class="page-subtitle">Track all trips in real time</p>
   </div>
-  <div class="d-flex gap-2 align-items-center flex-wrap">
-    <?php if (currentUserHasAnyPermission(['reports.export'])): ?>
+  <div class="trip-monitor-controls d-flex gap-2 align-items-center flex-wrap">
+    <?php if ($helperEmployeeId === null && currentUserHasAnyPermission(['trips.export'])): ?>
     <form method="get" action="<?= APP_BASE ?>/ajax/trip_operations_export.php"
-          class="d-flex gap-2 align-items-center flex-wrap" target="_blank">
-      <input type="date" name="from" class="form-control form-control-sm" aria-label="Export from date">
-      <input type="date" name="to" class="form-control form-control-sm" aria-label="Export to date">
+          class="trip-export-controls" target="_blank">
+      <label class="trip-export-field"><span>From date</span>
+        <input type="date" name="from" class="form-control form-control-sm" aria-label="Export from date">
+      </label>
+      <label class="trip-export-field"><span>To date</span>
+        <input type="date" name="to" class="form-control form-control-sm" aria-label="Export to date">
+      </label>
+      <label class="trip-export-field"><span>Status</span>
       <select name="status" class="form-select form-select-sm" aria-label="Export trip status">
         <option value="">All trip statuses</option>
-        <?php foreach (['Loading', 'In Transit', 'Unloading', 'Completed', 'Cancelled'] as $statusOption): ?>
+        <?php foreach (TRIP_STATUSES as $statusOption): ?>
         <option value="<?= htmlspecialchars($statusOption) ?>"><?= htmlspecialchars($statusOption) ?></option>
         <?php endforeach; ?>
       </select>
+      </label>
+      <label class="trip-export-field"><span>Client</span>
       <select name="client_id" class="form-select form-select-sm" aria-label="Export client">
         <option value="">All clients</option>
         <?php foreach ($reportClients as $client): ?>
         <option value="<?= (int)$client['client_id'] ?>"><?= htmlspecialchars($client['client_name']) ?></option>
         <?php endforeach; ?>
       </select>
+      </label>
+      <label class="trip-export-field"><span>Shift</span>
       <select name="shift" class="form-select form-select-sm" aria-label="Export trip shift">
         <option value="">All shifts</option>
         <option value="Day">Day Shift</option>
         <option value="Night">Night Shift</option>
       </select>
+      </label>
       <button type="submit" class="btn btn-outline-success btn-sm text-nowrap">
         <i class="bi bi-download me-1"></i>Export CSV
       </button>
     </form>
     <?php endif; ?>
-    <form method="get" class="d-flex">
-      <select name="period" class="form-select" style="min-width:160px;font-size:.85rem;" onchange="this.form.submit()">
+    <form method="get" class="trip-period-control">
+      <label for="tripPeriod">Period</label>
+      <select id="tripPeriod" name="period" class="form-select" onchange="this.form.submit()">
         <?php foreach ($periods as $key => $label): ?>
         <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
         <?php endforeach; ?>
@@ -161,69 +144,22 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
   </div>
 </div>
 
-<!-- ---- Summary cards ------------------------------------- -->
-<div class="row g-3 mb-4">
-  <div class="col-6 col-xl-3">
-    <div class="stat-card">
-      <div class="stat-icon amber"><i class="bi bi-map"></i></div>
-      <div class="stat-info">
-        <div class="stat-value"><?= (int)$counts['total'] ?></div>
-        <div class="stat-label">Total Trips</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-xl-3">
-    <div class="stat-card">
-      <div class="stat-icon blue"><i class="bi bi-arrow-right-circle"></i></div>
-      <div class="stat-info">
-        <div class="stat-value"><?= (int)$counts['active'] ?></div>
-        <div class="stat-label">Active</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-xl-3">
-    <div class="stat-card">
-      <div class="stat-icon green"><i class="bi bi-check-circle"></i></div>
-      <div class="stat-info">
-        <div class="stat-value"><?= (int)$counts['completed'] ?></div>
-        <div class="stat-label">Completed</div>
-      </div>
-    </div>
-  </div>
-  <div class="col-6 col-xl-3">
-    <div class="stat-card">
-      <div class="stat-icon red"><i class="bi bi-alarm"></i></div>
-      <div class="stat-info">
-        <div class="stat-value"><?= (int)$counts['late'] ?></div>
-        <div class="stat-label">Late</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<?php if ((int)$counts['late'] > 0): ?>
-<!-- ---- Late trip alert banner ---------------------------- -->
-<div class="alert-banner mb-4">
-  <i class="bi bi-exclamation-triangle-fill"></i>
-  <strong><?= (int)$counts['late'] ?> trip<?= $counts['late'] > 1 ? 's are' : ' is' ?> overdue.</strong>
-  Use the filter below to view them.
-</div>
-<?php endif; ?>
-
 <!-- ---- Filter bar ---------------------------------------- -->
 <div class="card mb-4">
   <div class="card-body-custom">
     <div class="d-flex flex-wrap gap-2 align-items-center">
       <span class="text-muted" style="font-size:.8rem;">Filter:</span>
       <button class="filter-btn active" data-filter="all">All</button>
-      <button class="filter-btn" data-filter="Loading">Loading</button>
-      <button class="filter-btn" data-filter="In Transit">In Transit</button>
-      <button class="filter-btn" data-filter="Unloading">Unloading</button>
+      <button class="filter-btn" data-filter="Assigned">Assigned</button>
+      <button class="filter-btn" data-filter="Dispatched">Dispatched</button>
+      <button class="filter-btn" data-filter="In Progress">In Progress</button>
+      <button class="filter-btn" data-filter="Delivered">Delivered</button>
+      <button class="filter-btn" data-filter="Returned">Returned</button>
       <button class="filter-btn" data-filter="Completed">Completed</button>
       <button class="filter-btn" data-filter="shift:Day">Day Shift</button>
       <button class="filter-btn" data-filter="shift:Night">Night Shift</button>
       <button class="filter-btn late-filter" data-filter="late">
-        <i class="bi bi-alarm"></i> Late Only
+        <i class="bi bi-alarm"></i> Past ETA
       </button>
       <button class="filter-btn" data-filter="problem">Problems</button>
       <button class="filter-btn" data-filter="okay">No Problems</button>
@@ -266,9 +202,9 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
         <?php else: ?>
         <?php foreach ($trips as $trip):
           $statusClass = match($trip['status']) {
-            'Loading'    => 'maintenance',
-            'In Transit' => 'deployed',
-            'Unloading'  => 'available',
+            'Approved', 'Assigned', 'Ready for Dispatch' => 'maintenance',
+            'Dispatched', 'In Progress' => 'deployed',
+            'Delivered', 'Returned' => 'available',
             'Completed'  => 'available',
             'Cancelled'  => 'inactive',
             default      => 'inactive',
@@ -276,6 +212,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
           $isLate    = (bool)$trip['is_late'];
           $hasProblem = (bool)$trip['has_problem'];
           $isActive  = !in_array($trip['status'], ['Completed','Cancelled']);
+          $isPastEta = $isLate && $isActive;
           $searchStr = strtolower(
             $trip['trip_number'] . ' ' .
             $trip['plate_number'] . ' ' .
@@ -290,7 +227,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
         ?>
         <tr data-status="<?= htmlspecialchars($trip['status']) ?>"
             data-shift="<?= htmlspecialchars($trip['shift']) ?>"
-            data-late="<?= $isLate ? '1' : '0' ?>"
+            data-late="<?= $isPastEta ? '1' : '0' ?>"
             data-problem="<?= $hasProblem ? '1' : '0' ?>"
             data-search="<?= htmlspecialchars($searchStr) ?>"
             class="<?= $isLate && $isActive ? 'row-late' : '' ?>">
@@ -301,7 +238,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
               <?= htmlspecialchars($trip['trip_number']) ?>
             </a>
             <?php if ($isLate && $isActive): ?>
-            <span class="late-pill">LATE</span>
+            <span class="late-pill">PAST ETA</span>
             <?php endif; ?>
           </td>
           <td><span class="badge text-bg-<?= $trip['shift'] === 'Day' ? 'info' : 'dark' ?>"><?= htmlspecialchars($trip['shift']) ?></span></td>
@@ -418,8 +355,8 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
         <div class="mb-3">
           <label class="form-label fw-600">New Status</label>
           <select class="form-select" id="modalStatus">
-            <option value="In Transit">In Transit</option>
-            <option value="Unloading">Unloading</option>
+            <option value="In Progress">In Progress</option>
+            <option value="Delivered">Delivered</option>
             <option value="Completed">Completed</option>
             <option value="Cancelled">Cancelled</option>
           </select>

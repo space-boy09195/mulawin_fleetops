@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
 require_once __DIR__ . '/../includes/app_settings.php';
+require_once __DIR__ . '/../includes/employee_profile.php';
 
 header('Content-Type: application/json');
 
@@ -17,45 +18,39 @@ $pdo    = getDBConnection();
 $action = $_POST['action'] ?? '';
 
 function assertSingleActiveUser(PDO $pdo, int $roleId, int $active, ?int $excludeUserId = null): void {
-    // Only enforce single-active-user when the role requires it
-    // Single-holder roles (one active user max): all roles except Driver (13) and Helper (14)
-    $singleHolderRoles = [1, 2, 5, 6, 7, 8, 9, 10, 11, 12]; // Admin, Dispatcher, Operations Head, Carrier Dispatcher, Container Wing Dispatcher, Purchasing Officer, Finance, Billing, Payroll, Audit
-    $multiUserRoles = [13, 14]; // Driver, Helper may have multiple active users
-
+    // Only an active account can break the rule.
     if ($active !== 1) {
         return;
     }
 
-    // Skip enforcement for multi-user roles
-    if (in_array($roleId, $multiUserRoles, true)) {
+    // The target role's is_single_holder flag decides whether the role may
+    // have more than one active user. The role row is locked in the
+    // caller's transaction, so concurrent assignments to it are serialized.
+    $roleQuery = $pdo->prepare('SELECT is_single_holder FROM roles WHERE role_id = ? FOR UPDATE');
+    $roleQuery->execute([$roleId]);
+    $singleHolder = $roleQuery->fetchColumn();
+    if ($singleHolder === false) {
+        throw new DomainException('The selected role no longer exists.');
+    }
+    if ((int)$singleHolder !== 1) {
         return;
     }
 
-    // Skip enforcement for roles not in the single-holder list
-    if (!in_array($roleId, $singleHolderRoles, true)) {
-        return;
+    // Count the other active holders of the role. When editing, the edited
+    // user is excluded, so moving or reactivating a user into a role that
+    // another active user already holds is refused. FOR UPDATE keeps the
+    // count stable until the caller's transaction ends.
+    $sql = 'SELECT COUNT(*) FROM users WHERE role_id = ? AND is_active = 1';
+    $params = [$roleId];
+    if ($excludeUserId !== null) {
+        $sql .= ' AND user_id <> ?';
+        $params[] = $excludeUserId;
     }
+    $countRole = $pdo->prepare($sql . ' FOR UPDATE');
+    $countRole->execute($params);
 
-    // Use FOR UPDATE to prevent race conditions between concurrent requests
-    $countRole = $pdo->prepare(
-        'SELECT COUNT(*) FROM users WHERE role_id = ? AND is_active = 1 FOR UPDATE'
-    );
-    $countRole->execute([$roleId]);
-
-    $count = (int)$countRole->fetchColumn();
-
-    // If adding a new user (no exclusion), check that there's currently 0 active users
-    // If editing (with exclusion), check that there's currently 1 active user (the one being edited)
-    if ($excludeUserId === null) {
-        // New user: must have 0 active users currently (will be first for this role)
-        if ($count > 0) {
-            throw new DomainException('Only one active account is allowed for this role.');
-        }
-    } else {
-        // Edit user: must have 1 active user currently (the one being edited), or 0 if replacing
-        if ($count > 1) {
-            throw new DomainException('Only one active account is allowed for this role.');
-        }
+    if ((int)$countRole->fetchColumn() > 0) {
+        throw new DomainException('Only one active account is allowed for this role.');
     }
 }
 
@@ -65,14 +60,16 @@ function assertSingleActiveUser(PDO $pdo, int $roleId, int $active, ?int $exclud
 
 // ── Add user ──────────────────────────────────────────────────────────────────
 if ($action === 'add_user') {
+    // User accounts are Admin-only (validated system key), whatever role
+    // holds users.manage. Employee-only actions below are not affected.
+    if (!isAdmin()) {
+        jsonFail('Only an Admin can manage user accounts.', 403);
+    }
 
-    $fullName = requiredString('full_name', 'Full name', 150);
-    $username = requiredString('username', 'Username', 100);
+    $employeeId = requiredInt('employee_id', 'Employee', 1);
+    $username = requiredString('username', 'Username', 80);
     $email    = requiredString('email', 'Email', 150);
     $roleId   = requiredInt('role_id', 'Role', 1);
-    if ($roleId === ROLE_ADMIN && currentRoleId() !== ROLE_ADMIN) {
-        jsonFail('Only an Admin can assign the Admin role.', 403);
-    }
     $password = $_POST['password'] ?? '';
     $confirm  = $_POST['confirm']  ?? '';
 
@@ -92,8 +89,18 @@ if ($action === 'add_user') {
         jsonFail('Passwords do not match.');
     }
 
-    // Check role exists
-    findOrFail($pdo, 'roles', 'role_id', $roleId, 'Invalid role selected.');
+    // The target role must exist and be active. Only an Admin (validated
+    // system key) may assign the role whose system key is 'admin'.
+    $targetRole = roleRowForId($pdo, $roleId);
+    if (!$targetRole) {
+        jsonFail('Invalid role selected.');
+    }
+    if (!(int)$targetRole['is_active']) {
+        jsonFail('This role is inactive and cannot be assigned.', 409);
+    }
+    if ($targetRole['system_key'] === 'admin' && !isAdmin()) {
+        jsonFail('Only an Admin can assign the Admin role.', 403);
+    }
 
     // Unique username and email
     if (existsWhere($pdo, 'users', 'username', $username)) {
@@ -106,34 +113,56 @@ if ($action === 'add_user') {
     $pdo->beginTransaction();
     try {
         assertSingleActiveUser($pdo, $roleId, 1);
+        $employeeQuery = $pdo->prepare(
+            "SELECT employee_id, user_id, first_name, middle_name, last_name, suffix
+             FROM employees
+             WHERE employee_id = ? AND employment_status = 'Active'
+             FOR UPDATE"
+        );
+        $employeeQuery->execute([$employeeId]);
+        $employee = $employeeQuery->fetch(PDO::FETCH_ASSOC);
+        if (!$employee) {
+            throw new DomainException('Select an active employee before creating an account.');
+        }
+
+        $linkedUserQuery = $pdo->prepare(
+            'SELECT user_id
+             FROM users
+             WHERE employee_id = ? OR user_id = ?
+             LIMIT 1
+             FOR UPDATE'
+        );
+        $linkedUserQuery->execute([$employeeId, $employee['user_id']]);
+        if ($linkedUserQuery->fetchColumn()) {
+            throw new DomainException('This employee already has a system account.');
+        }
+
         $hash = password_hash($password, PASSWORD_BCRYPT);
         $stmt = $pdo->prepare("
-            INSERT INTO users (role_id, username, email, password_hash, is_active, auth_version)
-            VALUES (?, ?, ?, ?, ?, 1)
+            INSERT INTO users (role_id, employee_id, username, email, password_hash, is_active, auth_version)
+            VALUES (?, ?, ?, ?, ?, 1, 1)
         ");
-        $stmt->execute([$roleId, $username, $email, $hash]);
+        $stmt->execute([$roleId, $employeeId, $username, $email, $hash]);
         $newId = (int)$pdo->lastInsertId();
 
-        // Create linked employee record — full_name stored in employees table
-        $empStmt = $pdo->prepare(
-            "INSERT INTO employees (user_id, employee_code, full_name, position, is_active, employment_type)
-             VALUES (:user_id, :employee_code, :full_name, :position, 1, 'Employee')"
+        $linkEmployee = $pdo->prepare(
+            'UPDATE employees SET user_id = ? WHERE employee_id = ? AND user_id IS NULL'
         );
-        $empStmt->execute([
-            ':user_id'       => $newId,
-            ':employee_code' => 'EMP-' . sprintf('%04d', $newId),
-            ':full_name'     => $fullName,
-            ':position'      => 'User',
-        ]);
-        $empId = (int)$pdo->lastInsertId(); // employee_id auto-increment
-
-        // Link user to employee
-        $pdo->prepare('UPDATE users SET employee_id = ? WHERE user_id = ?')->execute([$empId, $newId]);
+        $linkEmployee->execute([$newId, $employeeId]);
+        if ($linkEmployee->rowCount() !== 1) {
+            throw new DomainException('This employee was linked to another account. Refresh the page and try again.');
+        }
 
         auditLog('ADD_USER', 'users', $newId, null, [
-            'username'  => $username,
-            'full_name' => $fullName,
-            'role_id'   => $roleId,
+            'username'    => $username,
+            'employee_id' => $employeeId,
+            'employee_name' => trim(implode(' ', array_filter([
+                $employee['first_name'],
+                $employee['middle_name'],
+                $employee['last_name'],
+                $employee['suffix'],
+            ]))),
+            'role_id'     => $roleId,
         ]);
         $pdo->commit();
 
@@ -141,6 +170,11 @@ if ($action === 'add_user') {
     } catch (PDOException $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('users_handler/add_user: ' . $e->getMessage());
+        // 1205 = lock wait timeout, 1213 = deadlock: the whole transaction was
+        // rolled back above, so nothing was saved and the request can be retried.
+        if (in_array((int)($e->errorInfo[1] ?? 0), [1205, 1213], true)) {
+            jsonFail('Another change was being saved at the same time. Please try again.', 409);
+        }
         jsonFail('A database error occurred. Please try again.', 500);
     } catch (DomainException $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
@@ -150,15 +184,18 @@ if ($action === 'add_user') {
 
 // ── Edit user ─────────────────────────────────────────────────────────────────
 if ($action === 'edit_user') {
+    if (!isAdmin()) {
+        jsonFail('Only an Admin can manage user accounts.', 403);
+    }
 
     $userId   = requiredInt('user_id', 'User', 1);
-    $fullName = requiredString('full_name', 'Full name', 150);
-    $username = requiredString('username', 'Username', 100);
+    $firstName  = requiredString('first_name', 'First name', 80);
+    $middleName = optionalString('middle_name', null, 80);
+    $lastName   = requiredString('last_name', 'Last name', 80);
+    $suffix     = optionalString('suffix', null, 20);
+    $username = requiredString('username', 'Username', 80);
     $email    = requiredString('email', 'Email', 150);
     $roleId   = requiredInt('role_id', 'Role', 1);
-    if ($roleId === ROLE_ADMIN && currentRoleId() !== ROLE_ADMIN) {
-        jsonFail('Only an Admin can assign the Admin role.', 403);
-    }
     $isActive = isset($_POST['is_active']) && $_POST['is_active'] === '1' ? 1 : 0;
 
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -171,9 +208,28 @@ if ($action === 'edit_user') {
 
     // Fetch old record for audit
     $oldData = findOrFail($pdo, 'users', 'user_id', $userId, 'User not found.');
-    if ((int)$oldData['role_id'] === ROLE_ADMIN && currentRoleId() !== ROLE_ADMIN) {
+
+    // Role checks use roles.system_key from the database, never a role ID.
+    $currentRole = roleRowForId($pdo, (int)$oldData['role_id']);
+    $targetRole  = roleRowForId($pdo, $roleId);
+    if (!$targetRole) {
+        jsonFail('Invalid role selected.');
+    }
+    $currentKey  = $currentRole['system_key'] ?? null;
+    $roleChanges = $roleId !== (int)$oldData['role_id'];
+    if ($roleChanges && $userId === currentUserId()) {
+        jsonFail('You cannot change your own role.', 403);
+    }
+    if ($roleChanges && !(int)$targetRole['is_active']) {
+        jsonFail('This role is inactive and cannot be assigned.', 409);
+    }
+    if ($currentKey === 'admin' && !isAdmin()) {
         jsonFail('Only an Admin can edit or deactivate an Admin account.', 403);
     }
+    if ($targetRole['system_key'] === 'admin' && !isAdmin()) {
+        jsonFail('Only an Admin can assign the Admin role.', 403);
+    }
+    $touchesAdmin = $currentKey === 'admin' || $targetRole['system_key'] === 'admin';
 
     // Unique checks excluding self
     if (existsWhere($pdo, 'users', 'username', $username, $userId, 'user_id')) {
@@ -185,6 +241,55 @@ if ($action === 'edit_user') {
 
     $pdo->beginTransaction();
     try {
+        // Lock order: the Admin role row, then the edited user, then the
+        // single-holder count. Every change that can affect Admin membership
+        // waits on the Admin role row first, so concurrent demotions are
+        // serialized whatever the isolation level.
+        if ($touchesAdmin) {
+            $adminRoleLock = $pdo->prepare("SELECT role_id FROM roles WHERE system_key = 'admin' FOR UPDATE");
+            $adminRoleLock->execute();
+            if ($adminRoleLock->fetchColumn() === false) {
+                $pdo->rollBack();
+                jsonFail('The Admin role is not configured, so Admin membership cannot be changed.', 409);
+            }
+        }
+
+        // Decide on fresh, locked values, not on the read made before the
+        // transaction.
+        $freshQuery = $pdo->prepare('SELECT role_id, is_active FROM users WHERE user_id = ? FOR UPDATE');
+        $freshQuery->execute([$userId]);
+        $freshUser = $freshQuery->fetch(PDO::FETCH_ASSOC);
+        if (!$freshUser) {
+            $pdo->rollBack();
+            jsonFail('User not found.', 404);
+        }
+        if ((int)$freshUser['role_id'] !== (int)$oldData['role_id']
+            || (int)$freshUser['is_active'] !== (int)$oldData['is_active']) {
+            throw new DomainException('This account was changed by someone else. Reload and try again.');
+        }
+
+        // Never leave the system without an active Admin.
+        $wasActiveAdmin = $currentKey === 'admin'
+            && (int)($currentRole['is_active'] ?? 0) === 1
+            && (int)$freshUser['is_active'] === 1;
+        $staysActiveAdmin = $targetRole['system_key'] === 'admin'
+            && (int)$targetRole['is_active'] === 1
+            && $isActive === 1;
+        if ($wasActiveAdmin && !$staysActiveAdmin) {
+            $otherAdmins = $pdo->prepare(
+                "SELECT COUNT(*)
+                 FROM users u
+                 JOIN roles r ON r.role_id = u.role_id
+                 WHERE r.system_key = 'admin' AND r.is_active = 1
+                   AND u.is_active = 1 AND u.user_id <> ?
+                 FOR UPDATE"
+            );
+            $otherAdmins->execute([$userId]);
+            if ((int)$otherAdmins->fetchColumn() === 0) {
+                throw new DomainException('At least one active Admin must remain. Assign another active Admin first.');
+            }
+        }
+
         assertSingleActiveUser($pdo, $roleId, $isActive, $userId);
         // UPDATE users table — do NOT set full_name (column does not exist in new schema)
         // full_name is maintained in the employees table instead
@@ -201,22 +306,51 @@ if ($action === 'edit_user') {
             $roleId, $isActive, $roleId, $isActive, $userId,
         ]);
 
-        // UPDATE linked employee's full_name — find employee by user_id
-        $emp = findOrFail($pdo, 'employees', 'user_id', $userId, 'Employee not found.');
-        $pdo->prepare('UPDATE employees SET full_name = ? WHERE employee_id = ?')->execute([
-            $fullName, $emp['employee_id'],
+        // Update the linked employee's name parts. users.employee_id is the
+        // link the user list displays; the older employees.user_id link is
+        // still accepted when users.employee_id is not set.
+        $emp = !empty($oldData['employee_id'])
+            ? findOrFail($pdo, 'employees', 'employee_id', (int)$oldData['employee_id'], 'Employee not found.')
+            : findOrFail($pdo, 'employees', 'user_id', $userId, 'Employee not found.');
+        $pdo->prepare(
+            'UPDATE employees SET first_name = ?, middle_name = ?, last_name = ?, suffix = ?
+             WHERE employee_id = ?'
+        )->execute([
+            $firstName, $middleName, $lastName, $suffix, $emp['employee_id'],
         ]);
-        $pdo->commit();
+        syncEmployeeCompatColumns($pdo, (int)$emp['employee_id']);
 
+        // Audited inside the transaction: a role or status change is never
+        // saved without its audit row.
         auditLog('EDIT_USER', 'users', $userId,
-            ['full_name' => $oldData['full_name'], 'role_id' => $oldData['role_id'], 'is_active' => $oldData['is_active']],
-            ['full_name' => $fullName, 'role_id' => $roleId, 'is_active' => $isActive]
+            [
+                'first_name'  => $emp['first_name'] ?? null,
+                'middle_name' => $emp['middle_name'] ?? null,
+                'last_name'   => $emp['last_name'] ?? null,
+                'suffix'      => $emp['suffix'] ?? null,
+                'role_id'     => $oldData['role_id'],
+                'is_active'   => $oldData['is_active'],
+            ],
+            [
+                'first_name'  => $firstName,
+                'middle_name' => $middleName,
+                'last_name'   => $lastName,
+                'suffix'      => $suffix,
+                'role_id'     => $roleId,
+                'is_active'   => $isActive,
+            ]
         );
+        $pdo->commit();
 
         jsonOk([], 'User updated successfully.');
     } catch (PDOException $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('users_handler/edit_user: ' . $e->getMessage());
+        // 1205 = lock wait timeout, 1213 = deadlock: the whole transaction was
+        // rolled back above, so nothing was saved and the request can be retried.
+        if (in_array((int)($e->errorInfo[1] ?? 0), [1205, 1213], true)) {
+            jsonFail('Another change to this account was saved at the same time. Please try again.', 409);
+        }
         jsonFail('A database error occurred. Please try again.', 500);
     } catch (DomainException $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
@@ -224,59 +358,15 @@ if ($action === 'edit_user') {
     }
 }
 
-if ($action === 'review_password_reset') {
-    $requestId = requiredInt('request_id', 'Request', 1);
-    $status = requiredEnum('status', ['Approved', 'Rejected'], 'Status');
-    $notes = optionalString('review_notes', null, 500);
-    $pdo->beginTransaction();
-    try {
-        $stmt = $pdo->prepare(
-            "SELECT request_id, user_id, password_hash, status
-             FROM password_reset_requests
-             WHERE request_id = ? AND status = 'Pending'
-             FOR UPDATE"
-        );
-        $stmt->execute([$requestId]);
-        $request = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$request) {
-            $pdo->rollBack();
-            jsonFail('Request not found or already reviewed.', 404);
-        }
-
-        if ($status === 'Approved') {
-            $update = $pdo->prepare(
-                'UPDATE users
-                 SET password_hash = ?, auth_version = auth_version + 1
-                 WHERE user_id = ? AND is_active = 1'
-            );
-            $update->execute([$request['password_hash'], $request['user_id']]);
-            if ($update->rowCount() !== 1) {
-                $pdo->rollBack();
-                jsonFail('The user account is inactive or no longer exists.', 409);
-            }
-        }
-        $pdo->prepare(
-            'UPDATE password_reset_requests
-             SET status = ?, reviewed_by = ?, reviewed_at = NOW(), review_notes = ?
-             WHERE request_id = ?'
-        )->execute([$status, currentUserId(), $notes, $requestId]);
-        $pdo->commit();
-    } catch (Throwable $e) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
-        error_log('users_handler/review_password_reset: ' . $e->getMessage());
-        jsonFail('Could not review the password request.', 500);
-    }
-
-    auditLog('PASSWORD_RESET_' . strtoupper($status), 'password_reset_requests', $requestId, null, ['user_id' => (int)$request['user_id']]);
-    jsonOk([], "Password reset request {$status}.");
-}
-
 // ── Reset password ────────────────────────────────────────────────────────────
 if ($action === 'reset_password') {
+    if (!isAdmin()) {
+        jsonFail('Only an Admin can manage user accounts.', 403);
+    }
     $userId   = requiredInt('user_id', 'User', 1);
-    $password = $_POST['password'] ?? '';
-    $confirm  = $_POST['confirm']  ?? '';
-    if (!$password) {
+    $password = is_string($_POST['password'] ?? null) ? $_POST['password'] : '';
+    $confirm  = is_string($_POST['confirm'] ?? null) ? $_POST['confirm'] : '';
+    if ($password === '') {
         jsonFail('New password is required.');
     }
     if (strlen($password) < 8) {
@@ -287,40 +377,52 @@ if ($action === 'reset_password') {
     }
 
     $targetUser = findOrFail($pdo, 'users', 'user_id', $userId, 'User not found.');
-    if ((int)$targetUser['role_id'] === ROLE_ADMIN && currentRoleId() !== ROLE_ADMIN) {
+    $targetUserRole = roleRowForId($pdo, (int)$targetUser['role_id']);
+    if (($targetUserRole['system_key'] ?? null) === 'admin' && !isAdmin()) {
         jsonFail('Only an Admin can reset an Admin account password.', 403);
     }
 
+    $hash = password_hash($password, PASSWORD_BCRYPT);
+    $pdo->beginTransaction();
     try {
-        $hash = password_hash($password, PASSWORD_BCRYPT);
+        // auth_version + 1 signs the user out of every existing session.
         $pdo->prepare(
             'UPDATE users SET password_hash = ?, auth_version = auth_version + 1 WHERE user_id = ?'
         )
             ->execute([$hash, $userId]);
 
+        // Audited in the same transaction: an unaudited reset is rolled back.
         auditLog('RESET_PASSWORD', 'users', $userId, null, ['note' => 'Password reset by admin']);
-
-        jsonOk([], 'Password reset successfully.');
-    } catch (PDOException $e) {
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('users_handler/reset_password: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
     }
+
+    jsonOk([], 'Password reset successfully.');
 }
 
 // ════════════════════════════════════════════════════════════════════════════
 // EMPLOYEE ACTIONS
 // ════════════════════════════════════════════════════════════════════════════
 
+// Name-part lengths match the target employees columns; employee_code,
+// license_type and resignation_reason match the S-36 migration. Over-long
+// input is rejected with a clear message before any write.
 function extractEmpFields(): array {
     return [
-        'employee_code'  => optionalString('employee_code'),
-        'full_name'      => optionalString('full_name'),
+        'employee_code'  => optionalString('employee_code', null, 30),
+        'first_name'     => optionalString('first_name', null, 80),
+        'middle_name'    => optionalString('middle_name', null, 80),
+        'last_name'      => optionalString('last_name', null, 80),
+        'suffix'         => optionalString('suffix', null, 20),
         'position'       => optionalString('position'),
         'contact_number' => optionalString('contact_number'),
         'address'        => optionalString('address'),
         'license_number' => optionalString('license_number'),
         'license_expiry' => optionalString('license_expiry'),
-        'license_type'   => optionalString('license_type'),
+        'license_type'   => optionalString('license_type', null, 20),
         'date_hired'     => optionalString('date_hired'),
         'employment_type' => requiredEnum('employment_type', ['Employee', 'Contractor'], 'Employment type'),
         'contractor_company' => optionalString('contractor_company', null, 150),
@@ -331,7 +433,8 @@ function extractEmpFields(): array {
 
 function validateEmpFields(array $f, bool $allowPassedDates = false): ?string {
     if (!$f['employee_code']) return 'Employee code is required.';
-    if (!$f['full_name'])     return 'Full name is required.';
+    if (!$f['first_name'])    return 'First name is required.';
+    if (!$f['last_name'])     return 'Last name is required.';
     if (!$f['position'])      return 'Position is required.';
 
     $isDriver = strcasecmp(trim($f['position']), 'Driver') === 0;
@@ -375,15 +478,24 @@ function validateEmpFields(array $f, bool $allowPassedDates = false): ?string {
 }
 
 function duplicateEmployeeExists(PDO $pdo, array $f, ?int $selfId = null): bool {
-    $fullName = preg_replace('/\s+/', ' ', trim((string)($f['full_name'] ?? '')));
-    $contact  = preg_replace('/\s+/', ' ', trim((string)($f['contact_number'] ?? '')));
+    $norm = static fn($v): ?string => ($v = preg_replace('/\s+/', ' ', trim((string)($v ?? '')))) === '' ? null : $v;
+    $first   = $norm($f['first_name'] ?? null);
+    $middle  = $norm($f['middle_name'] ?? null);
+    $last    = $norm($f['last_name'] ?? null);
+    $suffix  = $norm($f['suffix'] ?? null);
+    $contact = $norm($f['contact_number'] ?? null);
 
-    if ($fullName === '' || $contact === '') {
+    if ($first === null || $last === null || $contact === null) {
         return false;
     }
 
-    $sql = "SELECT employee_id FROM employees WHERE full_name = ? AND contact_number = ?";
-    $params = [$fullName, $contact];
+    // Same person = same name parts (optional parts compared NULL-safely)
+    // and the same contact number.
+    $sql = "SELECT employee_id FROM employees
+            WHERE first_name = ? AND last_name = ?
+              AND middle_name <=> ? AND suffix <=> ?
+              AND contact_number = ?";
+    $params = [$first, $last, $middle, $suffix, $contact];
     if ($selfId !== null) {
         $sql .= " AND employee_id != ?";
         $params[] = $selfId;
@@ -392,6 +504,15 @@ function duplicateEmployeeExists(PDO $pdo, array $f, ?int $selfId = null): bool 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     return (bool)$stmt->fetchColumn();
+}
+
+// A recorded resignation date always means Resigned; otherwise the form's
+// active switch chooses Active or Inactive (target employment_status values).
+function employmentStatusFor(?string $dateResigned, bool $active): string {
+    if ($dateResigned !== null) {
+        return 'Resigned';
+    }
+    return $active ? 'Active' : 'Inactive';
 }
 
 // ── Add employee ──────────────────────────────────────────────────────────────
@@ -410,30 +531,40 @@ if ($action === 'add_employee') {
     }
 
     try {
-        $isActive = $f['date_resigned'] === null ? 1 : 0;
+        // New employees have no active switch: Active unless already resigned.
+        $status = employmentStatusFor($f['date_resigned'], true);
+        $pdo->beginTransaction();
         $pdo->prepare("
             INSERT INTO employees
-                (employee_code, full_name, position, contact_number, address,
-                 license_number, license_expiry, license_type, is_active, date_hired,
+                (employee_code, first_name, middle_name, last_name, suffix,
+                 position, contact_number, address,
+                 license_number, license_expiry, license_type, employment_status, date_hired,
                  employment_type, contractor_company, date_resigned, resignation_reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ")->execute([
-            $f['employee_code'], $f['full_name'], $f['position'],
-            $f['contact_number'], $f['address'],
+            $f['employee_code'], $f['first_name'], $f['middle_name'], $f['last_name'], $f['suffix'],
+            $f['position'], $f['contact_number'], $f['address'],
             $f['license_number'], $f['license_expiry'], $f['license_type'],
-            $isActive, $f['date_hired'], $f['employment_type'], $f['contractor_company'],
+            $status, $f['date_hired'], $f['employment_type'], $f['contractor_company'],
             $f['date_resigned'], $f['resignation_reason'],
         ]);
         $newId = (int)$pdo->lastInsertId();
+        syncEmployeeCompatColumns($pdo, $newId);
 
         auditLog('ADD_EMPLOYEE', 'employees', $newId, null, [
-            'employee_code' => $f['employee_code'],
-            'full_name'     => $f['full_name'],
-            'position'      => $f['position'],
+            'employee_code'     => $f['employee_code'],
+            'first_name'        => $f['first_name'],
+            'middle_name'       => $f['middle_name'],
+            'last_name'         => $f['last_name'],
+            'suffix'            => $f['suffix'],
+            'position'          => $f['position'],
+            'employment_status' => $status,
         ]);
+        $pdo->commit();
 
         jsonOk(['id' => $newId], 'Employee added successfully.');
     } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('users_handler/add_employee: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
     }
@@ -443,17 +574,35 @@ if ($action === 'add_employee') {
 if ($action === 'edit_employee') {
 
     $empId    = requiredInt('employee_id', 'Employee', 1);
-    $isActive = isset($_POST['is_active']) && $_POST['is_active'] === '1' ? 1 : 0;
+    $isActive = isset($_POST['is_active']) && $_POST['is_active'] === '1';
+    $clearResignation = ($_POST['clear_resignation'] ?? '') === '1';
     $f        = extractEmpFields();
-    if ($f['date_resigned'] !== null) {
-        $isActive = 0;
-    }
 
     if ($err = validateEmpFields($f, true)) {
         jsonFail($err);
     }
 
     $oldData = findOrFail($pdo, 'employees', 'employee_id', $empId, 'Employee not found.');
+
+    // Resignation history is never erased by an ordinary edit. Clearing it
+    // needs the explicit "Clear resignation record" option, and the previous
+    // values are kept in the audit entry below.
+    $oldDateResigned = $oldData['date_resigned'] ?? null;
+    $oldReason       = $oldData['resignation_reason'] ?? null;
+    if ($clearResignation) {
+        if ($f['date_resigned'] !== null) {
+            jsonFail('Remove the resignation date to clear the resignation record, or untick "Clear resignation record".');
+        }
+        $f['resignation_reason'] = null;
+    } else {
+        if ($oldDateResigned !== null && $f['date_resigned'] === null) {
+            jsonFail('The resignation date cannot be removed by editing. Tick "Clear resignation record" to clear it on purpose.');
+        }
+        if ($oldReason !== null && $f['resignation_reason'] === null) {
+            jsonFail('The resignation reason cannot be removed by editing. Tick "Clear resignation record" to clear it on purpose.');
+        }
+    }
+    $status = employmentStatusFor($f['date_resigned'], $isActive);
 
     if (existsWhere($pdo, 'employees', 'employee_code', $f['employee_code'], $empId, 'employee_id')) {
         jsonFail('Employee code already in use.');
@@ -463,29 +612,52 @@ if ($action === 'edit_employee') {
     }
 
     try {
+        $pdo->beginTransaction();
         $pdo->prepare("
             UPDATE employees SET
-                employee_code  = ?, full_name     = ?, position      = ?,
+                employee_code  = ?, first_name    = ?, middle_name   = ?,
+                last_name      = ?, suffix        = ?, position      = ?,
                 contact_number = ?, address       = ?, license_number = ?,
                 license_expiry = ?, license_type  = ?, date_hired    = ?,
-                is_active      = ?, employment_type = ?, contractor_company = ?,
+                employment_status = ?, employment_type = ?, contractor_company = ?,
                 date_resigned = ?, resignation_reason = ?
             WHERE employee_id  = ?
         ")->execute([
-            $f['employee_code'], $f['full_name'], $f['position'],
+            $f['employee_code'], $f['first_name'], $f['middle_name'],
+            $f['last_name'], $f['suffix'], $f['position'],
             $f['contact_number'], $f['address'],
             $f['license_number'], $f['license_expiry'], $f['license_type'],
-            $f['date_hired'], $isActive, $f['employment_type'], $f['contractor_company'],
+            $f['date_hired'], $status, $f['employment_type'], $f['contractor_company'],
             $f['date_resigned'], $f['resignation_reason'], $empId,
         ]);
+        syncEmployeeCompatColumns($pdo, $empId);
 
         auditLog('EDIT_EMPLOYEE', 'employees', $empId,
-            ['full_name' => $oldData['full_name'], 'is_active' => $oldData['is_active']],
-            ['full_name' => $f['full_name'], 'is_active' => $isActive]
+            [
+                'first_name'         => $oldData['first_name'] ?? null,
+                'middle_name'        => $oldData['middle_name'] ?? null,
+                'last_name'          => $oldData['last_name'] ?? null,
+                'suffix'             => $oldData['suffix'] ?? null,
+                'employment_status'  => $oldData['employment_status'] ?? null,
+                'date_resigned'      => $oldDateResigned,
+                'resignation_reason' => $oldReason,
+            ],
+            [
+                'first_name'         => $f['first_name'],
+                'middle_name'        => $f['middle_name'],
+                'last_name'          => $f['last_name'],
+                'suffix'             => $f['suffix'],
+                'employment_status'  => $status,
+                'date_resigned'      => $f['date_resigned'],
+                'resignation_reason' => $f['resignation_reason'],
+                'resignation_cleared' => $clearResignation && ($oldDateResigned !== null || $oldReason !== null),
+            ]
         );
+        $pdo->commit();
 
         jsonOk([], 'Employee updated successfully.');
     } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('users_handler/edit_employee: ' . $e->getMessage());
         jsonFail('A database error occurred. Please try again.', 500);
     }

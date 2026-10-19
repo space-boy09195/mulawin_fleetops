@@ -40,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
         phone: button.dataset.phone,
         email: button.dataset.email,
         address: button.dataset.address,
-        notes: button.dataset.notes,
+        billing_address: button.dataset.billingAddress,
       };
       Object.entries(values).forEach(([key, value]) => {
         const input = form.elements.namedItem(key);

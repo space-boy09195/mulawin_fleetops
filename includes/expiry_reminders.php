@@ -8,6 +8,7 @@ function expiryReminderRecipients(PDO $pdo, array $permissionKeys): array {
     $stmt = $pdo->prepare(
         "SELECT DISTINCT u.user_id
          FROM users u
+         JOIN roles r ON r.role_id = u.role_id AND r.is_active = 1
          JOIN role_permissions rp ON rp.role_id = u.role_id
          JOIN permissions p ON p.permission_id = rp.permission_id
          WHERE u.is_active = 1 AND p.permission_key IN ($placeholders)"
@@ -16,6 +17,9 @@ function expiryReminderRecipients(PDO $pdo, array $permissionKeys): array {
     return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
 }
 
+// $linkEntity / $linkEntityId: the record the notification links to
+// (see NOTIFICATION_ENTITY_LINKS); the reminder itself is keyed by
+// $entityType / $entityId in reminder_deliveries.
 function deliverExpiryReminder(
     PDO $pdo,
     array $recipients,
@@ -23,9 +27,10 @@ function deliverExpiryReminder(
     int $entityId,
     string $title,
     string $message,
-    string $link,
+    string $linkEntity,
     int $days,
-    string $dueDate
+    string $dueDate,
+    ?int $linkEntityId = null
 ): int {
     $delivery = $pdo->prepare(
         'INSERT IGNORE INTO reminder_deliveries
@@ -52,7 +57,7 @@ function deliverExpiryReminder(
             if ($delivery->rowCount() === 1) {
                 $legacyDelivery->execute(['expiry_reminders', $legacyFingerprint, $userId]);
                 if (!$legacyDelivery->fetchColumn()) {
-                    createNotification($pdo, $userId, $title, $message, $link);
+                    createNotification($pdo, $userId, $title, $message, 'reminder', $linkEntity, $linkEntityId ?? $entityId);
                     $delivered++;
                 }
             }
@@ -83,24 +88,44 @@ function runConfiguredExpiryReminders(PDO $pdo): int {
     }
 
     $documentRecipients = expiryReminderRecipients($pdo, ['documents.manage']);
-    $employeeRecipients = expiryReminderRecipients($pdo, ['employees.manage', 'fleet.manage']);
+    $employeeRecipients = expiryReminderRecipients($pdo, ['users.manage']);
+    $partRecipients = expiryReminderRecipients($pdo, ['parts.manage']);
+    $fleetRecipients = expiryReminderRecipients($pdo, ['fleet.manage']);
+    // Target: documents (metadata) + files (original name).
     $documentQuery = $pdo->prepare(
-        'SELECT document_id, file_name, doc_type
-         FROM documents
-         WHERE expiry_date = ?
-         ORDER BY document_id'
+        'SELECT d.document_id, f.original_name AS file_name, d.document_category AS doc_type
+         FROM documents d
+         JOIN files f ON f.file_id = d.file_id
+         WHERE d.expiry_date = ?
+         ORDER BY d.document_id'
     );
+    // full_name / is_active are the T-E1 compatibility columns.
     $licenseQuery = $pdo->prepare(
-        'SELECT employee_id, full_name
+        "SELECT employee_id, full_name
          FROM employees
-         WHERE is_active = 1 AND license_expiry = ?
-         ORDER BY employee_id'
+         WHERE employment_status = 'Active' AND license_expiry = ?
+         ORDER BY employee_id"
     );
+    // Truck registration / insurance papers (truck_documents.expiry_date).
+    $truckDocumentQuery = $pdo->prepare(
+        'SELECT td.truck_document_id, td.truck_id, td.document_type, t.plate_number
+         FROM truck_documents td
+         JOIN trucks t ON t.truck_id = td.truck_id
+         WHERE td.expiry_date = ?
+         ORDER BY td.truck_document_id'
+    );
+    // The target keeps a warranty period per part, not an expiry date per
+    // stock item. A part installed during maintenance is under warranty
+    // until its issue date plus that period.
     $partWarrantyQuery = $pdo->prepare(
-        'SELECT part_id, part_name, part_number
-         FROM parts_inventory
-         WHERE warranty_expiry = ?
-         ORDER BY part_id'
+        'SELECT mp.maintenance_part_id, mp.maintenance_id, p.part_name, p.part_number, t.plate_number
+         FROM maintenance_parts mp
+         JOIN parts p ON p.part_id = mp.part_id
+         JOIN maintenance_records mr ON mr.maintenance_id = mp.maintenance_id
+         JOIN trucks t ON t.truck_id = mr.truck_id
+         WHERE p.warranty_period_days IS NOT NULL AND p.warranty_period_days > 0
+           AND DATE_ADD(DATE(mp.issued_at), INTERVAL p.warranty_period_days DAY) = ?
+         ORDER BY mp.maintenance_part_id'
     );
     $delivered = 0;
 
@@ -118,7 +143,7 @@ function runConfiguredExpiryReminders(PDO $pdo): int {
                 (int)$document['document_id'],
                 'Document expiry approaching',
                 $document['doc_type'] . ' "' . $document['file_name'] . '" expires in ' . $days . ' days.',
-                APP_BASE . '/pages/documents.php',
+                'document',
                 $days,
                 $dueDate
             );
@@ -132,10 +157,26 @@ function runConfiguredExpiryReminders(PDO $pdo): int {
                 'employee_license',
                 (int)$employee['employee_id'],
                 'Driver license expiry approaching',
-                $employee['full_name'] . "'s driver license expires in " . $days . ' days.',
-                APP_BASE . '/pages/users.php',
+                ($employee['full_name'] ?? ('Employee #' . $employee['employee_id'])) . "'s driver license expires in " . $days . ' days.',
+                'employee',
                 $days,
                 $dueDate
+            );
+        }
+
+        $truckDocumentQuery->execute([$dueDate]);
+        foreach ($truckDocumentQuery->fetchAll(PDO::FETCH_ASSOC) as $truckDocument) {
+            $delivered += deliverExpiryReminder(
+                $pdo,
+                $fleetRecipients,
+                'truck_document',
+                (int)$truckDocument['truck_document_id'],
+                'Truck document expiry approaching',
+                $truckDocument['document_type'] . ' of truck ' . $truckDocument['plate_number'] . ' expires in ' . $days . ' days.',
+                'truck',
+                $days,
+                $dueDate,
+                (int)$truckDocument['truck_id']
             );
         }
 
@@ -146,14 +187,15 @@ function runConfiguredExpiryReminders(PDO $pdo): int {
                 : '';
             $delivered += deliverExpiryReminder(
                 $pdo,
-                $employeeRecipients,
+                $partRecipients,
                 'part_warranty',
-                (int)$part['part_id'],
+                (int)$part['maintenance_part_id'],
                 'Part warranty expiry approaching',
-                $part['part_name'] . $partReference . ' warranty expires in ' . $days . ' days.',
-                APP_BASE . '/pages/parts.php',
+                $part['part_name'] . $partReference . ' installed on truck ' . $part['plate_number'] . ' leaves warranty in ' . $days . ' days.',
+                'maintenance',
                 $days,
-                $dueDate
+                $dueDate,
+                (int)$part['maintenance_id']
             );
         }
     }

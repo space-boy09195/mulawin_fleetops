@@ -79,6 +79,8 @@
 
   // ── Employees filter ──────────────────────────────────────────────────────
   const filterEmpStatus = document.getElementById('filterEmpStatus');
+  const filterEmpPosition = document.getElementById('filterEmpPosition');
+  const filterEmpEmployment = document.getElementById('filterEmpEmployment');
   const filterEmpSearch = document.getElementById('filterEmpSearch');
   const empTbody        = document.querySelector('#employeesTable tbody');
   const noEmployeeResults = document.getElementById('noEmployeeResults');
@@ -86,12 +88,16 @@
   function applyEmpFilters() {
     if (!empTbody) return;
     const statusVal = filterEmpStatus?.value ?? '';
+    const positionVal = filterEmpPosition?.value ?? '';
+    const employmentVal = filterEmpEmployment?.value ?? '';
     const searchVal = (filterEmpSearch?.value ?? '').toLowerCase();
     let visibleCount = 0;
     empTbody.querySelectorAll('tr').forEach(row => {
       const matchStatus = !statusVal || row.dataset.active === statusVal;
+      const matchPosition = !positionVal || row.dataset.position === positionVal;
+      const matchEmployment = !employmentVal || row.dataset.employmentType === employmentVal;
       const matchSearch = !searchVal || (row.dataset.search ?? '').includes(searchVal);
-      const isMatch = matchStatus && matchSearch;
+      const isMatch = matchStatus && matchPosition && matchEmployment && matchSearch;
       row.classList.toggle('usr-row-hidden', !isMatch);
       if (isMatch) visibleCount++;
     });
@@ -99,13 +105,15 @@
   }
 
   filterEmpStatus?.addEventListener('change', applyEmpFilters);
+  filterEmpPosition?.addEventListener('change', applyEmpFilters);
+  filterEmpEmployment?.addEventListener('change', applyEmpFilters);
   filterEmpSearch?.addEventListener('input', applyEmpFilters);
 
   // ══════════════════════════════════════════════════════════════════════════
   // ADD USER
   // ══════════════════════════════════════════════════════════════════════════
   const addUserModal  = document.getElementById('addUserModal');
-  const auFullName    = document.getElementById('auFullName');
+  const auEmployee    = document.getElementById('auEmployee');
   const auUsername    = document.getElementById('auUsername');
   const auEmail       = document.getElementById('auEmail');
   const auRole        = document.getElementById('auRole');
@@ -116,7 +124,7 @@
   const addUserAlert  = document.getElementById('addUserAlert');
 
   addUserModal?.addEventListener('hidden.bs.modal', () => {
-    clearInputs(auFullName, auUsername, auEmail, auPassword, auConfirm);
+    clearInputs(auEmployee, auUsername, auEmail, auPassword, auConfirm);
     if (auRole) auRole.value = '';
     hideAlert(addUserAlert);
     setBusy(submitAddUser, auSpinner, false);
@@ -128,8 +136,8 @@
     const pw  = auPassword?.value  ?? '';
     const con = auConfirm?.value   ?? '';
 
-    if (!auFullName?.value.trim() || !auUsername?.value.trim() || !auEmail?.value.trim() || !auRole?.value || !pw) {
-      showAlert(addUserAlert, 'All fields are required.');
+    if (!auEmployee?.value || !auUsername?.value.trim() || !auEmail?.value.trim() || !auRole?.value || !pw) {
+      showAlert(addUserAlert, 'Employee, username, email, role, and password are required.');
       return;
     }
     if (pw.length < 8) {
@@ -144,8 +152,8 @@
     setBusy(submitAddUser, auSpinner, true);
 
     postAjax({
-      action:    'add_user',
-      full_name: auFullName.value.trim(),
+      action:      'add_user',
+      employee_id: auEmployee.value,
       username:  auUsername.value.trim(),
       email:     auEmail.value.trim(),
       role_id:   auRole.value,
@@ -166,7 +174,10 @@
   // ══════════════════════════════════════════════════════════════════════════
   const editUserModal  = document.getElementById('editUserModal');
   const euId           = document.getElementById('euId');
-  const euFullName     = document.getElementById('euFullName');
+  const euFirstName    = document.getElementById('euFirstName');
+  const euMiddleName   = document.getElementById('euMiddleName');
+  const euLastName     = document.getElementById('euLastName');
+  const euSuffix       = document.getElementById('euSuffix');
   const euUsername     = document.getElementById('euUsername');
   const euEmail        = document.getElementById('euEmail');
   const euRole         = document.getElementById('euRole');
@@ -180,7 +191,10 @@
     if (!btn) return;
 
     if (euId)       euId.value       = btn.dataset.id       ?? '';
-    if (euFullName) euFullName.value = btn.dataset.name     ?? '';
+    if (euFirstName)  euFirstName.value  = btn.dataset.firstName  ?? '';
+    if (euMiddleName) euMiddleName.value = btn.dataset.middleName ?? '';
+    if (euLastName)   euLastName.value   = btn.dataset.lastName   ?? '';
+    if (euSuffix)     euSuffix.value     = btn.dataset.suffix     ?? '';
     if (euUsername) euUsername.value = btn.dataset.username ?? '';
     if (euEmail)    euEmail.value    = btn.dataset.email    ?? '';
     if (euRole)     euRole.value     = btn.dataset.role     ?? '';
@@ -200,15 +214,19 @@
   submitEditUser?.addEventListener('click', () => {
     hideAlert(editUserAlert);
 
-    if (!euFullName?.value.trim() || !euUsername?.value.trim() || !euEmail?.value.trim() || !euRole?.value) {
-      showAlert(editUserAlert, 'All fields are required.');
+    if (!euFirstName?.value.trim() || !euLastName?.value.trim() || !euUsername?.value.trim() || !euEmail?.value.trim() || !euRole?.value) {
+      showAlert(editUserAlert, 'First name, last name, username, email, and role are required.');
       return;
     }
 
+    const euDisplayName = [euFirstName, euMiddleName, euLastName, euSuffix]
+      .map(input => input?.value.trim() ?? '')
+      .filter(Boolean)
+      .join(' ');
     const wasActive = euActive?.dataset.original === '1';
     const isActive  = euActive?.checked ?? true;
     if (wasActive && !isActive) {
-      if (!confirm(`Deactivate ${euFullName.value.trim()}? They will no longer be able to log in.`)) {
+      if (!confirm(`Deactivate ${euDisplayName}? They will no longer be able to log in.`)) {
         return;
       }
     }
@@ -217,8 +235,11 @@
 
     postAjax({
       action:    'edit_user',
-      user_id:   euId?.value   ?? '',
-      full_name: euFullName.value.trim(),
+      user_id:     euId?.value   ?? '',
+      first_name:  euFirstName.value.trim(),
+      middle_name: euMiddleName?.value.trim() ?? '',
+      last_name:   euLastName.value.trim(),
+      suffix:      euSuffix?.value.trim() ?? '',
       username:  euUsername.value.trim(),
       email:     euEmail.value.trim(),
       role_id:   euRole.value,
@@ -295,29 +316,6 @@
       setBusy(submitResetPw, rpSpinner, false);
       showAlert(resetPwAlert, 'Network error. Please try again.');
     });
-
-    document.querySelectorAll('.js-review-reset').forEach(button => {
-      button.addEventListener('click', async () => {
-        const status = button.dataset.status;
-        const notes = status === 'Rejected' ? (prompt('Reason for rejection:') || '').trim() : '';
-        if (status === 'Rejected' && !notes) return;
-        if (!confirm(`${status} this password request?`)) return;
-        button.disabled = true;
-        try {
-          const result = await postAjax({
-            action: 'review_password_reset',
-            request_id: button.dataset.id,
-            status,
-            review_notes: notes,
-          });
-          if (result.success) window.location.reload();
-          else { alert(result.message || 'Could not review request.'); button.disabled = false; }
-        } catch {
-          alert('Network error. Please try again.');
-          button.disabled = false;
-        }
-      });
-    });
   });
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -325,7 +323,10 @@
   // ══════════════════════════════════════════════════════════════════════════
   const addEmpModal   = document.getElementById('addEmpModal');
   const aeCode        = document.getElementById('aeCode');
-  const aeName        = document.getElementById('aeName');
+  const aeFirstName   = document.getElementById('aeFirstName');
+  const aeMiddleName  = document.getElementById('aeMiddleName');
+  const aeLastName    = document.getElementById('aeLastName');
+  const aeSuffix      = document.getElementById('aeSuffix');
   const aePosition    = document.getElementById('aePosition');
   const aeContact     = document.getElementById('aeContact');
   const aeAddress     = document.getElementById('aeAddress');
@@ -343,7 +344,7 @@
   const addEmpAlert   = document.getElementById('addEmpAlert');
 
   addEmpModal?.addEventListener('hidden.bs.modal', () => {
-    clearInputs(aeCode, aeName, aePosition, aeContact, aeAddress, aeLicense, aeLicExpiry, aeLicType, aeDateHired,
+    clearInputs(aeCode, aeFirstName, aeMiddleName, aeLastName, aeSuffix, aePosition, aeContact, aeAddress, aeLicense, aeLicExpiry, aeLicType, aeDateHired,
       aeContractorCompany, aeDateResigned, aeResignationReason);
     if (aeEmploymentType) aeEmploymentType.value = 'Employee';
     aeContractorCompanyWrap?.classList.add('d-none');
@@ -359,8 +360,8 @@
   submitAddEmp?.addEventListener('click', () => {
     hideAlert(addEmpAlert);
 
-    if (!aeCode?.value.trim() || !aeName?.value.trim() || !aePosition?.value.trim()) {
-      showAlert(addEmpAlert, 'Employee code, name, and position are required.');
+    if (!aeCode?.value.trim() || !aeFirstName?.value.trim() || !aeLastName?.value.trim() || !aePosition?.value.trim()) {
+      showAlert(addEmpAlert, 'Employee code, first name, last name, and position are required.');
       return;
     }
 
@@ -369,7 +370,10 @@
     postAjax({
       action:          'add_employee',
       employee_code:   aeCode.value.trim(),
-      full_name:       aeName.value.trim(),
+      first_name:      aeFirstName.value.trim(),
+      middle_name:     aeMiddleName?.value.trim() ?? '',
+      last_name:       aeLastName.value.trim(),
+      suffix:          aeSuffix?.value.trim() ?? '',
       position:        aePosition.value.trim(),
       contact_number:  aeContact?.value.trim()  ?? '',
       address:         aeAddress?.value.trim()  ?? '',
@@ -397,7 +401,12 @@
   const editEmpModal  = document.getElementById('editEmpModal');
   const eeId          = document.getElementById('eeId');
   const eeCode        = document.getElementById('eeCode');
-  const eeName        = document.getElementById('eeName');
+  const eeFirstName   = document.getElementById('eeFirstName');
+  const eeMiddleName  = document.getElementById('eeMiddleName');
+  const eeLastName    = document.getElementById('eeLastName');
+  const eeSuffix      = document.getElementById('eeSuffix');
+  const eeClearResignation = document.getElementById('eeClearResignation');
+  const eeClearResignationWrap = document.getElementById('eeClearResignationWrap');
   const eePosition    = document.getElementById('eePosition');
   const eeContact     = document.getElementById('eeContact');
   const eeAddress     = document.getElementById('eeAddress');
@@ -421,7 +430,10 @@
 
     if (eeId)        eeId.value        = btn.dataset.id            ?? '';
     if (eeCode)      eeCode.value      = btn.dataset.code          ?? '';
-    if (eeName)      eeName.value      = btn.dataset.name          ?? '';
+    if (eeFirstName)  eeFirstName.value  = btn.dataset.firstName  ?? '';
+    if (eeMiddleName) eeMiddleName.value = btn.dataset.middleName ?? '';
+    if (eeLastName)   eeLastName.value   = btn.dataset.lastName   ?? '';
+    if (eeSuffix)     eeSuffix.value     = btn.dataset.suffix     ?? '';
     if (eePosition)  eePosition.value  = btn.dataset.position      ?? '';
     if (eeContact)   eeContact.value   = btn.dataset.contact       ?? '';
     if (eeAddress)   eeAddress.value   = btn.dataset.address       ?? '';
@@ -433,6 +445,10 @@
     if (eeContractorCompany) eeContractorCompany.value = btn.dataset.contractorCompany ?? '';
     if (eeDateResigned) eeDateResigned.value = btn.dataset.dateResigned ?? '';
     if (eeResignationReason) eeResignationReason.value = btn.dataset.resignationReason ?? '';
+    // The clear option is only offered when there is resignation history to clear.
+    const hasResignation = Boolean(btn.dataset.dateResigned || btn.dataset.resignationReason);
+    if (eeClearResignation) eeClearResignation.checked = false;
+    eeClearResignationWrap?.classList.toggle('d-none', !hasResignation);
     eeContractorCompanyWrap?.classList.toggle('d-none', eeEmploymentType?.value !== 'Contractor');
     if (eeActive)    eeActive.checked  = btn.dataset.active        === '1';
     if (eeActive)    eeActive.dataset.original = btn.dataset.active === '1' ? '1' : '0';
@@ -453,17 +469,25 @@
   submitEditEmp?.addEventListener('click', () => {
     hideAlert(editEmpAlert);
 
-    if (!eeCode?.value.trim() || !eeName?.value.trim() || !eePosition?.value.trim()) {
-      showAlert(editEmpAlert, 'Employee code, name, and position are required.');
+    if (!eeCode?.value.trim() || !eeFirstName?.value.trim() || !eeLastName?.value.trim() || !eePosition?.value.trim()) {
+      showAlert(editEmpAlert, 'Employee code, first name, last name, and position are required.');
       return;
     }
 
+    const eeDisplayName = [eeFirstName, eeMiddleName, eeLastName, eeSuffix]
+      .map(input => input?.value.trim() ?? '')
+      .filter(Boolean)
+      .join(' ');
     const empWasActive = eeActive?.dataset.original === '1';
     const empIsActive  = eeActive?.checked ?? true;
     if (empWasActive && !empIsActive) {
-      if (!confirm(`Deactivate ${eeName.value.trim()}? They will no longer be assignable to dispatches.`)) {
+      if (!confirm(`Deactivate ${eeDisplayName}? They will no longer be assignable to dispatches.`)) {
         return;
       }
+    }
+    const clearResignation = eeClearResignation?.checked ?? false;
+    if (clearResignation && !confirm(`Clear the resignation record for ${eeDisplayName}? The previous date and reason stay in the audit log.`)) {
+      return;
     }
 
     setBusy(submitEditEmp, eeSpinner, true);
@@ -472,7 +496,10 @@
       action:          'edit_employee',
       employee_id:     eeId?.value          ?? '',
       employee_code:   eeCode.value.trim(),
-      full_name:       eeName.value.trim(),
+      first_name:      eeFirstName.value.trim(),
+      middle_name:     eeMiddleName?.value.trim() ?? '',
+      last_name:       eeLastName.value.trim(),
+      suffix:          eeSuffix?.value.trim() ?? '',
       position:        eePosition.value.trim(),
       contact_number:  eeContact?.value.trim()  ?? '',
       address:         eeAddress?.value.trim()  ?? '',
@@ -482,9 +509,10 @@
       date_hired:      eeDateHired?.value        ?? '',
       employment_type: eeEmploymentType?.value ?? 'Employee',
       contractor_company: eeContractorCompany?.value.trim() ?? '',
-      date_resigned: eeDateResigned?.value ?? '',
-      resignation_reason: eeResignationReason?.value.trim() ?? '',
-      is_active:       eeDateResigned?.value ? '0' : (eeActive?.checked ? '1' : '0'),
+      date_resigned: clearResignation ? '' : (eeDateResigned?.value ?? ''),
+      resignation_reason: clearResignation ? '' : (eeResignationReason?.value.trim() ?? ''),
+      clear_resignation: clearResignation ? '1' : '0',
+      is_active:       (!clearResignation && eeDateResigned?.value) ? '0' : (eeActive?.checked ? '1' : '0'),
     }).then(res => {
       setBusy(submitEditEmp, eeSpinner, false);
       if (res.success) { bootstrap.Modal.getInstance(editEmpModal)?.hide(); window.location.reload(); }

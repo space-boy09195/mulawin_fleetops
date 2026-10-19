@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../config/enums.php';
 
 requireAnyPermission(['incidents.manage', 'legacy.role.3']);
 
@@ -11,51 +12,55 @@ layoutHead('Trip Problem Reports', APP_BASE . '/assets/css/incidents.css');
 
 $pdo = getDBConnection();
 
-// ── All incidents with full context ──────────────────────────────────────────
+// ── All incidents with full context (target trip_incidents) ─────────────────
+// resolution_notes = action_taken; reported_at = incident_date.
 $sql = "
     SELECT
         i.incident_id,
         i.trip_id,
         i.incident_type,
+        i.severity,
         i.description,
-        i.resolution_notes,
+        i.action_taken  AS resolution_notes,
         i.resolved_at,
-        i.reported_at,
+        i.incident_date AS reported_at,
         t.trip_number,
-        r.origin,
-        r.destination,
+        COALESCE(r.origin, t.origin)           AS origin,
+        COALESCE(r.destination, t.destination) AS destination,
         tr.plate_number,
         e.full_name      AS driver_name,
-        u.full_name      AS reported_by_name
-    FROM incidents i
+        COALESCE(ue.full_name, u.username) AS reported_by_name
+    FROM trip_incidents i
     JOIN trips t              ON i.trip_id      = t.trip_id
-    JOIN dispatch_requests dr ON t.dispatch_id  = dr.dispatch_id
-    JOIN trucks tr            ON dr.truck_id    = tr.truck_id
-    JOIN employees e          ON dr.driver_id   = e.employee_id
-    JOIN routes r             ON dr.route_id    = r.route_id
-    JOIN users u              ON i.reported_by  = u.user_id
-    ORDER BY i.reported_at DESC
+    LEFT JOIN trucks tr       ON tr.truck_id    = COALESCE(i.truck_id, t.truck_id)
+    LEFT JOIN employees e     ON e.employee_id  = t.driver_id
+    LEFT JOIN routes r        ON r.route_id     = t.route_id
+    LEFT JOIN users u         ON u.user_id      = i.reported_by
+    LEFT JOIN employees ue    ON ue.employee_id = u.employee_id
+    ORDER BY i.incident_date DESC
+    LIMIT 1000
 ";
 $incidents = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Active trips for the log form dropdown ───────────────────────────────────
+// Approved trips that are not finished (legacy: trips that existed and were
+// not Completed/Cancelled).
 $tripsSql = "
     SELECT
         t.trip_id,
         t.trip_number,
-        r.origin,
-        r.destination,
+        COALESCE(r.origin, t.origin)           AS origin,
+        COALESCE(r.destination, t.destination) AS destination,
         tr.plate_number
     FROM trips t
-    JOIN dispatch_requests dr ON t.dispatch_id = dr.dispatch_id
-    JOIN trucks tr            ON dr.truck_id   = tr.truck_id
-    JOIN routes r             ON dr.route_id   = r.route_id
-    WHERE t.status NOT IN ('Completed', 'Cancelled')
+    LEFT JOIN trucks tr ON tr.truck_id = t.truck_id
+    LEFT JOIN routes r  ON r.route_id  = t.route_id
+    WHERE t.status NOT IN ('Pending Approval', 'Completed', 'Cancelled')
     ORDER BY t.trip_number
 ";
 $activeTrips = $pdo->query($tripsSql)->fetchAll(PDO::FETCH_ASSOC);
 
-$incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
+$incidentTypes = INCIDENT_TYPES;
 ?>
 
 <div class="inc-page">
@@ -66,7 +71,7 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
       <h1 class="inc-title mb-0">Trip Problem Reports</h1>
       <p class="inc-subtitle mb-0">Record, monitor, and resolve problems related to trips</p>
     </div>
-    <?php if (in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER])): ?>
+    <?php if (currentUserHasAnyPermission(['incidents.manage'])): ?>
     <button class="btn btn-incident" data-bs-toggle="modal" data-bs-target="#logIncidentModal">
       <i class="bi bi-plus-lg me-1"></i> Report a Problem
     </button>
@@ -155,7 +160,7 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
           <td class="inc-date"><?= date('M d, Y H:i', strtotime($inc['reported_at'])) ?></td>
           <td><?= htmlspecialchars($inc['reported_by_name']) ?></td>
           <td class="text-end">
-            <?php if (!$isResolved && in_array(currentRoleId(), [ROLE_HEAD_MANAGEMENT, ROLE_DISPATCHER, ROLE_MAINTENANCE])): ?>
+            <?php if (!$isResolved && currentUserHasAnyPermission(['incidents.manage', 'legacy.role.3'])): ?>
             <button
               class="btn btn-sm btn-resolve"
               data-id="<?= $inc['incident_id'] ?>"
@@ -217,6 +222,15 @@ $incidentTypes = ['Vehicle Breakdown', 'Item Damage', 'Delay', 'Other'];
             <option value="">— Select type —</option>
             <?php foreach ($incidentTypes as $t): ?>
             <option value="<?= htmlspecialchars($t) ?>"><?= htmlspecialchars($t) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label inc-label" for="incidentSeverity">Severity</label>
+          <select class="form-select inc-input" id="incidentSeverity">
+            <?php foreach (INCIDENT_SEVERITIES as $severity): ?>
+            <option value="<?= htmlspecialchars($severity) ?>"><?= htmlspecialchars($severity) ?></option>
             <?php endforeach; ?>
           </select>
         </div>

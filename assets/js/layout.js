@@ -1,7 +1,6 @@
 // ============================================================
 // assets/js/layout.js
-// Handles: sidebar collapse, dark/light mode toggle,
-//          active nav highlighting, mobile overlay
+// Handles: sidebar collapse, active nav highlighting, mobile overlay
 // No jQuery — vanilla JS only
 // ============================================================
 
@@ -9,37 +8,9 @@
   'use strict';
 
   // ---- DOM refs (all grabbed once on DOMContentLoaded) -----
-  let sidebar, appShell, toggleBtn, themeToggleBtn,
-      themeIcon, themeLabel, overlay;
+  let sidebar, appShell, toggleBtn, overlay;
 
-  // ---- Theme -----------------------------------------------
   const USER_SCOPE = String(window.CURRENT_USER_ID ?? 'guest');
-  const THEME_KEY = `mulawin_theme_${USER_SCOPE}`;
-  const THEMES    = { light: 'light', dark: 'dark' };
-
-  function applyTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem(THEME_KEY, theme);
-    window.dispatchEvent(new CustomEvent('mulawin:themechange', {
-      detail: { theme: theme }
-    }));
-
-    // Update toggle button icon + label
-    if (themeIcon && themeLabel) {
-      if (theme === THEMES.dark) {
-        themeIcon.className  = 'bi bi-sun-fill toggle-icon';
-        themeLabel.textContent = 'Light Mode';
-      } else {
-        themeIcon.className  = 'bi bi-moon-fill toggle-icon';
-        themeLabel.textContent = 'Dark Mode';
-      }
-    }
-  }
-
-  function toggleTheme() {
-    const current = localStorage.getItem(THEME_KEY) || THEMES.light;
-    applyTheme(current === THEMES.dark ? THEMES.light : THEMES.dark);
-  }
 
   // ---- Sidebar Collapse ------------------------------------
   const COLLAPSED_KEY = `mulawin_sidebar_collapsed_${USER_SCOPE}`;
@@ -207,9 +178,6 @@
     sidebar         = document.getElementById('appSidebar');
     appShell        = document.getElementById('appShell');
     toggleBtn       = document.getElementById('sidebarToggleBtn');
-    themeToggleBtn  = document.getElementById('themeToggleBtn');
-    themeIcon       = document.getElementById('themeIcon');
-    themeLabel      = document.getElementById('themeLabel');
     overlay         = document.getElementById('sidebarOverlay');
 
     const pageContent = document.querySelector('.page-content');
@@ -236,10 +204,6 @@
     }
 
     if (!sidebar || !appShell) return;
-
-    // Restore theme preference (before paint to avoid flash)
-    const savedTheme = localStorage.getItem(THEME_KEY) || THEMES.light;
-    applyTheme(savedTheme);
 
     // Restore the appropriate state for the current viewport.
     syncSidebarViewport();
@@ -280,20 +244,9 @@
       localStorage.setItem(SCROLL_KEY, String(sidebarNav.scrollTop));
     }, { passive: true });
 
-    // Theme toggle button
-    if (themeToggleBtn) {
-      themeToggleBtn.addEventListener('click', toggleTheme);
-    }
-
     // Set active nav
     setActiveNav();
   });
-
-  // Prevent flash of wrong theme — run immediately before DOM ready
-  const savedThemeEarly = localStorage.getItem(THEME_KEY);
-  if (savedThemeEarly === 'dark') {
-    document.documentElement.setAttribute('data-theme', 'dark');
-  }
 
 })();
 

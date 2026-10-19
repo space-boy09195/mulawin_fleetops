@@ -341,8 +341,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const et_insurance_expiry = document.getElementById('et_insurance_expiry');
   const et_warranty_expiry = document.getElementById('et_warranty_expiry');
   const et_images     = Object.fromEntries(['front', 'side', 'rear', 'top'].map(view => [view, document.getElementById(`et_image_${view}`)]));
-  const et_status     = document.getElementById('et_status');
-  const et_status_reason = document.getElementById('et_status_reason');
   const submitEditBtn = document.getElementById('submitEditTruckBtn');
   const etBtnText     = document.getElementById('etBtnText');
   const etBtnSpinner  = document.getElementById('etBtnSpinner');
@@ -373,8 +371,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (et_insurance_policy) et_insurance_policy.value = btn.dataset.insurancePolicy ?? '';
     if (et_insurance_expiry) et_insurance_expiry.value = btn.dataset.insuranceExpiry ?? '';
     if (et_warranty_expiry) et_warranty_expiry.value = btn.dataset.warrantyExpiry ?? '';
-    if (et_status)   et_status.value   = btn.dataset.status   ?? 'Available';
-    if (et_status_reason) et_status_reason.value = '';
     Object.entries(et_images).forEach(([view, input]) => {
       if (input) input.value = '';
       const viewName = view[0].toUpperCase() + view.slice(1);
@@ -390,7 +386,6 @@ document.addEventListener('DOMContentLoaded', () => {
   editModal?.addEventListener('hidden.bs.modal', () => {
     hideAlert(editAlert);
     setBusy(etBtnText, etBtnSpinner, false);
-    if (et_status_reason) et_status_reason.value = '';
   });
 
   submitEditBtn?.addEventListener('click', () => {
@@ -420,9 +415,7 @@ document.addEventListener('DOMContentLoaded', () => {
       insurance_provider: et_insurance_provider?.value.trim() ?? '',
       insurance_policy_number: et_insurance_policy?.value.trim() ?? '',
       insurance_expiry: et_insurance_expiry?.value ?? '',
-      warranty_expiry: et_warranty_expiry?.value ?? '',
-      status: et_status?.value ?? 'Available',
-      status_reason: et_status_reason?.value.trim() ?? ''
+      warranty_expiry: et_warranty_expiry?.value ?? ''
     }).forEach(([key, value]) => formData.append(key, value));
     Object.entries(et_images).forEach(([view, input]) => {
       if (input?.files?.[0]) formData.append(`truck_images[${view}]`, input.files[0]);

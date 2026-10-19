@@ -43,9 +43,12 @@ if ($action === 'save_approval_chains') {
         jsonFail('Approval role selection is invalid.');
     }
 
-    $types = $pdo->query(
-        'SELECT request_type FROM approval_request_types WHERE is_active = 1'
-    )->fetchAll(PDO::FETCH_COLUMN);
+    // Target: approval_workflows (workflow_key is the form key) and the T-A1
+    // step template approval_workflow_steps.
+    $workflowIds = $pdo->query(
+        'SELECT workflow_key, workflow_id FROM approval_workflows WHERE is_active = 1'
+    )->fetchAll(PDO::FETCH_KEY_PAIR);
+    $types = array_keys($workflowIds);
     $roleRows = $pdo->query('SELECT role_id FROM roles')->fetchAll(PDO::FETCH_COLUMN);
     $validRoles = array_map('intval', $roleRows);
     $newChains = [];
@@ -88,23 +91,30 @@ if ($action === 'save_approval_chains') {
         $newChains[$type] = $selectedIds;
     }
 
-    $oldChains = $pdo->query(
-        'SELECT request_type, step_order, approver_role_id
-         FROM approval_role_steps
-         ORDER BY request_type, step_order'
-    )->fetchAll(PDO::FETCH_ASSOC);
+    // Requests already submitted keep their own copied approval_steps, so a
+    // template change applies only to requests submitted afterwards.
     $pdo->beginTransaction();
     try {
-        $pdo->exec('DELETE FROM approval_role_steps');
+        $oldChains = $pdo->query(
+            'SELECT w.workflow_key AS request_type, s.step_number AS step_order, s.approver_role_id
+             FROM approval_workflow_steps s
+             JOIN approval_workflows w ON w.workflow_id = s.workflow_id
+             ORDER BY w.workflow_key, s.step_number
+             FOR UPDATE'
+        )->fetchAll(PDO::FETCH_ASSOC);
+        $deleteSteps = $pdo->prepare('DELETE FROM approval_workflow_steps WHERE workflow_id = ?');
         $insertStep = $pdo->prepare(
-            'INSERT INTO approval_role_steps (request_type, step_order, approver_role_id)
+            'INSERT INTO approval_workflow_steps (workflow_id, step_number, approver_role_id)
              VALUES (?, ?, ?)'
         );
         foreach ($newChains as $type => $roleIds) {
+            $workflowId = (int)$workflowIds[$type];
+            $deleteSteps->execute([$workflowId]);
             foreach ($roleIds as $stepOrder => $roleId) {
-                $insertStep->execute([$type, $stepOrder, $roleId]);
+                $insertStep->execute([$workflowId, $stepOrder, $roleId]);
             }
         }
+        auditLog('UPDATE_APPROVAL_CHAINS', 'approval_workflow_steps', null, $oldChains, $newChains);
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -113,7 +123,6 @@ if ($action === 'save_approval_chains') {
         error_log('permissions_handler/save_approval_chains: ' . $e->getMessage());
         jsonFail('Could not save approval chains.', 500);
     }
-    auditLog('UPDATE_APPROVAL_CHAINS', 'approval_role_steps', null, $oldChains, $newChains);
     jsonOk([], 'Approval chains saved.');
 }
 
@@ -140,6 +149,15 @@ if ($action === 'save_role_permissions') {
     )));
 
     findOrFail($pdo, 'roles', 'role_id', $roleId, 'Role not found.');
+    // Admin authority is a system rule (roles.system_key), so its grants are
+    // not edited here. Nobody edits the grants of their own role.
+    $targetRole = roleRowForId($pdo, $roleId);
+    if (($targetRole['system_key'] ?? null) === 'admin') {
+        jsonFail('The Admin role holds every permission by system rule. Its grants cannot be edited here.', 403);
+    }
+    if ($roleId === currentRoleId()) {
+        jsonFail('You cannot change the permissions of your own role.', 403);
+    }
     if ($permissionIds) {
         $placeholders = implode(',', array_fill(0, count($permissionIds), '?'));
         $validQuery = $pdo->prepare("SELECT COUNT(*) FROM permissions WHERE permission_id IN ($placeholders)");
@@ -176,17 +194,61 @@ if ($action === 'save_role_permissions') {
         $addedIds = array_values(array_diff($permissionIds, $oldIds));
         $removedIds = array_values(array_diff($oldIds, $permissionIds));
 
+        // Protected permissions belong to the Admin role only (by the
+        // system_key rule). No non-Admin role may be granted them, whoever
+        // edits, Admin included. Matched by permission_key, never by ID. Only
+        // new grants are refused; grants a role already holds are kept.
+        if ($addedIds) {
+            $protectedPermissionKeys = [
+                'permissions.manage',
+                'roles.manage',
+                'users.manage',
+                'approvals.manage',
+                'legacy.role.1',
+            ];
+            $addedPlaceholders = implode(',', array_fill(0, count($addedIds), '?'));
+            $keyPlaceholders = implode(',', array_fill(0, count($protectedPermissionKeys), '?'));
+            $protectedQuery = $pdo->prepare(
+                "SELECT permission_key
+                 FROM permissions
+                 WHERE permission_id IN ($addedPlaceholders)
+                   AND permission_key IN ($keyPlaceholders)
+                 ORDER BY permission_key"
+            );
+            $protectedQuery->execute(array_merge($addedIds, $protectedPermissionKeys));
+            $protectedAdded = $protectedQuery->fetchAll(PDO::FETCH_COLUMN);
+            if ($protectedAdded) {
+                $pdo->rollBack();
+                jsonFail(
+                    'These permissions can only be held by the Admin role: ' . implode(', ', $protectedAdded) . '.',
+                    403
+                );
+            }
+        }
+
         if ($managerPermissionId > 0
             && in_array($managerPermissionId, $oldIds, true)
             && in_array($managerPermissionId, $removedIds, true)) {
+            // Existing protection: an active user in another active role must
+            // still hold permissions.manage. The active-Admin count is an
+            // additional safeguard (Admin holds every permission by system
+            // rule). Removal is refused only when both are zero.
             $remainingManagers = $pdo->prepare(
                 'SELECT COUNT(DISTINCT u.user_id)
                  FROM users u
+                 JOIN roles r ON r.role_id = u.role_id AND r.is_active = 1
                  JOIN role_permissions rp ON rp.role_id = u.role_id
                  WHERE u.is_active = 1 AND rp.permission_id = ? AND u.role_id <> ?'
             );
             $remainingManagers->execute([$managerPermissionId, $roleId]);
-            if ((int)$remainingManagers->fetchColumn() === 0) {
+            $activeAdmins = $pdo->prepare(
+                "SELECT COUNT(*)
+                 FROM users u
+                 JOIN roles r ON r.role_id = u.role_id
+                 WHERE u.is_active = 1 AND r.is_active = 1 AND r.system_key = 'admin'"
+            );
+            $activeAdmins->execute();
+            if ((int)$remainingManagers->fetchColumn() === 0 && (int)$activeAdmins->fetchColumn() === 0) {
                 $pdo->rollBack();
                 jsonFail('At least one active user in another role must retain permission-management access.', 409);
             }

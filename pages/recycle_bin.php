@@ -8,7 +8,18 @@ require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/soft_delete.php';
 
-requireRole([ROLE_HEAD_MANAGEMENT]);
+// Admin only, by the validated role key (isAdmin), not a legacy role grant.
+// Unauthorized responses match requireRole(): login check first, then a 403
+// JSON reply for JSON/AJAX requests, otherwise the 403 page.
+requireLogin();
+if (!isAdmin()) {
+    if (isJsonRequest()) {
+        sendJsonAccessResponse(403, 'You do not have permission to perform this action.');
+    }
+    http_response_code(403);
+    include __DIR__ . '/403.php';
+    exit;
+}
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/recycle_bin.js';
 layoutHead('Recycle Bin', APP_BASE . '/assets/css/recycle_bin.css');
@@ -22,12 +33,23 @@ $archived = $pdo->query("
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $auditLogs = $pdo->query("
-    SELECT a.log_id, a.action, a.table_name, a.record_id,
-           a.old_value, a.new_value, a.ip_address, a.logged_at,
-           COALESCE(u.full_name, 'System') AS user_name
+    SELECT a.audit_id AS log_id, a.action, COALESCE(a.entity_type, '') AS table_name,
+           a.entity_id AS record_id, a.old_values AS old_value, a.new_values AS new_value,
+           a.ip_address, a.created_at AS logged_at,
+           COALESCE(
+               NULLIF(TRIM(CONCAT_WS(' ',
+                   NULLIF(TRIM(e.first_name), ''),
+                   NULLIF(TRIM(e.middle_name), ''),
+                   NULLIF(TRIM(e.last_name), ''),
+                   NULLIF(TRIM(e.suffix), '')
+               )), ''),
+               u.username,
+               'System'
+           ) AS user_name
     FROM audit_logs a
     LEFT JOIN users u ON u.user_id = a.user_id
-    ORDER BY a.logged_at DESC
+    LEFT JOIN employees e ON e.employee_id = u.employee_id
+    ORDER BY a.created_at DESC, a.audit_id DESC
     LIMIT 500
 ")->fetchAll(PDO::FETCH_ASSOC);
 

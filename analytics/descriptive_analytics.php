@@ -75,7 +75,7 @@ function getDescriptiveAlerts(PDO $pdo, array $metrics, string $periodLabel): ar
     // ── Open incidents — a live snapshot, not tied to any period at all.
     //    This is the most "purely descriptive" check in the whole engine:
     //    it's just a raw count, full stop. ──
-    $openIncidents = (int)$pdo->query("SELECT COUNT(*) FROM incidents WHERE resolved_at IS NULL")->fetchColumn();
+    $openIncidents = (int)$pdo->query("SELECT COUNT(*) FROM trip_incidents WHERE resolved_at IS NULL")->fetchColumn();
     if ($openIncidents > 0) {
         $alerts[] = [
             'alert' => 'Open incidents',

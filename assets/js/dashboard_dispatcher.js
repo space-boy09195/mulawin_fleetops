@@ -57,40 +57,67 @@
   // ── Quick status update (Live Trips widget) ─────────────────────────────────
   const BASE = window.APP_BASE ?? '';
 
+  // Same request as the Trip Monitoring update: idempotency key per trip,
+  // cancellation reason required, Admin override reason asked once on 422.
+  async function sendStatus(tripId, values) {
+    const scope = `trip.status:${tripId}`;
+    const response = await fetch(BASE + '/ajax/update_trip_status.php', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...window.fleetOpsIdempotencyHeaders(scope),
+      },
+      body: new URLSearchParams({ trip_id: tripId, ...values, [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN }),
+    });
+    let result;
+    try {
+      result = await response.json();
+    } catch {
+      throw new Error(`Server returned HTTP ${response.status} instead of JSON.`);
+    }
+    if (response.status === 422 && !('override_reason' in values)) {
+      const reason = (window.prompt(`${result.message || 'An Admin override reason is required.'}\n\nAdmin override reason (1-500 characters):`) || '').trim();
+      if (!reason) return { success: false, message: 'Cancelled: no Admin override reason was given. Nothing was saved.' };
+      return sendStatus(tripId, { ...values, override_reason: reason });
+    }
+    if (result.success || response.status === 409) {
+      window.fleetOpsCompleteIdempotency(scope);
+    }
+    return result;
+  }
+
   document.querySelectorAll('.dd-quick-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const tripId = btn.dataset.tripId;
       const select = document.querySelector(`.dd-quick-select[data-trip-id="${tripId}"]`);
       const status = select?.value;
       if (!tripId || !status) return;
 
-      if (status === 'Cancelled' && !confirm('Cancel this trip?')) return;
+      const values = { status };
+      if (status === 'Cancelled') {
+        const reason = (window.prompt('Reason for cancelling this trip:') || '').trim();
+        if (!reason) return;
+        values.notes = reason;
+      } else if (!window.confirm(`Set this trip to ${status}?`)) {
+        return;
+      }
 
       btn.disabled = true;
       const icon = btn.querySelector('i');
       const originalClass = icon.className;
       icon.className = 'spinner-border spinner-border-sm';
-
-      fetch(BASE + '/ajax/update_trip_status.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ trip_id: tripId, status, [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN }),
-      })
-        .then(r => r.json())
-        .then(res => {
-          if (res.success) {
-            window.location.reload();
-          } else {
-            icon.className = originalClass;
-            btn.disabled = false;
-            alert(res.message || 'Failed to update trip status.');
-          }
-        })
-        .catch(() => {
-          icon.className = originalClass;
-          btn.disabled = false;
-          alert('Network error. Please try again.');
-        });
+      try {
+        const res = await sendStatus(tripId, values);
+        if (res.success) {
+          window.location.reload();
+          return;
+        }
+        alert(res.message || 'Failed to update trip status.');
+      } catch (error) {
+        alert(error.message || 'Network error. Please try again.');
+      }
+      icon.className = originalClass;
+      btn.disabled = false;
     });
   });
 })();

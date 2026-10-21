@@ -267,10 +267,18 @@
   }
 }
 
-/* ---------- Mobile: stack, login first ---------- */
+/* ---------- Mobile: stack, welcome panel on top ---------- */
 @media (max-width: 767.98px) {
   .login-page .login-shell {
     flex-direction: column;
+  }
+
+  .login-page .login-visual {
+    order: 0;
+  }
+
+  .login-page .login-card {
+    order: 1;
   }
 
   .login-page .login-card,

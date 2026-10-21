@@ -161,7 +161,7 @@
       confirm:   con,
     }).then(res => {
       setBusy(submitAddUser, auSpinner, false);
-      if (res.success) { bootstrap.Modal.getInstance(addUserModal)?.hide(); window.location.reload(); }
+      if (res.success) { bootstrap.Modal.getInstance(addUserModal)?.hide(); window.softReload(); }
       else showAlert(addUserAlert, res.message ?? 'Failed to add user.');
     }).catch(() => {
       setBusy(submitAddUser, auSpinner, false);
@@ -246,7 +246,7 @@
       is_active: euActive?.checked ? '1' : '0',
     }).then(res => {
       setBusy(submitEditUser, euSpinner, false);
-      if (res.success) { bootstrap.Modal.getInstance(editUserModal)?.hide(); window.location.reload(); }
+      if (res.success) { bootstrap.Modal.getInstance(editUserModal)?.hide(); window.softReload(); }
       else showAlert(editUserAlert, res.message ?? 'Failed to update user.');
     }).catch(() => {
       setBusy(submitEditUser, euSpinner, false);
@@ -387,7 +387,7 @@
       resignation_reason: aeResignationReason?.value.trim() ?? '',
     }).then(res => {
       setBusy(submitAddEmp, aeSpinner, false);
-      if (res.success) { bootstrap.Modal.getInstance(addEmpModal)?.hide(); window.location.reload(); }
+      if (res.success) { bootstrap.Modal.getInstance(addEmpModal)?.hide(); window.softReload(); }
       else showAlert(addEmpAlert, res.message ?? 'Failed to add employee.');
     }).catch(() => {
       setBusy(submitAddEmp, aeSpinner, false);
@@ -515,7 +515,7 @@
       is_active:       (!clearResignation && eeDateResigned?.value) ? '0' : (eeActive?.checked ? '1' : '0'),
     }).then(res => {
       setBusy(submitEditEmp, eeSpinner, false);
-      if (res.success) { bootstrap.Modal.getInstance(editEmpModal)?.hide(); window.location.reload(); }
+      if (res.success) { bootstrap.Modal.getInstance(editEmpModal)?.hide(); window.softReload(); }
       else showAlert(editEmpAlert, res.message ?? 'Failed to update employee.');
     }).catch(() => {
       setBusy(submitEditEmp, eeSpinner, false);

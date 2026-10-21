@@ -128,7 +128,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       if (data.success) {
         bsStatusModal.hide();
-        window.location.reload();
+        window.softReload();
       } else {
         alert('Error: ' + (data.message || 'Could not update status.'));
       }
@@ -309,7 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setBusy(atBtnText, atBtnSpinner, false);
         if (res.success) {
           bootstrap.Modal.getInstance(addModal)?.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(addAlert, res.message ?? 'Failed to add truck.');
         }
@@ -426,7 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setBusy(etBtnText, etBtnSpinner, false);
         if (res.success) {
           bootstrap.Modal.getInstance(editModal)?.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(editAlert, res.message ?? 'Failed to update truck.');
         }

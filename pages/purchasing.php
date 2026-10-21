@@ -95,7 +95,7 @@ layoutHead('Purchasing');
     const response = await fetch('<?= APP_BASE ?>/ajax/purchasing_handler.php', {method: 'POST', body});
     const result = await response.json();
     show(result.message || 'Request completed.', result.success);
-    if (result.success) setTimeout(() => window.location.reload(), 500);
+    if (result.success) setTimeout(() => window.softReload(), 500);
   });
   document.getElementById('addPurchaseItem').addEventListener('click', () => {
     const part = document.getElementById('purchasePart');
@@ -111,7 +111,7 @@ layoutHead('Purchasing');
     const body = new URLSearchParams({action: 'create_order', supplier_id: document.getElementById('purchaseSupplier').value, expected_at: document.getElementById('purchaseExpected').value, notes: document.getElementById('purchaseNotes').value, items: JSON.stringify(items), [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN});
     const response = await fetch('<?= APP_BASE ?>/ajax/purchasing_handler.php', {method: 'POST', body});
     const result = await response.json(); show(result.message || 'Request completed.', result.success);
-    if (result.success) setTimeout(() => window.location.reload(), 700);
+    if (result.success) setTimeout(() => window.softReload(), 700);
   });
 })();
 </script>

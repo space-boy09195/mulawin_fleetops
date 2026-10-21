@@ -10,6 +10,11 @@ require_once __DIR__ . '/../includes/workflow_events.php';
 
 header('Content-Type: application/json');
 requireLogin();
+// Trip completion is encoded by the assigned dispatcher (ajax/update_trip_status.php).
+// Driver and helper completion reports are blocked for now.
+if (in_array(currentRoleKey(), ['driver', 'helper'], true)) {
+    jsonFail('Trip completion is now encoded by the assigned dispatcher. Drivers and helpers can no longer submit completion reports.', 403);
+}
 requirePostMethod();
 enforceCsrf();
 requirePermission('trips.complete');

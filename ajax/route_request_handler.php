@@ -16,6 +16,7 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
 require_once __DIR__ . '/../includes/approval_workflow.php';
+require_once __DIR__ . '/../includes/route_options.php';
 
 header('Content-Type: application/json');
 requirePostMethod();
@@ -28,7 +29,8 @@ if ($action === 'request') {
     requirePermission('routes.request');
     $name = requiredString('route_name', 'Route name', 150);
     $origin = requiredString('origin', 'Origin', 255);
-    $destination = requiredString('destination', 'Destination', 255);
+    $pickup = requiredString('pickup_location', 'Pickup location', 255);
+    $delivery = requiredString('delivery_location', 'Delivery location', 255);
     $distance = optionalFloat('distance_km');
     $requestNotes = optionalString('request_notes', null, 500);
     if ($distance !== null && $distance < 0) {
@@ -40,13 +42,19 @@ if ($action === 'request') {
     if (existsWhere($pdo, 'routes', 'route_name', $name)) {
         jsonFail('A route with that name already exists.');
     }
+    $sameOrigin = findRouteByOrigin($pdo, $origin);
+    if ($sameOrigin) {
+        jsonFail('A route from that origin already exists ("' . $sameOrigin['route_name']
+            . '"). Ask the Operations Head to add the pickup and delivery locations to it as options.', 409);
+    }
     $pdo->beginTransaction();
     try {
         $pdo->prepare(
             'INSERT INTO routes (route_name, origin, destination, distance, is_active, created_by)
              VALUES (?, ?, ?, ?, 0, ?)'
-        )->execute([$name, $origin, $destination, $distance, currentUserId()]);
+        )->execute([$name, $origin, $delivery, $distance, currentUserId()]);
         $id = (int)$pdo->lastInsertId();
+        addRouteOptions($pdo, $id, [['pickup' => $pickup, 'delivery' => $delivery]]);
         $approvalId = createApprovalRequest($pdo, 'route_request', 'route', $id, currentUserId(), $requestNotes);
         auditLog('REQUEST_ROUTE', 'routes', $id, null, ['route_name' => $name, 'approval_request_id' => $approvalId]);
         $pdo->commit();

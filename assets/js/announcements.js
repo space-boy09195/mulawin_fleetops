@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const res    = await fetch(window.APP_BASE + '/ajax/announcement_handler.php?action=add', { method: 'POST', body: fd });
       const result = await res.json();
       if (result.success) {
-        window.location.reload();
+        window.softReload();
       } else {
         errEl.textContent = result.message || 'Could not post.';
         errEl.classList.remove('d-none');
@@ -120,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const res    = await fetch(window.APP_BASE + '/ajax/announcement_handler.php?action=edit', { method: 'POST', body: fd });
       const result = await res.json();
       if (result.success) {
-        window.location.reload();
+        window.softReload();
       } else {
         errEl.textContent = result.message || 'Could not save changes.';
         errEl.classList.remove('d-none');

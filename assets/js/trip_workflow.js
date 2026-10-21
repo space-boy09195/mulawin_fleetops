@@ -62,7 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (result.success) {
           window.fleetOpsCompleteIdempotency(scope);
-          window.location.reload();
+          window.softReload();
           return;
         }
         if (response.status === 409) window.fleetOpsCompleteIdempotency(scope);
@@ -97,7 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const result = await response.json();
       if (result.success) {
         window.fleetOpsCompleteIdempotency(scope);
-        window.location.reload();
+        window.softReload();
         return;
       }
       if (response.status === 409) window.fleetOpsCompleteIdempotency(scope);

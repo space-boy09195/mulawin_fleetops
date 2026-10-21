@@ -462,7 +462,7 @@ $checklistItems = [
     </div>
     <div class="d-flex gap-2 align-items-center flex-wrap">
       <form method="get" class="d-flex">
-        <select name="period" class="form-select mnt-input" style="min-width:160px;font-size:.85rem;" onchange="this.form.submit()">
+        <select name="period" class="form-select mnt-input" style="min-width:160px;font-size:.85rem;" data-soft-submit>
           <?php foreach ($periods as $key => $label): ?>
           <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
           <?php endforeach; ?>

@@ -19,5 +19,8 @@ Thumbs.db
 /vendor/
 composer.lock
 
+# Generated backups
+/backups/
+
 # Logs
 *.log

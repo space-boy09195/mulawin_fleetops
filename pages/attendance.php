@@ -203,7 +203,7 @@ const sendAttendance = async (data) => {
     }
     feedback.textContent = result.message || 'Attendance updated.';
     feedback.className = 'alert alert-success';
-    setTimeout(() => window.location.reload(), 500);
+    setTimeout(() => window.softReload(), 500);
   } catch (error) {
     feedback.textContent = error.message || 'Attendance could not be updated. Please try again.';
     feedback.className = 'alert alert-danger';

@@ -255,7 +255,7 @@
         }
         if (res.success) {
           bootstrap.Modal.getInstance(uploadModal)?.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(uploadAlert, res.message ?? 'Upload failed.');
           uploadProgress?.classList.add('d-none');

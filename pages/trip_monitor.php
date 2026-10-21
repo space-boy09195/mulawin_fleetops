@@ -130,7 +130,7 @@ layoutHead('Trip Monitoring', APP_BASE . '/assets/css/trip_monitor.css');
     <?php endif; ?>
     <form method="get" class="trip-period-control">
       <label for="tripPeriod">Period</label>
-      <select id="tripPeriod" name="period" class="form-select" onchange="this.form.submit()">
+      <select id="tripPeriod" name="period" class="form-select" data-soft-submit>
         <?php foreach ($periods as $key => $label): ?>
         <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
         <?php endforeach; ?>

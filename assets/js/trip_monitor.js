@@ -51,6 +51,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateRowCount();
   }
 
+  document.addEventListener('fleetops:refreshed', applyFilters);
+
   filterBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
       filterBtns.forEach((b) => b.classList.remove('active'));
@@ -190,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (result.success) {
           window.fleetOpsCompleteIdempotency(scope);
           bsModal.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           if (res.status === 409) window.fleetOpsCompleteIdempotency(scope);
           alert('Error: ' + (result.message || 'Could not update trip.'));

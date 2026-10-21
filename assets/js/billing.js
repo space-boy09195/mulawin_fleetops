@@ -47,7 +47,7 @@
   setInterval(() => {
     const modalOpen = document.querySelector('.modal.show');
     if (!modalOpen && document.visibilityState === 'visible') {
-      window.location.reload();
+      window.softReload();
     }
   }, 20000);
 
@@ -199,7 +199,7 @@
         setBusy(submitBillingBtn, bilBtnSpinner, false);
         if (res.success) {
           bootstrap.Modal.getInstance(createBillingModal)?.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(billingFormAlert, res.message ?? 'Failed to create billing.');
         }
@@ -313,7 +313,7 @@
     if (!billingsTbody) return;
 
     const row = billingsTbody.querySelector(`tr[data-id="${billingId}"]`);
-    if (!row) { window.location.reload(); return; }
+    if (!row) { window.softReload(); return; }
 
     // Update data-status for filter
     row.dataset.status = newStatus;
@@ -426,7 +426,7 @@
       .then(res => {
         setBusy(submitPayrollBtn, prBtnSpinner, false);
         if (res.success) {
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(payrollFormAlert, res.message ?? 'Failed to log payment.');
         }
@@ -454,7 +454,7 @@
           .then(r => r.json())
           .then(res => {
             if (res.success) {
-              window.location.reload();
+              window.softReload();
             } else {
               alert(res.message ?? 'Could not delete this record.');
             }
@@ -467,7 +467,7 @@
       postPayrollAjax({ action: 'delete', payroll_id: id })
         .then(res => {
           if (res.success) {
-            window.location.reload();
+            window.softReload();
           } else {
             alert(res.message ?? 'Could not delete this record.');
           }

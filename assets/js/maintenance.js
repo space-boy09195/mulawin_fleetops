@@ -230,7 +230,7 @@
         setBusy(submitRecordBtn, recBtnSpinner, false);
         if (res.success) {
           bootstrap.Modal.getInstance(recordModal)?.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(recordFormAlert, res.message ?? 'Failed to save record.');
         }
@@ -280,7 +280,7 @@
       priority: document.getElementById('workOrderPriority')?.value || 'Normal',
       expected_completion_at: document.getElementById('workOrderEta')?.value || '',
     }).then(response => {
-      if (response.success) window.location.reload();
+      if (response.success) window.softReload();
       else showAlert(workOrderFormAlert, response.message || 'Could not open the work order.');
     }).catch(() => {
       showAlert(workOrderFormAlert, 'Network error. Please try again.');
@@ -328,7 +328,7 @@
       status,
       closure_notes: closureNotes,
     }).then(response => {
-      if (response.success) window.location.reload();
+      if (response.success) window.softReload();
       else showAlert(workOrderUpdateAlert, response.message || 'Could not update the work order.');
     }).catch(() => {
       showAlert(workOrderUpdateAlert, 'Network error. Please try again.');
@@ -375,7 +375,7 @@
       interval_days: intervalDays,
       next_due_date: nextDueDate,
     }).then(response => {
-      if (response.success) window.location.reload();
+      if (response.success) window.softReload();
       else showAlert(pmScheduleFormAlert, response.message || 'Could not create the schedule.');
     }).catch(() => {
       showAlert(pmScheduleFormAlert, 'Network error. Please try again.');
@@ -396,7 +396,7 @@
         action: 'complete_pm_schedule',
         schedule_id: button.dataset.scheduleId || '',
       }).then(response => {
-        if (response.success) window.location.reload();
+        if (response.success) window.softReload();
         else showAlert(pmScheduleActionAlert, response.message || 'Could not record scheduled service.');
       }).catch(() => {
         showAlert(pmScheduleActionAlert, 'Network error. Please try again.');
@@ -422,7 +422,7 @@
         schedule_id: button.dataset.scheduleId || '',
         status: nextStatus,
       }).then(response => {
-        if (response.success) window.location.reload();
+        if (response.success) window.softReload();
         else showAlert(pmScheduleActionAlert, response.message || 'Could not update the schedule.');
       }).catch(() => {
         showAlert(pmScheduleActionAlert, 'Network error. Please try again.');
@@ -516,7 +516,7 @@
         checklistTimer.setBusy(false);
         if (res.success) {
           bootstrap.Modal.getInstance(checklistModal)?.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(checklistFormAlert, res.message ?? 'Failed to submit checklist.');
         }
@@ -838,7 +838,7 @@
       notes: inspectionNotes.value.trim(),
       findings: JSON.stringify(findings),
     }).then(res => {
-      if (res.success) window.location.reload();
+      if (res.success) window.softReload();
       else showAlert(inspectionAlert, res.message || 'Could not save inspection.');
     }).catch(() => showAlert(inspectionAlert, 'Network error. Please try again.'))
       .finally(() => inspectionTimer.setBusy(false));

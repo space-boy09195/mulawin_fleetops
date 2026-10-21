@@ -44,6 +44,9 @@ layoutHead('Operations Head Dashboard');
     <p class="page-subtitle">Dispatch work, active trips, and current operational alerts.</p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-outline-primary" href="<?= APP_BASE ?>/pages/dispatcher_reports.php">
+      <i class="bi bi-bar-chart-line me-1"></i>Dispatcher Performance
+    </a>
     <a class="btn btn-outline-primary" href="<?= APP_BASE ?>/pages/dispatch_planning.php">
       <i class="bi bi-list-check me-1"></i>Plan Dispatch List
     </a>

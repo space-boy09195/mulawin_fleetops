@@ -62,7 +62,7 @@ const recruitmentRequest = async data => {
   const feedback = document.getElementById('recruitmentFeedback');
   feedback.textContent = result.message || 'Request completed.';
   feedback.className = `alert alert-${result.success ? 'success' : 'danger'}`;
-  if (result.success) setTimeout(() => window.location.reload(), 500);
+  if (result.success) setTimeout(() => window.softReload(), 500);
 };
 document.getElementById('candidateForm')?.addEventListener('submit', event => {
   event.preventDefault();

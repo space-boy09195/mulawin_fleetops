@@ -200,7 +200,7 @@
         if (res.success) {
           queueToast(res.message || 'Part added successfully.', 'success');
           bootstrap.Modal.getInstance(addPartModal)?.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(addPartAlert, res.message ?? 'Failed to add part.');
         }
@@ -324,7 +324,7 @@
         if (res.success) {
           queueToast(res.message || 'Movement recorded successfully.', 'success');
           bootstrap.Modal.getInstance(movementModal)?.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(movementAlert, res.message ?? 'Failed to record movement.');
         }

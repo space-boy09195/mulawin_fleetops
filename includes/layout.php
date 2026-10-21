@@ -20,31 +20,32 @@ function roleDashboardUrl(): string {
 // ---- Navigation definition --------------------------------
 function getNavItems(): array {
     return [
-        ['label' => 'Analytics',           'href' => '/pages/analytics.php',    'icon' => 'bi-graph-up-arrow',      'permissions' => ['reports.view', 'operations.reports.view', 'maintenance.reports.view', 'billing.view']],
-        ['label' => 'Dispatcher Reports', 'href' => '/pages/dispatcher_reports.php', 'icon' => 'bi-bar-chart-line', 'permission' => 'dispatch.reports.view'],
-        ['label' => 'Fleet Status',        'href' => '/pages/fleet_status.php', 'icon' => 'bi-truck',               'permission' => 'fleet.view'],
-        ['label' => 'Trip Monitoring',     'href' => '/pages/trip_monitor.php', 'icon' => 'bi-map',                 'permission' => 'trips.view'],
-        ['label' => 'Dispatch',            'href' => '/pages/dispatch.php',     'icon' => 'bi-send',                'permission' => 'trips.view'],
-        ['label' => 'Dispatch Planning',   'href' => '/pages/dispatch_planning.php', 'icon' => 'bi-list-check',    'permission' => 'dispatch.instructions.manage', 'excluded_roles' => ['admin']],
-        ['label' => 'Dispatcher Queue',    'href' => '/pages/dispatch_inbox.php', 'icon' => 'bi-inbox',             'permission' => 'dispatch.instructions.encode', 'excluded_roles' => ['admin']],
-        ['label' => 'Requests',            'href' => '/pages/requests.php',     'icon' => 'bi-inbox',               'permission' => 'approvals.review'],
-        ['label' => 'Maintenance Records', 'href' => '/pages/maintenance.php',  'icon' => 'bi-tools',               'permission' => 'maintenance.view'],
-        ['label' => 'Operations Maintenance Report', 'href' => '/pages/operations_maintenance_report.php', 'icon' => 'bi-wrench-adjustable', 'permission' => 'maintenance.reports.operations.view'],
-        ['label' => 'Parts Inventory',     'href' => '/pages/parts.php',        'icon' => 'bi-box-seam',            'permission' => 'parts.view'],
-        ['label' => 'Purchasing',          'href' => '/pages/purchasing.php',   'icon' => 'bi-cart-check',          'permission' => 'purchasing.view', 'excluded_roles' => ['admin']],
-        ['label' => 'Attendance',          'href' => '/pages/attendance.php',   'icon' => 'bi-calendar-check',     'permission' => 'hr.attendance.view', 'also_linked_employee' => true, 'excluded_roles' => ['operations_head', 'car_carrier_dispatcher', 'container_wing_van_dispatcher', 'maintenance', 'purchasing_officer', 'finance', 'billing_collection', 'audit', 'driver', 'helper']],
-        ['label' => 'Office Supplies',     'href' => '/pages/office_supplies.php', 'icon' => 'bi-clipboard2-check','permissions' => ['admin.supplies.view', 'admin.supplies.manage'], 'excluded_roles' => ['admin']],
-        ['label' => 'Billing',             'href' => '/pages/billing.php',      'icon' => 'bi-receipt',             'permission' => 'billing.view'],
-        ['label' => 'Payroll',             'href' => '/pages/payroll.php',      'icon' => 'bi-cash-stack',          'permission' => 'payroll.view'],
-        ['label' => 'Trip Pay',            'href' => '/pages/trip_pay.php',     'icon' => 'bi-person-workspace',    'permission' => 'payroll.manage'],
-        ['label' => 'Clients',             'href' => '/pages/clients.php',      'icon' => 'bi-person-vcard',         'permission' => 'clients.view'],
-        ['label' => 'Trip Costs',           'href' => '/pages/trip_costs.php',    'icon' => 'bi-fuel-pump',            'permission' => 'finance.view'],
-        ['label' => 'Finance',              'href' => '/pages/finance.php',       'icon' => 'bi-wallet2',               'permission' => 'finance.funds.view', 'excluded_roles' => ['admin']],
-        ['label' => 'Trip Problem Reports', 'href' => '/pages/incidents.php',    'icon' => 'bi-exclamation-triangle', 'permissions' => ['incidents.manage', 'legacy.role.3']],
-        ['label' => 'Documents',           'href' => '/pages/documents.php',    'icon' => 'bi-folder2-open',        'permission' => 'documents.view'],
-        ['label' => 'Audit History',       'href' => '/pages/audit_history.php', 'icon' => 'bi-journal-text',       'permission' => 'audit.view'],
-        ['label' => 'User Management',     'href' => '/pages/users.php',        'icon' => 'bi-people',              'permission' => 'users.manage'],
-        ['label' => 'Recycle Bin',         'href' => '/pages/recycle_bin.php',  'icon' => 'bi-trash3',              'admin_only' => true],
+        ['section' => 'Analytics', 'label' => 'Analytics', 'href' => '/pages/analytics.php', 'icon' => 'bi-graph-up-arrow', 'permissions' => ['reports.view', 'operations.reports.view', 'maintenance.reports.view', 'billing.view']],
+        ['section' => 'Reports', 'label' => 'Dispatcher Reports', 'href' => '/pages/dispatcher_reports.php', 'icon' => 'bi-bar-chart-line', 'permission' => 'dispatch.reports.view', 'also_roles' => ['operations_head']],
+        ['section' => 'Operations', 'label' => 'Fleet Status', 'href' => '/pages/fleet_status.php', 'icon' => 'bi-truck', 'permission' => 'fleet.view'],
+        ['section' => 'Operations', 'label' => 'Trip Monitoring', 'href' => '/pages/trip_monitor.php', 'icon' => 'bi-map', 'permission' => 'trips.view'],
+        ['section' => 'Operations', 'label' => 'Dispatch', 'href' => '/pages/dispatch.php', 'icon' => 'bi-send', 'permission' => 'trips.view'],
+        ['section' => 'Operations', 'label' => 'Dispatch Planning', 'href' => '/pages/dispatch_planning.php', 'icon' => 'bi-list-check', 'permission' => 'dispatch.instructions.manage', 'excluded_roles' => ['admin']],
+        ['section' => 'Operations', 'label' => 'Dispatcher Queue', 'href' => '/pages/dispatch_inbox.php', 'icon' => 'bi-inbox', 'permission' => 'dispatch.instructions.encode', 'excluded_roles' => ['admin']],
+        ['section' => 'Requests & Approvals', 'label' => 'Requests', 'href' => '/pages/requests.php', 'icon' => 'bi-inbox', 'permission' => 'approvals.review'],
+        ['section' => 'Maintenance', 'label' => 'Maintenance Records', 'href' => '/pages/maintenance.php', 'icon' => 'bi-tools', 'permission' => 'maintenance.view'],
+        ['section' => 'Reports', 'label' => 'Operations Maintenance Report', 'href' => '/pages/operations_maintenance_report.php', 'icon' => 'bi-wrench-adjustable', 'permission' => 'maintenance.reports.operations.view'],
+        ['section' => 'Inventory', 'label' => 'Parts Inventory', 'href' => '/pages/parts.php', 'icon' => 'bi-box-seam', 'permission' => 'parts.view'],
+        ['section' => 'Inventory', 'label' => 'Purchasing', 'href' => '/pages/purchasing.php', 'icon' => 'bi-cart-check', 'permission' => 'purchasing.view', 'excluded_roles' => ['admin']],
+        ['section' => 'Records Management', 'label' => 'Attendance', 'href' => '/pages/attendance.php', 'icon' => 'bi-calendar-check', 'permission' => 'hr.attendance.view', 'also_linked_employee' => true, 'excluded_roles' => ['operations_head', 'car_carrier_dispatcher', 'container_wing_van_dispatcher', 'maintenance', 'purchasing_officer', 'finance', 'billing_collection', 'audit', 'driver', 'helper']],
+        ['section' => 'Inventory', 'label' => 'Office Supplies', 'href' => '/pages/office_supplies.php', 'icon' => 'bi-clipboard2-check', 'permissions' => ['admin.supplies.view', 'admin.supplies.manage'], 'excluded_roles' => ['admin']],
+        ['section' => 'Finance', 'label' => 'Billing', 'href' => '/pages/billing.php', 'icon' => 'bi-receipt', 'permission' => 'billing.view'],
+        ['section' => 'Finance', 'label' => 'Payroll', 'href' => '/pages/payroll.php', 'icon' => 'bi-cash-stack', 'permission' => 'payroll.view'],
+        ['section' => 'Finance', 'label' => 'Trip Pay', 'href' => '/pages/trip_pay.php', 'icon' => 'bi-person-workspace', 'permission' => 'payroll.manage'],
+        ['section' => 'Records Management', 'label' => 'Clients', 'href' => '/pages/clients.php', 'icon' => 'bi-person-vcard', 'permission' => 'clients.view'],
+        ['section' => 'Finance', 'label' => 'Trip Costs', 'href' => '/pages/trip_costs.php', 'icon' => 'bi-fuel-pump', 'permission' => 'finance.view'],
+        ['section' => 'Finance', 'label' => 'Finance', 'href' => '/pages/finance.php', 'icon' => 'bi-wallet2', 'permission' => 'finance.funds.view', 'excluded_roles' => ['admin']],
+        ['section' => 'Operations', 'label' => 'Trip Problem Reports', 'href' => '/pages/incidents.php', 'icon' => 'bi-exclamation-triangle', 'permissions' => ['incidents.manage', 'legacy.role.3']],
+        ['section' => 'Records Management', 'label' => 'Documents', 'href' => '/pages/documents.php', 'icon' => 'bi-folder2-open', 'permission' => 'documents.view'],
+        ['section' => 'System Administration', 'label' => 'Audit History', 'href' => '/pages/audit_history.php', 'icon' => 'bi-journal-text', 'permission' => 'audit.view'],
+        ['section' => 'System Administration', 'label' => 'User Management', 'href' => '/pages/users.php', 'icon' => 'bi-people', 'permission' => 'users.manage'],
+        ['section' => 'System Administration', 'label' => 'Recycle Bin', 'href' => '/pages/recycle_bin.php', 'icon' => 'bi-trash3', 'admin_only' => true],
+        ['section' => 'System Administration', 'label' => 'Backup', 'href' => '/pages/backup.php', 'icon' => 'bi-hdd-network', 'admin_only' => true],
     ];
 }
 
@@ -62,7 +63,7 @@ function currentUserHasActiveEmployee(): bool {
 
 // ---- User initials for avatar ----------------------------
 function userInitials(): string {
-    $name  = $_SESSION['full_name'] ?? 'U';
+    $name  = $_SESSION['full_name'] ?? $_SESSION['username'] ?? 'U';
     $parts = explode(' ', trim($name));
     if (count($parts) >= 2) {
         return strtoupper(substr($parts[0], 0, 1) . substr(end($parts), 0, 1));
@@ -83,6 +84,7 @@ function navItemVisible(array $item): bool {
     if (isset($item['permission']) || isset($item['permissions'])) {
         $permissions = (array)($item['permissions'] ?? $item['permission']);
         return currentUserHasAnyPermission($permissions)
+            || ($roleKey !== null && in_array($roleKey, (array)($item['also_roles'] ?? []), true))
             || (($item['also_linked_employee'] ?? false) && currentUserHasActiveEmployee());
     }
     // Transitional role-based links remain available for legacy pages.
@@ -92,25 +94,62 @@ function navItemVisible(array $item): bool {
 // ---- Build sidebar nav HTML --------------------------------
 function buildSidebarNav(): string {
     $navItems    = getNavItems();
-    $currentPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-    $html        = '';
+    $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '';
+    $sections = [
+        'Analytics' => ['icon' => 'bi-graph-up-arrow', 'items' => []],
+        'Operations' => ['icon' => 'bi-truck', 'items' => []],
+        'Maintenance' => ['icon' => 'bi-tools', 'items' => []],
+        'Requests & Approvals' => ['icon' => 'bi-inbox', 'items' => []],
+        'Finance' => ['icon' => 'bi-wallet2', 'items' => []],
+        'Inventory' => ['icon' => 'bi-box-seam', 'items' => []],
+        'Reports' => ['icon' => 'bi-bar-chart-line', 'items' => []],
+        'Records Management' => ['icon' => 'bi-folder2-open', 'items' => []],
+        'System Administration' => ['icon' => 'bi-gear', 'items' => []],
+    ];
 
     foreach ($navItems as $item) {
         if (!navItemVisible($item)) {
             continue;
         }
 
+        $section = $item['section'];
         $href     = APP_BASE . $item['href'];
         $active   = str_ends_with($currentPath, $item['href']) ? ' active' : '';
         $label    = htmlspecialchars($item['label']);
         $icon     = htmlspecialchars($item['icon']);
         $hrefSafe = htmlspecialchars($href);
 
-        $html .= '<div class="nav-item">'
-               . '<a href="' . $hrefSafe . '" class="nav-link' . $active . '" title="' . $label . '">'
-               . '<i class="bi ' . $icon . ' nav-icon"></i>'
-               . '<span class="nav-label">' . $label . '</span>'
-               . '</a></div>';
+        $sections[$section]['items'][] = '<div class="nav-item">'
+            . '<a href="' . $hrefSafe . '" class="nav-link' . $active . '" title="' . $label . '">'
+            . '<i class="bi ' . $icon . ' nav-icon"></i>'
+            . '<span class="nav-label">' . $label . '</span>'
+            . '</a></div>';
+    }
+
+    $html = '';
+    foreach ($sections as $name => $section) {
+        if (!$section['items']) {
+            continue;
+        }
+
+        $sectionId = 'navSection' . preg_replace('/[^A-Za-z0-9]/', '', $name);
+        $expanded = str_contains(implode('', $section['items']), ' active');
+        $expandedAttr = $expanded ? 'true' : 'false';
+        $collapsedClass = $expanded ? '' : ' collapsed';
+        $hiddenAttr = $expanded ? '' : ' hidden';
+        $sectionLabel = htmlspecialchars($name);
+        $sectionIcon = htmlspecialchars($section['icon']);
+        $html .= '<section class="nav-section' . ($expanded ? ' has-active' : '') . '">'
+            . '<button class="nav-section-toggle' . $collapsedClass . '" type="button"'
+            . ' aria-expanded="' . $expandedAttr . '" aria-controls="' . $sectionId . '"'
+            . ' title="' . $sectionLabel . '">'
+            . '<i class="bi ' . $sectionIcon . ' nav-section-icon" aria-hidden="true"></i>'
+            . '<span class="nav-section-label">' . $sectionLabel . '</span>'
+            . '<i class="bi bi-chevron-down nav-section-chevron" aria-hidden="true"></i>'
+            . '</button>'
+            . '<div class="nav-section-items' . $collapsedClass . '" id="' . $sectionId . '"' . $hiddenAttr . '>'
+            . implode('', $section['items'])
+            . '</div></section>';
     }
 
     return $html;
@@ -203,10 +242,14 @@ function getLatestAnnouncements(): array {
 function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = ''): void {
     $fullTitle   = htmlspecialchars($pageTitle . ' — Mulawin FleetOps');
     $navHtml     = buildSidebarNav();
-    $initials    = userInitials();
-    $fullName    = htmlspecialchars($_SESSION['full_name'] ?? '');
+    $displayName = (string)($_SESSION['full_name'] ?? $_SESSION['username'] ?? '');
+    $initials    = htmlspecialchars(userInitials());
+    $fullName    = htmlspecialchars($displayName);
     $roleName    = htmlspecialchars($_SESSION['role_name'] ?? '');
     $homeUrl     = htmlspecialchars(roleDashboardUrl());
+    $homePath    = parse_url(roleDashboardUrl(), PHP_URL_PATH) ?: '';
+    $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '';
+    $homeActive  = $homePath !== '' && $homePath === $currentPath ? ' active' : '';
     $base        = APP_BASE;
     $csrfName    = htmlspecialchars(CSRF_TOKEN_NAME);
     $cssTag      = $extraCss ? "<link rel=\"stylesheet\" href=\"{$extraCss}\">" : '';
@@ -238,6 +281,23 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
         . '<div class="fw-semibold px-2 py-1">Notifications</div>'
         . ($notificationItems ?: '<div class="text-muted small px-2 py-2">No new notifications.</div>')
         . '</div></div>';
+    $profileHtml = '<div class="dropdown profile-dropdown">'
+        . '<button class="profile-trigger" type="button" data-bs-toggle="dropdown"'
+        . ' aria-expanded="false" aria-label="Account menu for ' . $fullName . '">'
+        . '<span class="profile-avatar">' . $initials . '</span>'
+        . '<span class="profile-identity"><span class="profile-name">' . $fullName . '</span></span>'
+        . '<i class="bi bi-chevron-down profile-chevron" aria-hidden="true"></i></button>'
+        . '<div class="dropdown-menu dropdown-menu-end profile-menu">'
+        . '<div class="profile-menu-user"><span class="profile-menu-name">' . $fullName . '</span>'
+        . '<span class="profile-menu-role">' . $roleName . '</span></div>'
+        . '<div class="dropdown-divider"></div>'
+        . '<form method="post" action="' . htmlspecialchars($base . '/auth/login_handler.php') . '"'
+        . ' onsubmit="return confirm(\'Log out of Mulawin FleetOps?\')">'
+        . '<input type="hidden" name="action" value="logout">'
+        . '<input type="hidden" name="' . $csrfName . '" value="' . $csrfToken . '">'
+        . '<button type="submit" class="dropdown-item profile-logout">'
+        . '<i class="bi bi-box-arrow-right" aria-hidden="true"></i><span>Log Out</span>'
+        . '</button></form></div></div>';
 
     echo <<<HTML
 <!DOCTYPE html>
@@ -277,8 +337,6 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     html.sidebar-precollapsed #appSidebar { width: var(--sidebar-collapsed); }
     html.sidebar-precollapsed #appSidebar .nav-label { opacity: 0; width: 0; }
     html.sidebar-precollapsed #appSidebar .nav-link { padding: 10px 0; justify-content: center; }
-    html.sidebar-precollapsed #appSidebar .sidebar-user-info { opacity: 0; width: 0; }
-    html.sidebar-precollapsed #appSidebar .sidebar-logout-btn { display: none; }
     html.sidebar-precollapsed #appShell .main-wrapper { margin-left: var(--sidebar-collapsed); }
     html.sidebar-precollapsed #appSidebar .sidebar-home-icon-btn { display: none; }
   </style>
@@ -314,32 +372,12 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
 
     <!-- Nav -->
     <nav class="sidebar-nav">
-      <a href="{$homeUrl}" class="sidebar-home-nav">
+      <a href="{$homeUrl}" class="sidebar-home-nav{$homeActive}">
         <i class="bi bi-house-fill nav-icon"></i>
         <span class="nav-label">Home</span>
       </a>
       {$navHtml}
     </nav>
-
-    <!-- Footer: user + logout -->
-    <div class="sidebar-footer">
-      <div class="sidebar-user">
-        <div class="sidebar-avatar">{$initials}</div>
-        <div class="sidebar-user-info">
-          <div class="sidebar-user-name">{$fullName}</div>
-          <div class="sidebar-user-role">{$roleName}</div>
-        </div>
-      </div>
-      <form method="post" action="{$base}/auth/login_handler.php" class="mt-2"
-            onsubmit="return confirm('Log out of Mulawin FleetOps?')">
-        <input type="hidden" name="action" value="logout">
-        <input type="hidden" name="{$csrfName}" value="{$csrfToken}">
-        <button type="submit" class="logout-btn sidebar-logout-btn w-100">
-        <i class="bi bi-box-arrow-right"></i>
-        <span>Log Out</span>
-        </button>
-      </form>
-    </div>
 
   </aside>
 
@@ -370,7 +408,7 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
           <i class="bi bi-megaphone"></i>
           <span class="notif-badge {$badgeClass}" id="notifBadge">{$unreadCount}</span>
         </button>
-
+        {$profileHtml}
       </div>
     </header>
 

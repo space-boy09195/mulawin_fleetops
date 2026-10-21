@@ -4,18 +4,27 @@ require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/dispatcher_scope.php';
 
-requirePermission('dispatch.reports.view');
+requireLogin();
 
 $roleKey = currentRoleKey();
 $isAdmin = isAdmin();
+$isOpsHead = $roleKey === 'operations_head';
+// Admin and Operations Head see every dispatcher; dispatchers see only themselves.
+$seesAll = $isAdmin || $isOpsHead;
+if (!$isOpsHead) {
+    requirePermission('dispatch.reports.view');
+}
 $isDispatcher = in_array($roleKey, ['car_carrier_dispatcher', 'container_wing_van_dispatcher'], true);
-if (!$isAdmin && !$isDispatcher) {
+if (!$seesAll && !$isDispatcher) {
     http_response_code(403);
     include __DIR__ . '/403.php';
     exit;
 }
 
 $periods = [
+    'today' => ['label' => 'Daily (today)', 'start' => 'today', 'end' => 'tomorrow'],
+    'week' => ['label' => 'Weekly (this week)', 'start' => 'monday this week', 'end' => 'monday next week'],
+    'month' => ['label' => 'Monthly (this month)', 'start' => 'first day of this month', 'end' => 'first day of next month'],
     '1m' => ['label' => 'Last 1 month', 'months' => 1],
     '3m' => ['label' => 'Last 3 months', 'months' => 3],
     '6m' => ['label' => 'Last 6 months', 'months' => 6],
@@ -26,13 +35,70 @@ $period = $_GET['period'] ?? '6m';
 if (!is_string($period) || !isset($periods[$period])) {
     $period = '6m';
 }
-$rangeStart = $periods[$period]['months'] === null
-    ? null
-    : (new DateTime('today'))->modify('-' . $periods[$period]['months'] . ' months');
+if (isset($periods[$period]['start'])) {
+    $rangeStart = (new DateTime('today'))->modify($periods[$period]['start']);
+    $rangeEnd = (new DateTime('today'))->modify($periods[$period]['end']);
+} else {
+    $rangeStart = $periods[$period]['months'] === null
+        ? null
+        : (new DateTime('today'))->modify('-' . $periods[$period]['months'] . ' months');
+    $rangeEnd = new DateTime('tomorrow');
+}
 $rangeStartSql = $rangeStart?->format('Y-m-d 00:00:00');
-$rangeEndSql = (new DateTime('tomorrow'))->format('Y-m-d 00:00:00');
+$rangeEndSql = $rangeEnd->format('Y-m-d 00:00:00');
 
-$scope = $isAdmin ? ['status' => 'none'] : dispatcherScopeResult();
+// Dispatcher performance: bookings falling inside each active dispatcher
+// assignment (shift, truck types, assignment dates) versus how many of them
+// that dispatcher has already encoded as trips.
+$perfPeriodSql = $rangeStartSql !== null ? ' AND b.scheduled_departure >= :perfStart AND b.scheduled_departure < :perfEnd' : '';
+$perfStmt = getDBConnection()->prepare(
+    "SELECT u.user_id,
+            COALESCE(NULLIF(TRIM(e.full_name), ''), u.username) AS dispatcher_name,
+            da.dispatcher_role_type, da.shift,
+            COUNT(DISTINCT b.booking_id) AS assigned_count,
+            COUNT(DISTINCT CASE WHEN dr.submitted_by = u.user_id THEN b.booking_id END) AS encoded_count,
+            COUNT(DISTINCT CASE WHEN t.trip_id IS NULL AND b.status = 'Pending' THEN b.booking_id END) AS left_count,
+            COUNT(DISTINCT CASE WHEN dr.submitted_by = u.user_id AND t.status = 'Completed' THEN t.trip_id END) AS completed_count
+     FROM dispatcher_assignments da
+     JOIN users u ON u.employee_id = da.employee_id AND u.is_active = 1
+     JOIN employees e ON e.employee_id = da.employee_id
+     LEFT JOIN client_bookings b
+            ON b.status <> 'Cancelled'
+           AND b.shift = da.shift
+           AND b.scheduled_departure IS NOT NULL
+           AND DATE(b.scheduled_departure) >= da.start_date
+           AND (da.end_date IS NULL OR DATE(b.scheduled_departure) <= da.end_date)
+           AND ((da.dispatcher_role_type = 'CAR_CARRIER' AND b.truck_type = 'Car Carrier')
+             OR (da.dispatcher_role_type = 'CONTAINER_WING_VAN' AND b.truck_type IN ('Container', 'Wing Van')))
+           $perfPeriodSql
+     LEFT JOIN trips t ON t.booking_id = b.booking_id
+     LEFT JOIN dispatch_requests dr ON dr.trip_id = t.trip_id
+     WHERE da.is_active = 1
+     GROUP BY u.user_id, dispatcher_name, da.dispatcher_role_type, da.shift
+     ORDER BY dispatcher_name, da.shift"
+);
+$perfStmt->execute($rangeStartSql !== null ? [':perfStart' => $rangeStartSql, ':perfEnd' => $rangeEndSql] : []);
+$performanceAll = $perfStmt->fetchAll(PDO::FETCH_ASSOC);
+
+$dispatcherOptions = [];
+foreach ($performanceAll as $row) {
+    $dispatcherOptions[(int)$row['user_id']] = $row['dispatcher_name'];
+}
+$selectedDispatcher = 0;
+if ($seesAll) {
+    $requested = $_GET['dispatcher'] ?? '';
+    if (is_string($requested) && ctype_digit($requested) && isset($dispatcherOptions[(int)$requested])) {
+        $selectedDispatcher = (int)$requested;
+    }
+}
+$performanceRows = array_values(array_filter(
+    $performanceAll,
+    static fn(array $row): bool => $seesAll
+        ? ($selectedDispatcher === 0 || (int)$row['user_id'] === $selectedDispatcher)
+        : (int)$row['user_id'] === currentUserId()
+));
+
+$scope = $seesAll ? ['status' => 'none'] : dispatcherScopeResult();
 $scopeAvailable = $scope['status'] !== 'denied';
 $tripFilters = [];
 $requestFilters = [];
@@ -63,6 +129,12 @@ if ($isDispatcher && $scopeAvailable) {
             $scopeAvailable = false;
         }
     }
+}
+if ($seesAll && $selectedDispatcher > 0) {
+    $tripFilters[] = 'dr.submitted_by = :selectedDispatcher';
+    $requestFilters[] = 'dr.submitted_by = :selectedDispatcher';
+    $tripParams[':selectedDispatcher'] = $selectedDispatcher;
+    $requestParams[':selectedDispatcher'] = $selectedDispatcher;
 }
 if ($rangeStartSql !== null) {
     $tripFilters[] = 't.scheduled_departure >= :tripRangeStart AND t.scheduled_departure < :rangeEnd';
@@ -141,12 +213,21 @@ layoutHead('My Dispatch Reports');
 
 <div class="page-header d-flex justify-content-between align-items-start flex-wrap gap-3">
   <div>
-    <h1 class="page-title"><?= $isAdmin ? 'Dispatcher Operational Reports' : 'My Dispatch Reports' ?></h1>
+    <h1 class="page-title"><?= $seesAll ? 'Dispatcher Operational Reports' : 'My Dispatch Reports' ?></h1>
     <p class="page-subtitle">Operational trip and dispatch-request activity only. No billing, payroll, expense, or payment values are included.</p>
   </div>
-  <form method="get" class="d-flex gap-2 align-items-center">
+  <form method="get" class="d-flex gap-2 align-items-center flex-wrap">
+    <?php if ($seesAll): ?>
+    <label class="form-label mb-0" for="dispatchReportDispatcher">Dispatcher</label>
+    <select class="form-select" name="dispatcher" id="dispatchReportDispatcher" data-soft-submit>
+      <option value="">All dispatchers</option>
+      <?php foreach ($dispatcherOptions as $userId => $name): ?>
+      <option value="<?= $userId ?>" <?= $selectedDispatcher === $userId ? 'selected' : '' ?>><?= htmlspecialchars($name) ?></option>
+      <?php endforeach; ?>
+    </select>
+    <?php endif; ?>
     <label class="form-label mb-0" for="dispatchReportPeriod">Period</label>
-    <select class="form-select" name="period" id="dispatchReportPeriod" onchange="this.form.submit()">
+    <select class="form-select" name="period" id="dispatchReportPeriod" data-soft-submit>
       <?php foreach ($periods as $key => $option): ?>
       <option value="<?= htmlspecialchars($key) ?>" <?= $period === $key ? 'selected' : '' ?>>
         <?= htmlspecialchars($option['label']) ?>
@@ -156,7 +237,7 @@ layoutHead('My Dispatch Reports');
   </form>
 </div>
 
-<?php if (!$isAdmin && !$scopeAvailable): ?>
+<?php if (!$seesAll && !$scopeAvailable): ?>
 <div class="alert alert-warning">
   Your dispatcher assignment could not be verified, so no report data is shown. Ask an administrator to check your active dispatcher assignment.
 </div>
@@ -164,6 +245,37 @@ layoutHead('My Dispatch Reports');
 <div class="alert alert-info">
   Trips are grouped by scheduled departure date; requests are grouped by submission date. Dispatcher results include only your submitted requests and trips matching your current assigned shift and truck types. Historical records are therefore scoped by the current assignment.
 </div>
+<div class="card mb-4" id="dispatcherPerformance">
+  <div class="card-header-custom">
+    <h2 class="card-title-custom">Dispatcher performance</h2>
+    <span class="text-muted small">Assigned bookings versus bookings encoded as trips</span>
+  </div>
+  <div class="table-responsive"><table class="table mb-0">
+    <thead><tr><th>Dispatcher</th><th>Assignment</th><th class="text-end">Assigned</th><th class="text-end">Encoded</th><th class="text-end">Left to encode</th><th class="text-end">Trips completed</th><th style="min-width:160px;">Progress</th></tr></thead>
+    <tbody>
+    <?php if (!$performanceRows): ?><tr><td colspan="7" class="text-muted p-3">No active dispatcher assignments found.</td></tr><?php endif; ?>
+    <?php foreach ($performanceRows as $row):
+        $assigned = (int)$row['assigned_count'];
+        $encoded = (int)$row['encoded_count'];
+        $percent = $assigned > 0 ? (int)round($encoded / $assigned * 100) : 0;
+    ?>
+    <tr>
+      <td><?= htmlspecialchars($row['dispatcher_name']) ?></td>
+      <td><?= htmlspecialchars(($row['dispatcher_role_type'] === 'CAR_CARRIER' ? 'Car Carrier' : 'Container / Wing Van') . ' · ' . $row['shift']) ?></td>
+      <td class="text-end"><?= $assigned ?></td>
+      <td class="text-end"><?= $encoded ?></td>
+      <td class="text-end"><?= (int)$row['left_count'] ?></td>
+      <td class="text-end"><?= (int)$row['completed_count'] ?></td>
+      <td>
+        <div class="progress" role="progressbar" aria-valuenow="<?= $percent ?>" aria-valuemin="0" aria-valuemax="100" style="height:8px;"><div class="progress-bar" style="width: <?= $percent ?>%"></div></div>
+        <div class="small text-muted mt-1"><?= $percent ?>% encoded</div>
+      </td>
+    </tr>
+    <?php endforeach; ?>
+    </tbody>
+  </table></div>
+</div>
+
 <div class="row g-3 mb-4">
   <div class="col-md-6"><div class="card h-100"><div class="card-body-custom"><div class="text-muted small">Trips in period</div><div class="fs-3 fw-semibold"><?= $totalTrips ?></div></div></div></div>
   <div class="col-md-6"><div class="card h-100"><div class="card-body-custom"><div class="text-muted small">Dispatch requests in period</div><div class="fs-3 fw-semibold"><?= $totalRequests ?></div></div></div></div>

@@ -36,8 +36,6 @@ $driverId    = requiredInt('driver_id', 'Driver', 1);
 $helperId    = filter_input(INPUT_POST, 'helper_id', FILTER_VALIDATE_INT) ?: null;
 $secondDriverId = filter_input(INPUT_POST, 'second_driver_id', FILTER_VALIDATE_INT) ?: null;
 $clientId    = requiredInt('client_id', 'Client', 1);
-$originLocationId = filter_input(INPUT_POST, 'origin_location_id', FILTER_VALIDATE_INT) ?: null;
-$destinationLocationId = filter_input(INPUT_POST, 'destination_location_id', FILTER_VALIDATE_INT) ?: null;
 $scheduledAt = requiredString('scheduled_at', 'Scheduled date/time');
 $shift       = requiredEnum('shift', ['Day', 'Night'], 'Shift');
 // instruction_id is the client_bookings.booking_id of an Operations Head
@@ -140,36 +138,35 @@ if (!(int)$route['is_active']) {
     jsonFail('The selected route is not approved for dispatch.');
 }
 
-// trips.origin / trips.destination: the selected client locations (name and
-// address), otherwise the route's origin and destination.
-$origin = (string)$route['origin'];
-$destination = (string)$route['destination'];
-if ($originLocationId === null || $destinationLocationId === null) {
-    jsonFail('Choose an origin and destination location for this dispatch.');
+// A client that has routes linked may only dispatch on those routes.
+$linkedRoutes = $pdo->prepare('SELECT route_id FROM client_routes WHERE client_id = ?');
+$linkedRoutes->execute([$clientId]);
+$linkedRouteIds = array_map('intval', $linkedRoutes->fetchAll(PDO::FETCH_COLUMN));
+if ($linkedRouteIds && !in_array($routeId, $linkedRouteIds, true)) {
+    jsonFail('The selected route is not linked to this client.');
 }
-$locations = $pdo->prepare(
-    'SELECT location_id, location_name, address
-     FROM client_locations
-     WHERE location_id = ? AND client_id = ? AND is_active = 1'
+
+// trips.origin / trips.destination: the pickup and delivery locations, which
+// must be options set on the route.
+$pickup = trim((string)($_POST['pickup_location'] ?? ''));
+$delivery = trim((string)($_POST['delivery_location'] ?? ''));
+if ($pickup === '' || $delivery === '') {
+    jsonFail('Choose a pickup and delivery location for this dispatch.');
+}
+$optionCheck = $pdo->prepare(
+    'SELECT COUNT(*) FROM route_locations WHERE route_id = ? AND pickup_location = ?'
 );
-$locations->execute([$originLocationId, $clientId]);
-$originLocation = $locations->fetch(PDO::FETCH_ASSOC);
-$locations->execute([$destinationLocationId, $clientId]);
-$destinationLocation = $locations->fetch(PDO::FETCH_ASSOC);
-if (!$originLocation || !$destinationLocation) {
-    jsonFail('Choose active origin and destination locations belonging to the selected client.');
-}
-if ($originLocationId === $destinationLocationId) {
-    jsonFail('Origin and destination must be different locations.');
-}
-$locationText = static fn(array $location): string => mb_substr(
-    trim($location['location_name'] . ' — ' . preg_replace('/\s+/u', ' ', (string)$location['address'])),
-    0,
-    255,
-    'UTF-8'
+$optionCheck->execute([$routeId, $pickup]);
+$validPickup = (int)$optionCheck->fetchColumn() > 0;
+$optionCheck = $pdo->prepare(
+    'SELECT COUNT(*) FROM route_locations WHERE route_id = ? AND delivery_location = ?'
 );
-$origin = $locationText($originLocation);
-$destination = $locationText($destinationLocation);
+$optionCheck->execute([$routeId, $delivery]);
+if (!$validPickup || (int)$optionCheck->fetchColumn() === 0) {
+    jsonFail('The pickup and delivery locations must be options set on the selected route.');
+}
+$origin = $pickup;
+$destination = $delivery;
 
 $overrideBypassed = ['restriction' => 'instruction_required'];
 $overrideReason = null;

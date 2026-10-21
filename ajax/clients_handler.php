@@ -11,6 +11,7 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
+require_once __DIR__ . '/../includes/route_options.php';
 
 header('Content-Type: application/json');
 // Client records: clients.manage (Admin passes every permission check).
@@ -29,6 +30,7 @@ if ($action === 'save') {
     $email = optionalString('email', null, 150);
     $address = optionalString('address', null, 1000);
     $billingAddress = optionalString('billing_address', null, 5000);
+    $routeIds = isset($_POST['route_ids']) ? postedIdList('route_ids') : null;
 
     if ($email !== null && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         jsonFail('Enter a valid client email address.');
@@ -54,6 +56,7 @@ if ($action === 'save') {
                         address = ?, billing_address = ?
                  WHERE client_id = ?'
             )->execute([$name, $contact, $phone, $email, $address, $billingAddress, $clientId]);
+            if ($routeIds !== null) syncClientRoutes($pdo, $clientId, $routeIds);
             auditLog('UPDATE_CLIENT', 'clients', $clientId, $oldData, ['client_name' => $name]);
             $pdo->commit();
             jsonOk([], 'Client updated successfully.');
@@ -64,6 +67,7 @@ if ($action === 'save') {
              VALUES (?, ?, ?, ?, ?, ?, 'Active')"
         )->execute([$name, $contact, $phone, $email, $address, $billingAddress]);
         $newId = (int)$pdo->lastInsertId();
+        if ($routeIds !== null) syncClientRoutes($pdo, $newId, $routeIds);
         auditLog('CREATE_CLIENT', 'clients', $newId, null, ['client_name' => $name]);
         $pdo->commit();
         jsonOk(['id' => $newId], 'Client added successfully.');

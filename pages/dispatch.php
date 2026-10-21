@@ -104,19 +104,23 @@ $routes = $pdo->query("
     FROM routes WHERE is_active = 1 ORDER BY route_name
 ")->fetchAll();
 
+// Pickup/delivery options per route and the clients each route is linked to.
+$routeOptions = [];
+foreach ($pdo->query('SELECT route_id, pickup_location, delivery_location FROM route_locations ORDER BY route_location_id')->fetchAll() as $row) {
+    $routeOptions[(int)$row['route_id']][] = ['pickup' => $row['pickup_location'], 'delivery' => $row['delivery_location']];
+}
+$routeClientIds = [];
+foreach ($pdo->query('SELECT route_id, client_id FROM client_routes')->fetchAll() as $row) {
+    $routeClientIds[(int)$row['route_id']][] = (int)$row['client_id'];
+}
+
 // The target has no parent (billing) client; the field stays NULL so the
 // form logic keeps working.
 $clients = $pdo->query("
     SELECT client_id, client_name, NULL AS parent_client_id
     FROM clients WHERE status = 'Active' ORDER BY client_name
 ")->fetchAll();
-// Target client_locations have no pickup/delivery type: every location can
-// be an origin or a destination ('Both').
-$clientLocations = $pdo->query("
-    SELECT location_id, client_id, location_name, 'Both' AS location_type, address
-    FROM client_locations WHERE is_active = 1
-    ORDER BY client_id, location_name
-")->fetchAll();
+$clientNames = array_column($clients, 'client_name', 'client_id');
 
 // ── All routes for management tab ─────────────────────────────────────────────
 // approval_status / request_notes come from the latest route_request
@@ -189,7 +193,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
   </div>
   <div class="d-flex gap-2 align-items-center flex-wrap">
     <form method="get" class="d-flex">
-      <select name="period" class="form-select disp-input" style="min-width:160px;font-size:.85rem;" onchange="this.form.submit()">
+      <select name="period" class="form-select disp-input" style="min-width:160px;font-size:.85rem;" data-soft-submit>
         <?php foreach ($periods as $key => $label): ?>
         <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
         <?php endforeach; ?>
@@ -432,7 +436,8 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             <tr>
               <th>Route Name</th>
               <th>Origin</th>
-              <th>Destination</th>
+              <th>Pickup → Delivery Options</th>
+              <th>Clients</th>
               <th>Distance</th>
               <th>Requester Note</th>
               <th>Approval Status</th>
@@ -447,7 +452,17 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             <tr>
               <td class="fw-600"><?= htmlspecialchars($rt['route_name']) ?></td>
               <td><?= htmlspecialchars($rt['origin']) ?></td>
-              <td><?= htmlspecialchars($rt['destination']) ?></td>
+              <td class="small">
+                <?php foreach ($routeOptions[(int)$rt['route_id']] ?? [] as $opt): ?>
+                <div><?= htmlspecialchars($opt['pickup']) ?> → <?= htmlspecialchars($opt['delivery']) ?></div>
+                <?php endforeach; ?>
+              </td>
+              <td class="small">
+                <?php
+                  $routeClientNames = array_filter(array_map(fn($id) => $clientNames[$id] ?? null, $routeClientIds[(int)$rt['route_id']] ?? []));
+                  echo $routeClientNames ? htmlspecialchars(implode(', ', $routeClientNames)) : '<span class="text-muted">—</span>';
+                ?>
+              </td>
               <td>
                 <?= $rt['distance_km']
                   ? number_format($rt['distance_km'], 1) . ' km'
@@ -491,6 +506,8 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                           data-name="<?= htmlspecialchars($rt['route_name'], ENT_QUOTES) ?>"
                           data-origin="<?= htmlspecialchars($rt['origin'], ENT_QUOTES) ?>"
                           data-destination="<?= htmlspecialchars($rt['destination'], ENT_QUOTES) ?>"
+                          data-options="<?= htmlspecialchars(json_encode($routeOptions[(int)$rt['route_id']] ?? []), ENT_QUOTES) ?>"
+                          data-clients="<?= htmlspecialchars(json_encode($routeClientIds[(int)$rt['route_id']] ?? []), ENT_QUOTES) ?>"
                           data-distance="<?= htmlspecialchars($rt['distance_km'] ?? '', ENT_QUOTES) ?>">
                     <i class="bi bi-pencil"></i>
                   </button>
@@ -559,7 +576,9 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             <datalist id="approvedRoutesList">
               <?php foreach ($routes as $rt): ?>
               <option value="<?= htmlspecialchars($rt['route_name'] . ' — ' . $rt['origin'] . ' → ' . $rt['destination'], ENT_QUOTES) ?>"
-                      data-id="<?= (int)$rt['route_id'] ?>"></option>
+                      data-id="<?= (int)$rt['route_id'] ?>"
+                      data-clients="<?= htmlspecialchars(json_encode($routeClientIds[(int)$rt['route_id']] ?? []), ENT_QUOTES) ?>"
+                      data-options="<?= htmlspecialchars(json_encode($routeOptions[(int)$rt['route_id']] ?? []), ENT_QUOTES) ?>"></option>
               <?php endforeach; ?>
             </datalist>
             <?php if (empty($routes)): ?>
@@ -614,27 +633,13 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
           <div class="col-md-6">
             <label class="disp-label">Pickup Location <span class="text-danger">*</span></label>
             <select class="form-select disp-input" id="d_origin_location" disabled required>
-              <option value="">— Select client first —</option>
-              <?php foreach ($clientLocations as $location): ?>
-              <?php if (in_array($location['location_type'], ['Pickup', 'Both'], true)): ?>
-              <option value="<?= (int)$location['location_id'] ?>" data-client="<?= (int)$location['client_id'] ?>">
-                <?= htmlspecialchars($location['location_name'] . ' — ' . $location['address']) ?>
-              </option>
-              <?php endif; ?>
-              <?php endforeach; ?>
+              <option value="">— Select route first —</option>
             </select>
           </div>
           <div class="col-md-6">
             <label class="disp-label">Delivery Location <span class="text-danger">*</span></label>
             <select class="form-select disp-input" id="d_destination_location" disabled required>
-              <option value="">— Select client first —</option>
-              <?php foreach ($clientLocations as $location): ?>
-              <?php if (in_array($location['location_type'], ['Delivery', 'Both'], true)): ?>
-              <option value="<?= (int)$location['location_id'] ?>" data-client="<?= (int)$location['client_id'] ?>">
-                <?= htmlspecialchars($location['location_name'] . ' — ' . $location['address']) ?>
-              </option>
-              <?php endif; ?>
-              <?php endforeach; ?>
+              <option value="">— Select route first —</option>
             </select>
           </div>
           <div class="col-md-6">
@@ -701,7 +706,8 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
         <div id="routeRequestAlert" class="alert d-none"></div>
         <input class="form-control disp-input mb-2" id="rr_name" placeholder="Route name" required>
         <input class="form-control disp-input mb-2" id="rr_origin" placeholder="Origin" required>
-        <input class="form-control disp-input mb-2" id="rr_destination" placeholder="Destination" required>
+        <input class="form-control disp-input mb-2" id="rr_pickup" placeholder="Pickup location" required>
+        <input class="form-control disp-input mb-2" id="rr_destination" placeholder="Delivery location" required>
         <input type="number" min="0" step="0.1" class="form-control disp-input" id="rr_distance" placeholder="Distance (km, optional)">
         <label class="disp-label mt-2" for="rr_notes">Side note <span class="text-muted">(optional)</span></label>
         <textarea class="form-control disp-input" id="rr_notes" rows="2" maxlength="500"
@@ -792,21 +798,42 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                    placeholder="e.g. Manila Port">
           </div>
           <div class="col-md-6">
-            <label class="disp-label">Destination <span class="text-danger">*</span></label>
-            <input type="text" class="form-control disp-input" id="ar_destination"
-                   placeholder="e.g. Davao City">
-          </div>
-          <div class="col-md-6">
             <label class="disp-label">Distance (km) <span class="text-muted">(optional)</span></label>
             <input type="number" class="form-control disp-input" id="ar_distance"
                    min="0" step="0.1" placeholder="e.g. 1180.5">
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label">Pickup Location <span class="text-danger">*</span></label>
+            <input type="text" class="form-control disp-input" id="ar_pickup" placeholder="e.g. Manila Warehouse">
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label">Delivery Location <span class="text-danger">*</span></label>
+            <input type="text" class="form-control disp-input" id="ar_destination" placeholder="e.g. Davao City">
+          </div>
+          <div class="col-12">
+            <div id="ar_extra_options" class="d-grid gap-2"></div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-2 js-add-route-option" data-target="ar_extra_options">
+              <i class="bi bi-plus-lg me-1"></i>Add another pickup / delivery option
+            </button>
+            <div class="form-text">A route with an origin that already exists receives these as extra options instead of becoming a duplicate route.</div>
+          </div>
+          <div class="col-12">
+            <label class="disp-label">Clients <span class="text-muted">(optional)</span></label>
+            <div class="border rounded p-2" style="max-height:140px;overflow:auto;" id="ar_clients">
+              <?php foreach ($clients as $client): ?>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" value="<?= (int)$client['client_id'] ?>" id="ar_client_<?= (int)$client['client_id'] ?>">
+                <label class="form-check-label" for="ar_client_<?= (int)$client['client_id'] ?>"><?= htmlspecialchars($client['client_name']) ?></label>
+              </div>
+              <?php endforeach; ?>
+            </div>
           </div>
 
           <!-- ── Map Preview ─────────────────────────────────────────────── -->
           <div class="col-12">
             <label class="disp-label">Map Preview</label>
             <div class="row g-2">
-              <div class="col-md-6">
+              <div class="col-md-4">
                 <div class="route-map-wrap" id="ar_origin_map_wrap">
                   <div class="route-map-placeholder" id="ar_origin_map_placeholder">
                     <i class="bi bi-geo-alt"></i><span>Origin preview</span>
@@ -815,21 +842,39 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                           loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
                 </div>
               </div>
-              <div class="col-md-6">
+              <div class="col-md-4">
+                <div class="route-map-wrap" id="ar_pickup_map_wrap">
+                  <div class="route-map-placeholder" id="ar_pickup_map_placeholder">
+                    <i class="bi bi-box-arrow-up"></i><span>Pickup preview</span>
+                  </div>
+                  <iframe class="route-map-frame d-none" id="ar_pickup_map"
+                          loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
+              </div>
+              <div class="col-md-4">
                 <div class="route-map-wrap" id="ar_destination_map_wrap">
                   <div class="route-map-placeholder" id="ar_destination_map_placeholder">
-                    <i class="bi bi-geo-alt-fill"></i><span>Destination preview</span>
+                    <i class="bi bi-geo-alt-fill"></i><span>Delivery preview</span>
                   </div>
                   <iframe class="route-map-frame d-none" id="ar_destination_map"
                           loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
                 </div>
               </div>
-              <div class="col-12">
-                <div class="route-map-wrap route-map-wrap-lg" id="ar_route_map_wrap">
-                  <div class="route-map-placeholder" id="ar_route_map_placeholder">
-                    <i class="bi bi-signpost-2"></i><span>Enter both origin and destination to preview the route</span>
+              <div class="col-md-6">
+                <div class="route-map-wrap route-map-wrap-lg" id="ar_route_a_map_wrap">
+                  <div class="route-map-placeholder" id="ar_route_a_map_placeholder">
+                    <i class="bi bi-signpost-2"></i><span>Origin → Pickup (A to B)</span>
                   </div>
-                  <iframe class="route-map-frame route-map-frame-lg d-none" id="ar_route_map"
+                  <iframe class="route-map-frame route-map-frame-lg d-none" id="ar_route_a_map"
+                          loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="route-map-wrap route-map-wrap-lg" id="ar_route_b_map_wrap">
+                  <div class="route-map-placeholder" id="ar_route_b_map_placeholder">
+                    <i class="bi bi-signpost-2"></i><span>Pickup → Delivery (A to B)</span>
+                  </div>
+                  <iframe class="route-map-frame route-map-frame-lg d-none" id="ar_route_b_map"
                           loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
                 </div>
               </div>
@@ -871,13 +916,34 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
             <input type="text" class="form-control disp-input" id="er_origin">
           </div>
           <div class="col-md-6">
-            <label class="disp-label">Destination <span class="text-danger">*</span></label>
-            <input type="text" class="form-control disp-input" id="er_destination">
-          </div>
-          <div class="col-md-6">
             <label class="disp-label">Distance (km) <span class="text-muted">(optional)</span></label>
             <input type="number" class="form-control disp-input" id="er_distance"
                    min="0" step="0.1">
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label">Pickup Location <span class="text-danger">*</span></label>
+            <input type="text" class="form-control disp-input" id="er_pickup">
+          </div>
+          <div class="col-md-6">
+            <label class="disp-label">Delivery Location <span class="text-danger">*</span></label>
+            <input type="text" class="form-control disp-input" id="er_destination">
+          </div>
+          <div class="col-12">
+            <div id="er_extra_options" class="d-grid gap-2"></div>
+            <button type="button" class="btn btn-sm btn-outline-secondary mt-2 js-add-route-option" data-target="er_extra_options">
+              <i class="bi bi-plus-lg me-1"></i>Add another pickup / delivery option
+            </button>
+          </div>
+          <div class="col-12">
+            <label class="disp-label">Clients</label>
+            <div class="border rounded p-2" style="max-height:140px;overflow:auto;" id="er_clients">
+              <?php foreach ($clients as $client): ?>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" value="<?= (int)$client['client_id'] ?>" id="er_client_<?= (int)$client['client_id'] ?>">
+                <label class="form-check-label" for="er_client_<?= (int)$client['client_id'] ?>"><?= htmlspecialchars($client['client_name']) ?></label>
+              </div>
+              <?php endforeach; ?>
+            </div>
           </div>
 
           <!-- ── Map Preview ─────────────────────────────────────────────── -->

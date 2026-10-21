@@ -68,7 +68,7 @@ layoutHead('Announcements', APP_BASE . '/assets/css/announcements.css');
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <form method="get" class="d-flex">
-      <select name="period" class="form-select form-select-sm ann-sort-select" onchange="this.form.submit()">
+      <select name="period" class="form-select form-select-sm ann-sort-select" data-soft-submit>
         <?php foreach ($periods as $key => $label): ?>
         <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
         <?php endforeach; ?>

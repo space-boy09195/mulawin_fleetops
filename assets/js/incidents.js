@@ -120,7 +120,7 @@
         setBusy(submitBtn, submitSpinner, false);
         if (res.success) {
           bootstrap.Modal.getInstance(logModal)?.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(incFormAlert, res.message ?? 'Failed to report the trip problem.');
         }

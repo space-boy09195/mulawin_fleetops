@@ -368,7 +368,7 @@ expenseForm.addEventListener('submit', async function (event) {
   const response = await fetch(this.action, { method: 'POST', body: new URLSearchParams(new FormData(this)) });
   const result = await response.json();
   document.getElementById('expenseMessage').innerHTML = '<div class="alert alert-' + (result.success ? 'success' : 'danger') + '">' + result.message + '</div>';
-  if (result.success) setTimeout(() => window.location.reload(), 700);
+  if (result.success) setTimeout(() => window.softReload(), 700);
 });
 
 document.querySelectorAll('.expense-breakdown-btn').forEach((button) => {
@@ -524,7 +524,7 @@ crewPaySubmit.addEventListener('click', async () => {
   const response = await fetch('<?= APP_BASE ?>/ajax/trip_pay_handler.php', { method: 'POST', body });
   const result = await response.json();
   crewPayMessage.innerHTML = `<div class="alert alert-${result.success ? 'success' : 'danger'}">${escapeHtml(result.message)}</div>`;
-  if (result.success) setTimeout(() => window.location.reload(), 700);
+  if (result.success) setTimeout(() => window.softReload(), 700);
 });
 </script>
 <?php layoutFoot(); ?>

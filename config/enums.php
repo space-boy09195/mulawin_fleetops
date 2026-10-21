@@ -69,7 +69,7 @@ define('PAYMENT_MODES', ['Cash', 'Check', 'Bank Transfer', 'Other']);
 
 // Uploadable document categories (documents.document_category, VARCHAR).
 define('DOCUMENT_TYPES', [
-    'OR/CR', 'Delivery Receipt', 'Waybill',
+    'OR/CR', 'Delivery Receipt', 'Waybill', 'GPS Report',
     'Maintenance Record', 'Billing Record',
     'Company Document', 'Other',
 ]);

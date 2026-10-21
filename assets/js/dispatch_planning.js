@@ -52,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       window.fleetOpsCompleteIdempotency(scope);
-      window.location.reload();
+      window.softReload();
     } catch (error) {
       showAlert(error.message || 'Network error. Please try again.');
     } finally {
@@ -129,7 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       window.fleetOpsCompleteIdempotency(scope);
-      window.location.reload();
+      window.softReload();
     } catch (error) {
       showAlert(error.message || 'Network error. Please try again.');
     } finally {
@@ -151,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
           button.disabled = false;
           return;
         }
-        window.location.reload();
+        window.softReload();
       } catch (error) {
         showAlert(error.message || 'Network error. Please try again.');
         button.disabled = false;

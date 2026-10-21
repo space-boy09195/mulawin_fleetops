@@ -158,7 +158,55 @@ document.addEventListener('DOMContentLoaded', () => {
     hiddenInput.value = option?.dataset.id ?? '';
   }
 
-  routeInput?.addEventListener('input', () => syncDatalistId(routeInput, routeIdInput, 'approvedRoutesList'));
+  // Routes: filtered by the chosen client, and the route fills in pickup/delivery.
+  const routeListEl = document.getElementById('approvedRoutesList');
+  const allRouteOptions = Array.from(routeListEl?.querySelectorAll('option') ?? []).map(option => ({
+    value: option.value,
+    id: option.dataset.id,
+    clients: JSON.parse(option.dataset.clients || '[]').map(String),
+    options: JSON.parse(option.dataset.options || '[]'),
+  }));
+
+  // A client with linked routes is offered only those; otherwise every route.
+  function routesForClient(client) {
+    const linked = allRouteOptions.filter(route => route.clients.includes(client));
+    return client && linked.length ? linked : allRouteOptions;
+  }
+
+  function renderRouteList() {
+    if (!routeListEl) return;
+    routeListEl.replaceChildren(...routesForClient(clientSelect?.value ?? '').map(route => {
+      const option = document.createElement('option');
+      option.value = route.value;
+      option.dataset.id = route.id;
+      return option;
+    }));
+  }
+
+  function fillSelect(select, values, preferred) {
+    if (!select) return;
+    select.replaceChildren(new Option(values.length ? '— Select location —' : '— Select route first —', ''));
+    values.forEach(value => select.add(new Option(value, value)));
+    select.disabled = values.length === 0;
+    select.value = values.includes(preferred) ? preferred : (values[0] ?? '');
+  }
+
+  function applyRoute() {
+    const route = allRouteOptions.find(item => item.id === routeIdInput?.value);
+    const options = route?.options ?? [];
+    const unique = key => [...new Set(options.map(option => option[key]))];
+    fillSelect(originLocationSelect, unique('pickup'), options[0]?.pickup);
+    fillSelect(destinationLocationSelect, unique('delivery'), options[0]?.delivery);
+    if (route && clientSelect && !clientSelect.value && route.clients.length === 1) {
+      clientSelect.value = route.clients[0];
+      renderRouteList();
+    }
+  }
+
+  routeInput?.addEventListener('input', () => {
+    syncDatalistId(routeInput, routeIdInput, 'approvedRoutesList');
+    applyRoute();
+  });
   driverSel?.addEventListener('input', () => syncDatalistId(driverSel, driverIdInput, 'activeDriversList'));
   secondDriverSel?.addEventListener('input', () => syncDatalistId(secondDriverSel, secondDriverIdInput, 'activeDriversList'));
   helperSel?.addEventListener('input', () => syncDatalistId(helperSel, helperIdInput, 'activeHelpersList'));
@@ -177,24 +225,16 @@ document.addEventListener('DOMContentLoaded', () => {
   secondDriverSel?.addEventListener('input', syncHelperOptions);
 
   clientSelect?.addEventListener('change', () => {
-    [originLocationSelect, destinationLocationSelect].forEach(select => {
-      if (!select) return;
-      select.value = '';
-      select.disabled = !clientSelect.value;
-      Array.from(select.options).forEach(option => {
-        if (!option.value) return;
-        option.hidden = option.dataset.client !== clientSelect.value;
-        option.disabled = option.hidden;
-      });
-      const firstOption = select.options[0];
-      if (firstOption) {
-        firstOption.textContent = clientSelect.value ? '— Select location —' : '— Select client first —';
-      }
-    });
+    const route = allRouteOptions.find(item => item.id === routeIdInput?.value);
+    if (route && clientSelect.value && !routesForClient(clientSelect.value).includes(route)) {
+      if (routeInput) routeInput.value = '';
+      if (routeIdInput) routeIdInput.value = '';
+      applyRoute();
+    }
+    renderRouteList();
   });
-  if (clientSelect?.value) {
-    clientSelect.dispatchEvent(new Event('change'));
-  }
+  renderRouteList();
+  applyRoute();
 
   function clearDispatchFields() {
     if (routeInput) routeInput.value = '';
@@ -208,16 +248,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (clientSelect) clientSelect.value = '';
     const billingClient = document.getElementById('d_billing_client');
     if (billingClient) billingClient.value = '';
-    [originLocationSelect, destinationLocationSelect].forEach(select => {
-      if (!select) return;
-      select.value = '';
-      select.disabled = true;
-      Array.from(select.options).forEach(option => {
-        option.hidden = false;
-        option.disabled = false;
-      });
-      if (select.options[0]) select.options[0].textContent = '— Select client first —';
-    });
+    renderRouteList();
+    applyRoute();
     const route = document.getElementById('d_route');
     const truck = document.getElementById('d_truck');
     const scheduled = document.getElementById('d_scheduled');
@@ -266,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const remarks   = document.getElementById('d_remarks')?.value.trim() ?? '';
 
     if (!truck || !route || !driver || !scheduled || !shift || !client || !originLocation || !destinationLocation) {
-      showAlert(dispatchFormError, 'Please choose an active client and locations, approved route, active driver, truck, and scheduled departure.');
+      showAlert(dispatchFormError, 'Please choose an active client, approved route (which sets the pickup and delivery locations), active driver, truck, and scheduled departure.');
       return;
     }
     if ([driver, secondDriver, helper].filter(Boolean).length !== new Set([driver, secondDriver, helper].filter(Boolean)).size) {
@@ -291,8 +323,8 @@ document.addEventListener('DOMContentLoaded', () => {
       fd.append('second_driver_id', secondDriver);
       fd.append('helper_id',    helper);
       fd.append('client_id',    client);
-      fd.append('origin_location_id', originLocation);
-      fd.append('destination_location_id', destinationLocation);
+      fd.append('pickup_location', originLocation);
+      fd.append('delivery_location', destinationLocation);
       fd.append('scheduled_at', scheduled);
       fd.append('shift', shift);
       fd.append('instruction_id', instructionId);
@@ -302,7 +334,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const result = await postForm(DISPATCH_URL, fd);
 
       if (result.success) {
-        window.location.reload();
+        window.softReload();
       } else {
         showAlert(dispatchFormError, result.message || 'Could not submit request.');
       }
@@ -323,7 +355,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const rrMapPreview = wireMapPreview('rr', rrOrigin, rrDestination);
 
   routeRequestModal?.addEventListener('hidden.bs.modal', () => {
-    const fields = ['rr_name', 'rr_origin', 'rr_destination', 'rr_distance', 'rr_notes'];
+    const fields = ['rr_name', 'rr_origin', 'rr_pickup', 'rr_destination', 'rr_distance', 'rr_notes'];
     fields.forEach(id => {
       const field = document.getElementById(id);
       if (field) field.value = '';
@@ -336,15 +368,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const alertEl = document.getElementById('routeRequestAlert');
     const name = document.getElementById('rr_name')?.value.trim() ?? '';
     const origin = document.getElementById('rr_origin')?.value.trim() ?? '';
+    const pickup = document.getElementById('rr_pickup')?.value.trim() ?? '';
     const destination = document.getElementById('rr_destination')?.value.trim() ?? '';
     const distance = document.getElementById('rr_distance')?.value ?? '';
     const notes = document.getElementById('rr_notes')?.value.trim() ?? '';
-    if (!name || !origin || !destination) {
-      showAlert(alertEl, 'Route name, origin, and destination are required.');
+    if (!name || !origin || !pickup || !destination) {
+      showAlert(alertEl, 'Route name, origin, pickup location, and delivery location are required.');
       return;
     }
-    if (name.length > 150 || origin.length > 150 || destination.length > 150) {
-      showAlert(alertEl, 'Route name, origin, and destination must be 150 characters or fewer.');
+    if (name.length > 150 || origin.length > 150 || pickup.length > 150 || destination.length > 150) {
+      showAlert(alertEl, 'Route name and locations must be 150 characters or fewer.');
       return;
     }
     const distanceValue = distance === '' ? null : Number(distance);
@@ -353,16 +386,17 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     const confirmed = window.confirm(
-      `Submit route request "${name}" from "${origin}" to "${destination}" to Head Management?`
+      `Submit route request "${name}" from "${origin}" (pickup "${pickup}", delivery "${destination}") to Head Management?`
     );
     if (!confirmed) return;
     const submitButton = document.getElementById('submitRouteRequestBtn');
     if (submitButton) submitButton.disabled = true;
     try {
       const result = await postAjax(ROUTE_REQUEST_URL, {
-        action: 'request', route_name: name, origin, destination, distance_km: distance, request_notes: notes
+        action: 'request', route_name: name, origin, pickup_location: pickup, delivery_location: destination,
+        distance_km: distance, request_notes: notes
       });
-      if (result.success) window.location.reload();
+      if (result.success) window.softReload();
       else showAlert(alertEl, result.message || 'Could not submit route request.');
     } catch (error) {
       showAlert(alertEl, error.message || 'Network error. Please try again.');
@@ -377,7 +411,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const result = await postAjax(ROUTE_REQUEST_URL, {
         action: 'review', route_id: btn.dataset.id, status: btn.dataset.status
       });
-      if (result.success) window.location.reload();
+      if (result.success) window.softReload();
       else alert(result.message || 'Could not review route request.');
     });
   });
@@ -391,7 +425,7 @@ document.addEventListener('DOMContentLoaded', () => {
       fd.append('status',      status);
       fd.append('remarks',     '');
       const result = await postForm(REVIEW_URL, fd);
-      if (result.success) window.location.reload();
+      if (result.success) window.softReload();
       else alert('Error: ' + (result.message || 'Could not update.'));
     } catch { alert('Network error.'); }
   };
@@ -419,7 +453,7 @@ document.addEventListener('DOMContentLoaded', () => {
       fd.append('status',      'Rejected');
       fd.append('remarks',     remarks);
       const result = await postForm(REVIEW_URL, fd);
-      if (result.success) { bsRejectModal.hide(); window.location.reload(); }
+      if (result.success) { bsRejectModal.hide(); window.softReload(); }
       else alert('Error: ' + (result.message || 'Could not reject.'));
     } catch { alert('Network error.'); }
   });
@@ -440,7 +474,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Wires up a pair of origin/destination inputs to their preview iframes.
   // prefix e.g. 'ar' or 'er' -> expects #{prefix}_origin_map, #{prefix}_destination_map,
   // #{prefix}_route_map and matching *_placeholder elements.
-  function wireMapPreview(prefix, originInput, destinationInput) {
+  function wireMapPreview(prefix, originInput, destinationInput, pickupInput = null) {
+    if (pickupInput) return wireStopMapPreview(prefix, originInput, pickupInput, destinationInput);
     const originFrame      = document.getElementById(prefix + '_origin_map');
     const originPlaceholder = document.getElementById(prefix + '_origin_map_placeholder');
     const destFrame         = document.getElementById(prefix + '_destination_map');
@@ -498,10 +533,110 @@ document.addEventListener('DOMContentLoaded', () => {
     }};
   }
 
+  // Origin, pickup and delivery pin previews plus origin→pickup and pickup→delivery route previews.
+  function wireStopMapPreview(prefix, originInput, pickupInput, destinationInput) {
+    const slot = id => ({
+      frame: document.getElementById(`${prefix}_${id}_map`),
+      placeholder: document.getElementById(`${prefix}_${id}_map_placeholder`),
+    });
+    const pins = [
+      [originInput, slot('origin')],
+      [pickupInput, slot('pickup')],
+      [destinationInput, slot('destination')],
+    ];
+    const routes = [
+      [originInput, pickupInput, slot('route_a')],
+      [pickupInput, destinationInput, slot('route_b')],
+    ];
+    const valueOf = input => input?.value.trim() ?? '';
+    const show = ({ frame, placeholder }, src) => {
+      if (frame) frame.src = src ?? '';
+      frame?.classList.toggle('d-none', !src);
+      placeholder?.classList.toggle('d-none', !!src);
+    };
+
+    let debounceTimer = null;
+    function refreshAll() {
+      pins.forEach(([input, target]) => {
+        const val = valueOf(input);
+        show(target, val.length >= 3 ? mapPinSrc(val) : null);
+      });
+      routes.forEach(([from, to, target]) => {
+        const a = valueOf(from);
+        const b = valueOf(to);
+        show(target, a.length >= 3 && b.length >= 3 ? mapRouteSrc(a, b) : null);
+      });
+    }
+    function scheduleRefresh() {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(refreshAll, 600);
+    }
+    [originInput, pickupInput, destinationInput].forEach(input => input?.addEventListener('input', scheduleRefresh));
+
+    return { refreshAll, reset: () => {
+      clearTimeout(debounceTimer);
+      [...pins.map(p => p[1]), ...routes.map(r => r[2])].forEach(target => show(target, null));
+    }};
+  }
+
+  // ── Pickup/delivery option rows and client checklists (add/edit route) ──────
+  function addOptionRow(containerId, pickup = '', delivery = '') {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'input-group input-group-sm js-option-row';
+    const pickupInput = Object.assign(document.createElement('input'), {
+      className: 'form-control js-option-pickup', placeholder: 'Pickup location', value: pickup,
+    });
+    const deliveryInput = Object.assign(document.createElement('input'), {
+      className: 'form-control js-option-delivery', placeholder: 'Delivery location', value: delivery,
+    });
+    const remove = Object.assign(document.createElement('button'), {
+      type: 'button', className: 'btn btn-outline-danger', title: 'Remove option',
+    });
+    remove.innerHTML = '<i class="bi bi-x-lg"></i>';
+    remove.addEventListener('click', () => row.remove());
+    row.append(pickupInput, deliveryInput, remove);
+    container.append(row);
+  }
+
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('.js-add-route-option');
+    if (btn) addOptionRow(btn.dataset.target);
+  });
+
+  function collectOptions(prefix) {
+    const options = [{
+      pickup: document.getElementById(prefix + '_pickup')?.value.trim() ?? '',
+      delivery: document.getElementById(prefix + '_destination')?.value.trim() ?? '',
+    }];
+    document.querySelectorAll(`#${prefix}_extra_options .js-option-row`).forEach(row => {
+      options.push({
+        pickup: row.querySelector('.js-option-pickup').value.trim(),
+        delivery: row.querySelector('.js-option-delivery').value.trim(),
+      });
+    });
+    return options.filter(option => option.pickup || option.delivery);
+  }
+
+  function optionsComplete(options) {
+    return options.length > 0 && options.every(option => option.pickup && option.delivery);
+  }
+
+  function collectClients(prefix) {
+    return Array.from(document.querySelectorAll(`#${prefix}_clients input:checked`)).map(box => box.value);
+  }
+
+  function setClients(prefix, ids) {
+    const selected = ids.map(String);
+    document.querySelectorAll(`#${prefix}_clients input`).forEach(box => { box.checked = selected.includes(box.value); });
+  }
+
   // ── Add Route ────────────────────────────────────────────────────────────────
   const addRouteModal = document.getElementById('addRouteModal');
   const ar_name       = document.getElementById('ar_name');
   const ar_origin     = document.getElementById('ar_origin');
+  const ar_pickup     = document.getElementById('ar_pickup');
   const ar_destination = document.getElementById('ar_destination');
   const ar_distance   = document.getElementById('ar_distance');
   const submitAddRoute = document.getElementById('submitAddRouteBtn');
@@ -509,10 +644,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const arBtnSpinner  = document.getElementById('arBtnSpinner');
   const addRouteAlert = document.getElementById('addRouteAlert');
 
-  const arMapPreview = wireMapPreview('ar', ar_origin, ar_destination);
+  const arMapPreview = wireMapPreview('ar', ar_origin, ar_destination, ar_pickup);
 
   addRouteModal?.addEventListener('hidden.bs.modal', () => {
-    [ar_name, ar_origin, ar_destination, ar_distance].forEach(el => { if (el) el.value = ''; });
+    [ar_name, ar_origin, ar_pickup, ar_destination, ar_distance].forEach(el => { if (el) el.value = ''; });
+    document.getElementById('ar_extra_options')?.replaceChildren();
+    setClients('ar', []);
     hideAlert(addRouteAlert);
     setBusy(arBtnText, arBtnSpinner, false);
     arMapPreview.reset();
@@ -523,11 +660,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const name        = ar_name?.value.trim()        ?? '';
     const origin      = ar_origin?.value.trim()      ?? '';
-    const destination = ar_destination?.value.trim() ?? '';
     const distance    = ar_distance?.value           ?? '';
+    const options     = collectOptions('ar');
 
-    if (!name || !origin || !destination) {
-      showAlert(addRouteAlert, 'Route name, origin, and destination are required.');
+    if (!name || !origin || !optionsComplete(options)) {
+      showAlert(addRouteAlert, 'Route name, origin, and a pickup and delivery location are required.');
       return;
     }
 
@@ -537,14 +674,15 @@ document.addEventListener('DOMContentLoaded', () => {
       action:      'add',
       route_name:  name,
       origin,
-      destination,
+      options:     JSON.stringify(options),
+      client_ids:  JSON.stringify(collectClients('ar')),
       distance_km: distance,
     })
       .then(res => {
         setBusy(arBtnText, arBtnSpinner, false);
         if (res.success) {
           bootstrap.Modal.getInstance(addRouteModal)?.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(addRouteAlert, res.message ?? 'Failed to add route.');
         }
@@ -560,6 +698,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const er_id           = document.getElementById('er_id');
   const er_name         = document.getElementById('er_name');
   const er_origin       = document.getElementById('er_origin');
+  const er_pickup       = document.getElementById('er_pickup');
   const er_destination  = document.getElementById('er_destination');
   const er_distance     = document.getElementById('er_distance');
   const submitEditRoute = document.getElementById('submitEditRouteBtn');
@@ -573,11 +712,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const btn = e.target.closest('.btn-edit-route');
     if (!btn) return;
 
+    const options = JSON.parse(btn.dataset.options || '[]');
+    const [first = { pickup: btn.dataset.origin ?? '', delivery: btn.dataset.destination ?? '' }, ...rest] = options;
+
     if (er_id)          er_id.value          = btn.dataset.id          ?? '';
     if (er_name)        er_name.value        = btn.dataset.name        ?? '';
     if (er_origin)      er_origin.value      = btn.dataset.origin      ?? '';
-    if (er_destination) er_destination.value = btn.dataset.destination ?? '';
+    if (er_pickup)      er_pickup.value      = first.pickup;
+    if (er_destination) er_destination.value = first.delivery;
     if (er_distance)    er_distance.value    = btn.dataset.distance    ?? '';
+    document.getElementById('er_extra_options')?.replaceChildren();
+    rest.forEach(option => addOptionRow('er_extra_options', option.pickup, option.delivery));
+    setClients('er', JSON.parse(btn.dataset.clients || '[]'));
 
     hideAlert(editRouteAlert);
     setBusy(erBtnText, erBtnSpinner, false);
@@ -596,11 +742,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const name        = er_name?.value.trim()        ?? '';
     const origin      = er_origin?.value.trim()      ?? '';
-    const destination = er_destination?.value.trim() ?? '';
     const distance    = er_distance?.value           ?? '';
+    const options     = collectOptions('er');
 
-    if (!name || !origin || !destination) {
-      showAlert(editRouteAlert, 'Route name, origin, and destination are required.');
+    if (!name || !origin || !optionsComplete(options)) {
+      showAlert(editRouteAlert, 'Route name, origin, and a pickup and delivery location are required.');
       return;
     }
 
@@ -611,14 +757,15 @@ document.addEventListener('DOMContentLoaded', () => {
       route_id:    er_id?.value ?? '',
       route_name:  name,
       origin,
-      destination,
+      options:     JSON.stringify(options),
+      client_ids:  JSON.stringify(collectClients('er')),
       distance_km: distance,
     })
       .then(res => {
         setBusy(erBtnText, erBtnSpinner, false);
         if (res.success) {
           bootstrap.Modal.getInstance(editRouteModal)?.hide();
-          window.location.reload();
+          window.softReload();
         } else {
           showAlert(editRouteAlert, res.message ?? 'Failed to update route.');
         }
@@ -677,7 +824,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     postAjax(ROUTES_URL, { action: 'toggle', route_id: routeId })
       .then(res => {
-        if (res.success) window.location.reload();
+        if (res.success) window.softReload();
         else alert('Error: ' + (res.message ?? 'Could not toggle route.'));
       })
       .catch(() => alert('Network error. Please try again.'));

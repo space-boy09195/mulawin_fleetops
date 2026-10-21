@@ -258,7 +258,7 @@ crewPaySubmit.addEventListener('click', async () => {
     const response = await fetch('<?= APP_BASE ?>/ajax/trip_pay_handler.php', { method: 'POST', body });
     const result = await response.json();
     crewPayMessage.innerHTML = `<div class="alert alert-${result.success ? 'success' : 'danger'}">${escapeHtml(result.message)}</div>`;
-    if (result.success) setTimeout(() => window.location.reload(), 700);
+    if (result.success) setTimeout(() => window.softReload(), 700);
   } catch (error) {
     crewPayMessage.innerHTML = '<div class="alert alert-danger">Network error. Please try again.</div>';
   }

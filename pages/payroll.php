@@ -184,7 +184,7 @@ document.getElementById('payrollForm')?.addEventListener('submit', async event =
   const result = await response.json();
   feedback.textContent = result.message || (result.success ? 'Payroll recorded.' : 'Could not record payroll.');
   feedback.className = `alert alert-${result.success ? 'success' : 'danger'}`;
-  if (result.success) setTimeout(() => window.location.reload(), 700);
+  if (result.success) setTimeout(() => window.softReload(), 700);
 });
 </script>
 <?php endif; ?>

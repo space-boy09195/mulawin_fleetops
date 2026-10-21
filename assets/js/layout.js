@@ -61,7 +61,7 @@
   // Marks the nav link whose href matches the current page URL
   function setActiveNav() {
     const currentPath = window.location.pathname;
-    const links = document.querySelectorAll('.nav-link[href]');
+    const links = document.querySelectorAll('.nav-link[href], .sidebar-home-nav[href]');
 
     links.forEach((link) => {
       const linkPath = new URL(link.href, window.location.origin).pathname;
@@ -71,6 +71,32 @@
         link.classList.remove('active');
       }
     });
+
+    const activeLink = document.querySelector('.sidebar-nav .active[href]');
+    const activeSection = activeLink?.closest('.nav-section');
+    if (activeSection) {
+      const toggle = activeSection.querySelector('.nav-section-toggle');
+      const sectionId = toggle?.getAttribute('aria-controls');
+      const items = sectionId ? document.getElementById(sectionId) : null;
+      if (toggle && items) {
+        toggle.classList.remove('collapsed');
+        toggle.setAttribute('aria-expanded', 'true');
+        items.classList.remove('collapsed');
+        items.hidden = false;
+        activeSection.classList.add('has-active');
+      }
+    }
+  }
+
+  function setNavSectionExpanded(toggle, expanded) {
+    const sectionId = toggle.getAttribute('aria-controls');
+    const items = sectionId ? document.getElementById(sectionId) : null;
+    if (!items) return;
+
+    toggle.classList.toggle('collapsed', !expanded);
+    toggle.setAttribute('aria-expanded', String(expanded));
+    items.classList.toggle('collapsed', !expanded);
+    items.hidden = !expanded;
   }
 
   function showTableText(title, text) {
@@ -205,6 +231,12 @@
 
     if (!sidebar || !appShell) return;
 
+    sidebar.querySelectorAll('.nav-section-toggle[aria-controls]').forEach((toggle) => {
+      toggle.addEventListener('click', () => {
+        setNavSectionExpanded(toggle, toggle.getAttribute('aria-expanded') !== 'true');
+      });
+    });
+
     // Restore the appropriate state for the current viewport.
     syncSidebarViewport();
 
@@ -327,3 +359,176 @@ async function deleteAnnouncement(id) {
     alert('Network error.');
   }
 }
+
+// ============================================================
+// Soft refresh: re-fetch the current page and update only the data on
+// screen (tables, cards, counts, charts' containers) instead of reloading
+// the whole document. Existing elements are updated in place, so event
+// listeners bound by page scripts keep working. If the new markup would add
+// interactive elements that scripts have not bound, it falls back to a full
+// reload so behaviour is never worse than before.
+// ============================================================
+(function () {
+  const KEEP_CLASSES = ['hidden-row', 'active', 'collapsed', 'show'];
+  const INTERACTIVE = 'button, a, input, select, textarea, form, [data-bs-toggle], [onclick]';
+  let inFlight = null;
+
+  class UnsafeMorph extends Error {}
+
+  function isPreserved(node) {
+    return node.nodeType === 1 && (
+      node.matches('.modal, .modal-backdrop, .offcanvas, script, canvas, [data-no-refresh]')
+    );
+  }
+
+  function significantChildren(parent) {
+    return Array.from(parent.childNodes).filter((node) => {
+      if (node.nodeType === 8) return false;
+      if (node.nodeType === 3) return node.nodeValue.trim() !== '';
+      return node.nodeType === 1 && !isPreserved(node);
+    });
+  }
+
+  function assertSafeToInsert(node) {
+    if (node.nodeType !== 1) return;
+    if (node.matches(INTERACTIVE) || node.querySelector(INTERACTIVE) || node.querySelector('canvas')) {
+      throw new UnsafeMorph('New interactive markup needs a full page load.');
+    }
+  }
+
+  function syncAttributes(oldEl, newEl) {
+    const isField = /^(INPUT|TEXTAREA|SELECT)$/.test(oldEl.tagName);
+    const keepWhenMissing = ['class', 'style', 'aria-expanded'];
+    Array.from(oldEl.attributes).forEach((attr) => {
+      if (newEl.hasAttribute(attr.name) || keepWhenMissing.includes(attr.name)) return;
+      if (isField && ['value', 'checked', 'selected'].includes(attr.name)) return;
+      oldEl.removeAttribute(attr.name);
+    });
+    Array.from(newEl.attributes).forEach((attr) => {
+      if (isField && ['value', 'checked', 'selected'].includes(attr.name)) return;
+      if (attr.name === 'class') {
+        const kept = KEEP_CLASSES.filter((name) => oldEl.classList.contains(name));
+        const merged = new Set(attr.value.split(/\s+/).filter(Boolean));
+        kept.forEach((name) => merged.add(name));
+        const next = Array.from(merged).join(' ');
+        if (oldEl.className !== next) oldEl.className = next;
+      } else if (oldEl.getAttribute(attr.name) !== attr.value) {
+        oldEl.setAttribute(attr.name, attr.value);
+      }
+    });
+  }
+
+  function morphElement(oldEl, newEl) {
+    syncAttributes(oldEl, newEl);
+    if (/^(INPUT|TEXTAREA|SELECT|CANVAS)$/.test(oldEl.tagName)) return;
+    morphChildren(oldEl, newEl);
+  }
+
+  function sameKind(oldNode, newNode) {
+    if (oldNode.nodeType !== newNode.nodeType) return false;
+    if (oldNode.nodeType === 3) return true;
+    return oldNode.tagName === newNode.tagName && (oldNode.id || '') === (newNode.id || '');
+  }
+
+  function morphChildren(oldParent, newParent) {
+    const oldKids = significantChildren(oldParent);
+    const newKids = significantChildren(newParent);
+    let anchor = null;
+
+    newKids.forEach((newKid, index) => {
+      const oldKid = oldKids[index];
+      if (oldKid && sameKind(oldKid, newKid)) {
+        if (newKid.nodeType === 3) {
+          if (oldKid.nodeValue !== newKid.nodeValue) oldKid.nodeValue = newKid.nodeValue;
+        } else {
+          morphElement(oldKid, newKid);
+        }
+        anchor = oldKid;
+        return;
+      }
+      assertSafeToInsert(newKid);
+      const fresh = document.importNode(newKid, true);
+      if (oldKid) {
+        oldParent.replaceChild(fresh, oldKid);
+      } else if (anchor && anchor.parentNode === oldParent) {
+        oldParent.insertBefore(fresh, anchor.nextSibling);
+      } else {
+        oldParent.appendChild(fresh);
+      }
+      anchor = fresh;
+    });
+
+    oldKids.slice(newKids.length).forEach((extra) => {
+      if (extra.parentNode === oldParent) oldParent.removeChild(extra);
+    });
+  }
+
+  function resetClosedModalForms() {
+    document.querySelectorAll('.modal:not(.show) form').forEach((form) => form.reset());
+  }
+
+  async function softRefresh(url, options = {}) {
+    const target = url || window.location.href;
+    const container = document.querySelector('.page-content');
+    if (!container) return false;
+    if (inFlight) return inFlight;
+
+    inFlight = (async () => {
+      try {
+        const response = await fetch(target, {
+          credentials: 'same-origin',
+          headers: { 'X-Requested-With': 'fleetops-soft-refresh', Accept: 'text/html' }
+        });
+        const finalPath = new URL(response.url, window.location.origin).pathname;
+        const wantedPath = new URL(target, window.location.origin).pathname;
+        if (!response.ok || finalPath !== wantedPath) throw new UnsafeMorph('Page changed.');
+        const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+        const fresh = doc.querySelector('.page-content');
+        if (!fresh) throw new UnsafeMorph('No page content.');
+        morphChildren(container, fresh);
+        if (options.history === 'push') {
+          window.history.pushState({}, '', target);
+        } else if (options.history === 'replace') {
+          window.history.replaceState({}, '', target);
+        }
+        if (options.resetModals !== false) resetClosedModalForms();
+        document.dispatchEvent(new CustomEvent('fleetops:refreshed'));
+        return true;
+      } catch (error) {
+        if (!(error instanceof UnsafeMorph)) console.error('Soft refresh failed:', error);
+        return false;
+      } finally {
+        inFlight = null;
+      }
+    })();
+    return inFlight;
+  }
+
+  // Drop-in for window.location.reload() after a successful action.
+  window.softReload = async function () {
+    if (!(await softRefresh(window.location.href))) window.location.reload();
+  };
+
+  // Filter forms: <form data-soft-filter> with controls using data-soft-submit.
+  async function applyFilterForm(form) {
+    const params = new URLSearchParams(new FormData(form));
+    const base = form.getAttribute('action') || window.location.pathname;
+    const url = new URL(base, window.location.href);
+    url.search = params.toString();
+    const ok = await softRefresh(url.toString(), { history: 'replace', resetModals: false });
+    if (!ok) window.location.href = url.toString();
+  }
+
+  document.addEventListener('change', (event) => {
+    const control = event.target.closest?.('[data-soft-submit]');
+    const form = control?.form;
+    if (form) applyFilterForm(form);
+  });
+
+  document.addEventListener('submit', (event) => {
+    if (event.target.matches?.('form[data-soft-filter]')) {
+      event.preventDefault();
+      applyFilterForm(event.target);
+    }
+  });
+})();

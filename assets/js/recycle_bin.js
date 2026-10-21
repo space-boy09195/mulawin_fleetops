@@ -29,7 +29,7 @@
       postAjax({ action: 'restore', archive_id: archiveId })
         .then(res => {
           if (res.success) {
-            window.location.reload();
+            window.softReload();
           } else {
             alert(res.message || 'Could not restore this item.');
             btn.disabled = false;
@@ -120,7 +120,7 @@
     postAjax({ action: 'purge', archive_id: pendingPurgeId })
       .then(res => {
         if (res.success) {
-          window.location.reload();
+          window.softReload();
         } else {
           if (purgeAlert) {
             purgeAlert.textContent = res.message || 'Could not permanently delete this item.';

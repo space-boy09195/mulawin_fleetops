@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
         showMessage(response.message || 'Could not save the record.');
         return;
       }
-      window.location.reload();
+      window.softReload();
     } catch (error) {
       showMessage(error.message || 'Network error.');
     } finally {
@@ -86,7 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
       button.disabled = true;
       try {
         const result = await post({ action: 'toggle_location', location_id: button.dataset.id });
-        if (result.success) window.location.reload();
+        if (result.success) window.softReload();
         else showMessage(result.message || 'Could not update location status.');
       } catch (error) {
         showMessage(error.message || 'Network error.');
@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
       button.disabled = true;
       try {
         const result = await post({ action: 'toggle_rate', rate_id: button.dataset.id });
-        if (result.success) window.location.reload();
+        if (result.success) window.softReload();
         else showMessage(result.message || 'Could not update rate status.');
       } catch (error) {
         showMessage(error.message || 'Network error.');

@@ -47,6 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (input) input.value = value ?? '';
       });
       if (modalTitle) modalTitle.textContent = 'Edit Client';
+      const linked = JSON.parse(button.dataset.routes || '[]').map(String);
+      document.querySelectorAll('.js-client-route').forEach(box => { box.checked = linked.includes(box.value); });
       updateParentOptions();
     });
   });
@@ -72,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
     event.preventDefault();
     alertEl.classList.add('d-none');
     const data = Object.fromEntries(new FormData(form).entries());
+    data.route_ids = JSON.stringify([...document.querySelectorAll('.js-client-route:checked')].map(box => box.value));
     if (!data.client_name.trim()) return message('Client name is required.');
     if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
       return message('Enter a valid client email address.');
@@ -84,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
     button.disabled = true;
     try {
       const result = await post({action: 'save', ...data});
-      if (result.success) window.location.reload();
+      if (result.success) window.softReload();
       else message(result.message || 'Could not save client.');
     } catch (error) { message(error.message || 'Network error.'); }
     finally { button.disabled = false; }
@@ -96,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
       button.disabled = true;
       try {
         const result = await post({action: 'toggle', client_id: button.dataset.id});
-        if (result.success) window.location.reload();
+        if (result.success) window.softReload();
         else message(result.message || 'Could not update client.');
       } catch (error) { message(error.message || 'Network error.'); }
       finally { button.disabled = false; }

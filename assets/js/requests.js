@@ -74,7 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
         button.disabled = false;
         return;
       }
-      window.location.reload();
+      window.softReload();
     } catch (error) {
       showMessage(error.message || 'Network error. Please try again.');
       button.disabled = false;

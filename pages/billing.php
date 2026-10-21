@@ -231,7 +231,7 @@ $paymentModes = PAYMENT_MODES;
     </div>
     <div class="d-flex align-items-center gap-2">
       <form method="get" class="d-flex">
-        <select name="period" class="form-select bil-period-select" onchange="this.form.submit()">
+        <select name="period" class="form-select bil-period-select" data-soft-submit>
           <?php foreach ($periods as $key => $label): ?>
           <option value="<?= $key ?>" <?= $key === $period ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
           <?php endforeach; ?>

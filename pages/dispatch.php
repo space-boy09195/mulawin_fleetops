@@ -29,7 +29,8 @@ if ($instructionId !== null && $instructionId !== false && $instructionId > 0) {
     );
     $instructionQuery->execute([$instructionId]);
     $instruction = $instructionQuery->fetch(PDO::FETCH_ASSOC);
-    if (!$instruction || !currentUserHasAnyPermission(['dispatch.instructions.encode'])) {
+    if (!$instruction || !currentUserHasAnyPermission(['dispatch.instructions.encode'])
+        || dispatcherScopeViolation((string)$instruction['shift'], (string)$instruction['truck_type']) !== null) {
         header('Location: ' . APP_BASE . '/pages/dispatch_inbox.php?instruction_error=unavailable');
         exit;
     }
@@ -146,14 +147,19 @@ $allRoutes = $pdo->query("
 // Pending requests always show regardless of period (they need action now);
 // the period filter only narrows down the historical Approved/Rejected ones.
 // Target: trips + dispatch_requests (includes/trip_queries.php).
+// Dispatchers see only requests in their assigned truck types and shift.
+$reqScopeParams = [];
+$reqScopeSql = dispatcherScopeReadSql('tr.truck_type', 't.shift', $reqScopeParams);
 $reqStmt = $pdo->prepare(
     tripSelectSql() . "
     WHERE dr.dispatch_request_id IS NOT NULL
       AND (dr.status = 'Pending' " . ($rangeStartSql ? "OR (dr.status != 'Pending' $reqDateFilter)" : "OR dr.status != 'Pending'") . ")
+      $reqScopeSql
     ORDER BY FIELD(dr.status,'Pending','Approved','Rejected','Cancelled'), dr.submitted_at DESC
     LIMIT 500"
 );
 if ($rangeStartSql) $reqStmt->bindValue(':rangeStart', $rangeStartSql);
+foreach ($reqScopeParams as $scopeKey => $scopeValue) $reqStmt->bindValue($scopeKey, $scopeValue);
 $reqStmt->execute();
 $requests = $reqStmt->fetchAll();
 foreach ($requests as &$requestRow) {
@@ -204,6 +210,10 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
        href="<?= APP_BASE ?>/pages/dispatch_inbox.php">
       <i class="bi bi-inbox"></i> Dispatch Queue
     </a>
+    <button class="btn btn-outline-primary btn-sm d-flex align-items-center gap-2"
+           data-bs-toggle="modal" data-bs-target="#routeRequestModal">
+     <i class="bi bi-signpost-2"></i> Route Request
+    </button>
     <?php elseif ($isDispatcher): ?>
     <button class="btn btn-primary btn-sm d-flex align-items-center gap-2"
             data-bs-toggle="modal" data-bs-target="#newDispatchModal">
@@ -699,7 +709,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content disp-modal">
       <div class="modal-header disp-modal-header-blue">
-        <h5 class="modal-title"><i class="bi bi-signpost-2 me-2"></i>New Route Request</h5>
+        <h5 class="modal-title"><i class="bi bi-signpost-2 me-2"></i>Route Request</h5>
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body disp-modal-body">
@@ -713,7 +723,7 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
         <textarea class="form-control disp-input" id="rr_notes" rows="2" maxlength="500"
                   placeholder="Add context or special instructions for the Operations Head…"></textarea>
         <div class="row g-2 mt-2">
-          <div class="col-md-6">
+          <div class="col-md-4">
             <div class="route-map-wrap" id="rr_origin_map_wrap">
               <div class="route-map-placeholder" id="rr_origin_map_placeholder">
                 <i class="bi bi-geo-alt"></i><span>Origin preview</span>
@@ -722,21 +732,39 @@ layoutHead('Dispatch', APP_BASE . '/assets/css/dispatch.css');
                       loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
             </div>
           </div>
-          <div class="col-md-6">
+          <div class="col-md-4">
+            <div class="route-map-wrap" id="rr_pickup_map_wrap">
+              <div class="route-map-placeholder" id="rr_pickup_map_placeholder">
+                <i class="bi bi-box-arrow-up"></i><span>Pickup preview</span>
+              </div>
+              <iframe class="route-map-frame d-none" id="rr_pickup_map"
+                      loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+          </div>
+          <div class="col-md-4">
             <div class="route-map-wrap" id="rr_destination_map_wrap">
               <div class="route-map-placeholder" id="rr_destination_map_placeholder">
-                <i class="bi bi-geo-alt-fill"></i><span>Destination preview</span>
+                <i class="bi bi-geo-alt-fill"></i><span>Delivery preview</span>
               </div>
               <iframe class="route-map-frame d-none" id="rr_destination_map"
                       loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
             </div>
           </div>
-          <div class="col-12">
-            <div class="route-map-wrap route-map-wrap-lg" id="rr_route_map_wrap">
-              <div class="route-map-placeholder" id="rr_route_map_placeholder">
-                <i class="bi bi-signpost-2"></i><span>Enter both locations to preview the route</span>
+          <div class="col-md-6">
+            <div class="route-map-wrap route-map-wrap-lg" id="rr_route_a_map_wrap">
+              <div class="route-map-placeholder" id="rr_route_a_map_placeholder">
+                <i class="bi bi-signpost-2"></i><span>Origin → Pickup (A to B)</span>
               </div>
-              <iframe class="route-map-frame route-map-frame-lg d-none" id="rr_route_map"
+              <iframe class="route-map-frame route-map-frame-lg d-none" id="rr_route_a_map"
+                      loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="route-map-wrap route-map-wrap-lg" id="rr_route_b_map_wrap">
+              <div class="route-map-placeholder" id="rr_route_b_map_placeholder">
+                <i class="bi bi-signpost-2"></i><span>Pickup → Delivery (A to B)</span>
+              </div>
+              <iframe class="route-map-frame route-map-frame-lg d-none" id="rr_route_b_map"
                       loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
             </div>
           </div>

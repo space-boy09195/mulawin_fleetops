@@ -352,7 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const routeRequestModal = document.getElementById('routeRequestModal');
   const rrOrigin = document.getElementById('rr_origin');
   const rrDestination = document.getElementById('rr_destination');
-  const rrMapPreview = wireMapPreview('rr', rrOrigin, rrDestination);
+  const rrMapPreview = wireMapPreview('rr', rrOrigin, rrDestination, document.getElementById('rr_pickup'));
 
   routeRequestModal?.addEventListener('hidden.bs.modal', () => {
     const fields = ['rr_name', 'rr_origin', 'rr_pickup', 'rr_destination', 'rr_distance', 'rr_notes'];

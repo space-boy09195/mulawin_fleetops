@@ -1,7 +1,7 @@
 <?php
 // ============================================================
 // pages/recycle_bin.php
-// View deleted records and audit history — Head Management only.
+// View and restore deleted records — Admin only.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
@@ -32,69 +32,24 @@ $archived = $pdo->query("
     ORDER BY deleted_at DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$auditLogs = $pdo->query("
-    SELECT a.audit_id AS log_id, a.action, COALESCE(a.entity_type, '') AS table_name,
-           a.entity_id AS record_id, a.old_values AS old_value, a.new_values AS new_value,
-           a.ip_address, a.created_at AS logged_at,
-           COALESCE(
-               NULLIF(TRIM(CONCAT_WS(' ',
-                   NULLIF(TRIM(e.first_name), ''),
-                   NULLIF(TRIM(e.middle_name), ''),
-                   NULLIF(TRIM(e.last_name), ''),
-                   NULLIF(TRIM(e.suffix), '')
-               )), ''),
-               u.username,
-               'System'
-           ) AS user_name
-    FROM audit_logs a
-    LEFT JOIN users u ON u.user_id = a.user_id
-    LEFT JOIN employees e ON e.employee_id = u.employee_id
-    ORDER BY a.created_at DESC, a.audit_id DESC
-    LIMIT 500
-")->fetchAll(PDO::FETCH_ASSOC);
-
 $tableLabels = [
     'announcements' => ['label' => 'Announcement', 'icon' => 'bi-megaphone'],
     'documents'     => ['label' => 'Document',     'icon' => 'bi-file-earmark'],
     'payroll_records' => ['label' => 'Payroll Record', 'icon' => 'bi-cash-stack'],
 ];
 
-function auditActionLabel(string $action): string {
-    return ucwords(strtolower(str_replace(['_', '-'], ' ', $action)));
-}
-
-function auditDetails(array $log): string {
-    $new = json_decode((string)($log['new_value'] ?? ''), true);
-    $old = json_decode((string)($log['old_value'] ?? ''), true);
-    $data = is_array($new) && $new ? $new : (is_array($old) ? $old : []);
-    $labels = [
-        'client_name' => 'Client', 'route_name' => 'Route', 'file_name' => 'File',
-        'title' => 'Title', 'status' => 'Status', 'approval_status' => 'Approval',
-        'is_active' => 'Active', 'amount' => 'Amount', 'trip_number' => 'Trip',
-    ];
-    $parts = [];
-    foreach ($data as $key => $value) {
-        if (!array_key_exists($key, $labels) || is_array($value) || is_object($value)) continue;
-        $display = is_bool($value) ? ($value ? 'Yes' : 'No') : (string)$value;
-        $parts[] = ($labels[$key] ?? ucwords(str_replace('_', ' ', $key))) . ': ' . $display;
-    }
-    return implode(' | ', $parts);
-}
 ?>
 
 <div class="rb-page">
 
   <div class="page-header">
     <h1 class="page-title">Recycle Bin</h1>
-    <p class="page-subtitle">Review deleted records, restore them, and inspect the system audit history.</p>
+    <p class="page-subtitle">Review deleted records and restore them.</p>
   </div>
 
   <ul class="nav rb-tabs mb-4" role="tablist">
     <li class="nav-item" role="presentation"><button class="rb-tab active" data-bs-toggle="tab" data-bs-target="#rbDeleted" type="button" role="tab">
       <i class="bi bi-trash3 me-1"></i>Deleted Records <span class="rb-tab-count"><?= count(array_filter($archived, fn($a) => $a['restored_at'] === null)) ?></span>
-    </button></li>
-    <li class="nav-item" role="presentation"><button class="rb-tab" data-bs-toggle="tab" data-bs-target="#rbAudit" type="button" role="tab">
-      <i class="bi bi-journal-text me-1"></i>Audit Logs <span class="rb-tab-count"><?= count($auditLogs) ?></span>
     </button></li>
   </ul>
 
@@ -191,74 +146,6 @@ function auditDetails(array $log): string {
     </table>
   </div>
   <?php endif; ?>
-  </div>
-
-  <div class="tab-pane fade" id="rbAudit">
-    <div class="rb-table-wrap">
-      <div class="p-3 border-bottom">
-        <div class="rb-filter-bar rb-filter-bar-audit">
-          <div class="rb-filter-search">
-            <label class="visually-hidden" for="auditSearch">Search audit logs</label>
-            <i class="bi bi-search" aria-hidden="true"></i>
-            <input type="search" class="form-control" id="auditSearch" placeholder="Search users, actions, records, or details...">
-          </div>
-          <div class="rb-filter-select">
-            <label class="visually-hidden" for="auditActionFilter">Filter audit action</label>
-            <select class="form-select" id="auditActionFilter">
-              <option value="">All actions</option>
-              <?php
-                $auditActions = array_unique(array_map(fn($log) => strtolower($log['action']), $auditLogs));
-                sort($auditActions);
-                foreach ($auditActions as $action):
-              ?>
-              <option value="<?= htmlspecialchars($action) ?>"><?= htmlspecialchars(auditActionLabel($action)) ?></option>
-              <?php endforeach; ?>
-            </select>
-          </div>
-          <div class="rb-filter-select">
-            <label class="visually-hidden" for="auditTableFilter">Filter audit table</label>
-            <select class="form-select" id="auditTableFilter">
-              <option value="">All areas</option>
-              <?php
-                $auditTables = array_unique(array_map(fn($log) => strtolower($log['table_name']), $auditLogs));
-                sort($auditTables);
-                foreach ($auditTables as $table):
-                  $auditTableLabel = $tableLabels[$table]['label'] ?? ucwords(str_replace('_', ' ', $table));
-              ?>
-              <option value="<?= htmlspecialchars($table) ?>"><?= htmlspecialchars($auditTableLabel) ?></option>
-              <?php endforeach; ?>
-            </select>
-          </div>
-        </div>
-      </div>
-      <div class="table-responsive">
-        <table class="table-custom rb-table" id="auditTable">
-          <thead><tr><th>Date</th><th>User</th><th>Action</th><th>Table</th><th>Record</th><th>Details</th><th>IP Address</th></tr></thead>
-          <tbody>
-          <?php foreach ($auditLogs as $log):
-            $details = auditDetails($log);
-            $actionLabel = auditActionLabel($log['action']);
-            $tableLabel = $tableLabels[$log['table_name']]['label'] ?? ucwords(str_replace('_', ' ', $log['table_name']));
-            $searchText = strtolower($log['user_name'] . ' ' . $actionLabel . ' ' . $tableLabel . ' ' . $log['record_id'] . ' ' . $details);
-          ?>
-            <tr data-audit-search="<?= htmlspecialchars($searchText, ENT_QUOTES) ?>"
-                data-audit-action="<?= htmlspecialchars(strtolower($log['action'])) ?>"
-                data-audit-table="<?= htmlspecialchars(strtolower($log['table_name'])) ?>">
-              <td class="rb-date"><?= date('M d, Y g:i A', strtotime($log['logged_at'])) ?></td>
-              <td><?= htmlspecialchars($log['user_name']) ?></td>
-              <td><span class="rb-type-badge"><?= htmlspecialchars($actionLabel) ?></span></td>
-              <td><?= htmlspecialchars($tableLabel) ?></td>
-              <td><?= $log['record_id'] !== null ? (int)$log['record_id'] : '—' ?></td>
-              <td class="rb-summary" title="<?= htmlspecialchars($details) ?>"><?= htmlspecialchars($details ?: '—') ?></td>
-              <td><?= htmlspecialchars($log['ip_address'] ?? '—') ?></td>
-            </tr>
-          <?php endforeach; ?>
-          <tr id="auditNoResults" class="d-none"><td colspan="7" class="text-center text-muted py-4">No audit logs match these filters.</td></tr>
-          <?php if (!$auditLogs): ?><tr><td colspan="7" class="text-center text-muted py-4">No audit logs found.</td></tr><?php endif; ?>
-          </tbody>
-        </table>
-      </div>
-    </div>
   </div>
   </div>
 

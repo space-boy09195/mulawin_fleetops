@@ -16,6 +16,7 @@
 
   margin: 0;
   min-height: 100vh;
+  min-height: 100svh;
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   background: var(--deep);
   color: var(--text-main);
@@ -31,9 +32,11 @@
 .login-page .login-shell {
   display: flex;
   min-height: 100vh;
+  min-height: 100svh;
   width: 100%;
   max-width: 1600px;
   margin: 0 auto;
+  align-items: stretch;
 }
 
 /* ---------- Left: login ---------- */
@@ -41,10 +44,12 @@
   order: 1;
   flex: 1 1 50%;
   min-width: 0;
+  min-height: 100vh;
+  min-height: 100svh;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: clamp(1.5rem, 5vw, 4.5rem);
+  padding: clamp(1.25rem, 4vw, 3.75rem);
   background: var(--offwhite);
 }
 
@@ -170,11 +175,13 @@
   order: 2;
   flex: 1 1 50%;
   min-width: 0;
+  min-height: 100vh;
+  min-height: 100svh;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: clamp(2rem, 5vw, 5rem);
+  padding: clamp(1.5rem, 4vw, 4rem);
   overflow: hidden;
   color: #fff;
   background:
@@ -253,7 +260,7 @@
 @media (max-width: 991.98px) {
   .login-page .login-card,
   .login-page .login-visual {
-    padding: 2rem 1.5rem;
+    padding: clamp(1.25rem, 3vw, 2rem) clamp(1rem, 3vw, 1.5rem);
   }
 
   .login-page .visual-content .brand-icon {
@@ -283,16 +290,18 @@
 
   .login-page .login-card,
   .login-page .login-visual {
-    flex: 0 0 auto;
     width: 100%;
+    min-height: 0;
   }
 
   .login-page .login-card {
-    padding: 1.75rem 1.25rem;
+    flex: 1 0 auto;
+    padding: clamp(1.5rem, 6vh, 2.5rem) clamp(1rem, 5vw, 1.5rem);
   }
 
   .login-page .login-visual {
-    padding: 1.75rem 1.25rem;
+    flex: 0 0 auto;
+    padding: clamp(1.25rem, 5vh, 2rem) clamp(1rem, 5vw, 1.5rem);
   }
 
   .login-page .visual-shape--b,
@@ -312,6 +321,28 @@
   .login-page .visual-content p {
     font-size: 0.95rem;
     line-height: 1.6;
+  }
+}
+
+@media (max-width: 380px) {
+  .login-page .login-card {
+    padding-right: 0.9rem;
+    padding-left: 0.9rem;
+  }
+
+  .login-page .login-brand {
+    margin-bottom: 1.25rem;
+  }
+
+  .login-page .brand-icon {
+    width: 54px;
+    height: 54px;
+    border-radius: 15px;
+    font-size: 1.5rem;
+  }
+
+  .login-page .login-footer-text {
+    margin-top: 1.25rem;
   }
 }
 

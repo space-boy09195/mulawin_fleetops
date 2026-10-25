@@ -302,20 +302,9 @@ function currentRoleId(): int {
     return (int)($_SESSION['role_id'] ?? 0);
 }
 
-// Admin keeps the Admin dashboard; every other role (existing or created
-// later) shares the common, permission-driven dashboard.
-// Each department role has its own dashboard; every dashboard page still
-// checks its own permission on the server. Unmapped roles use the general
-// dashboard, which shows only the cards the user's permissions allow.
-const ROLE_KEY_DASHBOARDS = [
-    'admin'                         => '/pages/dashboard_head.php',
-    'operations_head'               => '/pages/dashboard_operations_head.php',
-    'car_carrier_dispatcher'        => '/pages/dashboard_dispatcher.php',
-    'container_wing_van_dispatcher' => '/pages/dashboard_dispatcher.php',
-    'maintenance'                   => '/pages/dashboard_maintenance.php',
-    'finance'                       => '/pages/dashboard_accounting.php',
-    'billing_collection'            => '/pages/dashboard_accounting.php',
-];
+// Every role shares the permission-driven home dashboard. Department access
+// is reflected by its existing permissions and workflow links.
+const ROLE_KEY_DASHBOARDS = [];
 
 function dashboardUrlForRoleKey(?string $roleKey): string {
     return APP_BASE . (ROLE_KEY_DASHBOARDS[(string)$roleKey] ?? '/pages/dashboard.php');

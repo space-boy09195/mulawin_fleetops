@@ -18,13 +18,16 @@ $canIncidents = currentUserHasAnyPermission(['incidents.manage']);
 $canMaintenance = currentUserHasAnyPermission(['maintenance.view']);
 $canParts = currentUserHasAnyPermission(['parts.view']);
 $canApprovals = currentUserHasAnyPermission(['approvals.review']);
+$canDispatchQueue = currentUserHasAnyPermission(['dispatch.instructions.encode', 'dispatch.instructions.manage']);
+$canPurchasing = currentUserHasAnyPermission(['purchasing.view']);
 $isDispatcher = dispatcherScopeResult()['status'] !== 'none';
 $dispatcherScope = $isDispatcher ? dispatcherScope() : [];
 $employee = employeeForCurrentUser($pdo);
 $roleKey = currentRoleKey();
 $isCrew = in_array($roleKey, ['driver', 'helper'], true);
+$canTrips = $canTrips && (!$isCrew || $employee !== null);
 $canViewAssignedTrips = $isCrew && $employee !== null;
-$canViewTripList = $canTrips || $canViewAssignedTrips;
+$canViewTripList = $isCrew ? $canViewAssignedTrips : $canTrips;
 $userId = currentUserId();
 
 $tripScopeSql = '';
@@ -43,6 +46,16 @@ if ($isDispatcher) {
         $tripScopeParams[] = (string)($dispatcherScope['shift'] ?? '');
     }
 }
+if ($isCrew && $employee !== null) {
+    if ($roleKey === 'driver') {
+        $tripScopeSql .= ' AND (t.driver_id = ? OR t.second_driver_id = ?)';
+        $tripScopeParams[] = (int)$employee['employee_id'];
+        $tripScopeParams[] = (int)$employee['employee_id'];
+    } else {
+        $tripScopeSql .= ' AND t.helper_id = ?';
+        $tripScopeParams[] = (int)$employee['employee_id'];
+    }
+}
 
 $alerts = [];
 $alertsUnavailable = false;
@@ -56,7 +69,7 @@ $loadAlerts = static function (string $source, callable $load) use (&$alertsUnav
 };
 
 if ($canTrips) {
-    $loadAlerts('past ETA', static function () use ($pdo, $tripScopeSql, $tripScopeParams): array {
+    $loadAlerts('past ETA', static function () use ($pdo, $tripScopeSql, $tripScopeParams, $roleKey): array {
         $stmt = $pdo->prepare(
             tripSelectSql() . "
              WHERE " . tripOverdueSql('t') . $tripScopeSql . "
@@ -66,7 +79,9 @@ if ($canTrips) {
         return array_map(static fn(array $trip): array => [
             'title' => 'Past ETA',
             'detail' => $trip['trip_number'] . ' · ' . ($trip['plate_number'] ?? 'No truck'),
-            'url' => APP_BASE . '/pages/trip_monitor.php',
+            'url' => in_array($roleKey, ['driver', 'helper'], true)
+                ? APP_BASE . '/pages/trip_workflow.php?trip_id=' . (int)$trip['trip_id']
+                : APP_BASE . '/pages/trip_monitor.php',
             'tone' => 'warning',
         ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     });
@@ -105,6 +120,34 @@ if ($canParts) {
     });
 }
 
+$pendingPurchaseRequests = null;
+if ($canPurchasing) {
+    $loadAlerts('purchase requests', static function () use ($pdo, &$pendingPurchaseRequests): array {
+        $pendingPurchaseRequests = dashboardCount($pdo, "
+            SELECT COUNT(*)
+            FROM purchase_orders po
+            JOIN suppliers s ON s.supplier_id = po.supplier_id
+            LEFT JOIN purchase_requests pr ON pr.purchase_request_id = po.purchase_request_id
+            WHERE pr.status IN ('Pending Approval', 'Rejected')
+        ");
+        $stmt = $pdo->query("
+            SELECT po.po_number, pr.status, s.supplier_name
+            FROM purchase_orders po
+            JOIN suppliers s ON s.supplier_id = po.supplier_id
+            JOIN purchase_requests pr ON pr.purchase_request_id = po.purchase_request_id
+            WHERE pr.status IN ('Pending Approval', 'Rejected')
+            ORDER BY po.created_at DESC
+            LIMIT 5
+        ");
+        return array_map(static fn(array $request): array => [
+            'title' => 'Purchase request ' . $request['po_number'],
+            'detail' => $request['supplier_name'] . ' · ' . $request['status'],
+            'url' => APP_BASE . '/pages/purchasing.php',
+            'tone' => 'info',
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    });
+}
+
 if ($canApprovals) {
     $loadAlerts('pending approvals', static function () use ($pdo): array {
         $pending = dashboardPendingApprovalCount($pdo, isAdmin(), currentRoleId());
@@ -112,6 +155,22 @@ if ($canApprovals) {
             'title' => 'Awaiting your approval',
             'detail' => $pending . ' request' . ($pending === 1 ? '' : 's'),
             'url' => APP_BASE . '/pages/requests.php',
+            'tone' => 'info',
+        ]] : [];
+    });
+}
+
+$pendingDispatches = null;
+$dispatchDestination = currentUserHasAnyPermission(['trips.view'])
+    ? '/pages/dispatch.php'
+    : (currentUserHasAnyPermission(['dispatch.instructions.manage']) ? '/pages/dispatch_planning.php' : '/pages/dispatch_inbox.php');
+if ($canDispatchQueue) {
+    $loadAlerts('pending dispatch', static function () use ($pdo, $tripScopeSql, $tripScopeParams, &$pendingDispatches, $dispatchDestination): array {
+        $pendingDispatches = dashboardPendingDispatchCount($pdo, $tripScopeSql, $tripScopeParams);
+        return $pendingDispatches > 0 ? [[
+            'title' => 'Dispatch requests awaiting review',
+            'detail' => $pendingDispatches . ' pending request' . ($pendingDispatches === 1 ? '' : 's'),
+            'url' => APP_BASE . $dispatchDestination,
             'tone' => 'info',
         ]] : [];
     });
@@ -142,35 +201,221 @@ if ($canViewTripList) {
     $activeTrips = $activeStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+$canFleet = currentUserHasAnyPermission(['fleet.view']);
+$canBilling = currentUserHasAnyPermission(['billing.view']);
+$canPayroll = currentUserHasAnyPermission(['payroll.view']);
+$canPayrollManage = currentUserHasAnyPermission(['payroll.manage']);
+$canAudit = currentUserHasAnyPermission(['audit.view']);
+$summaryCards = [];
+$addSummaryCard = static function (string $key, string $label, string $value, string $detail, string $url, string $icon) use (&$summaryCards): void {
+    $summaryCards[$key] = compact('label', 'value', 'detail', 'url', 'icon');
+};
+
+if ($canViewTripList) {
+    $tripCount = $isCrew ? count($activeTrips ?? []) : dashboardActiveTripCount($pdo, $tripScopeSql, $tripScopeParams);
+    $addSummaryCard('trips', $isCrew ? 'Assigned trips in view' : 'Active trips', (string)$tripCount, 'Current permitted trip records', $isCrew ? APP_BASE . '/pages/dashboard.php#home-active-trips-heading' : APP_BASE . '/pages/trip_monitor.php', 'bi-map');
+}
+if ($canDispatchQueue) {
+    if ($pendingDispatches !== null) {
+        $addSummaryCard('dispatch', 'Pending dispatch', (string)$pendingDispatches, 'Requests awaiting dispatch review', APP_BASE . $dispatchDestination, 'bi-send');
+    }
+}
+if ($canApprovals) {
+    $pendingApprovals = dashboardPendingApprovalCount($pdo, isAdmin(), currentRoleId());
+    $addSummaryCard('approvals', 'Pending approvals', (string)$pendingApprovals, 'Requests assigned to your approval scope', APP_BASE . '/pages/requests.php', 'bi-inbox');
+}
+if ($canFleet) {
+    $fleetCounts = dashboardFleetCounts($pdo);
+    $addSummaryCard('fleet', 'Available trucks', (string)($fleetCounts['Available'] ?? 0), 'Fleet records marked available', APP_BASE . '/pages/fleet_status.php', 'bi-truck');
+}
+if ($canMaintenance) {
+    $addSummaryCard('maintenance', 'Open maintenance', (string)dashboardOpenMaintenanceCount($pdo), 'Reported, scheduled, in-progress, or waiting', APP_BASE . '/pages/maintenance.php', 'bi-tools');
+}
+if ($canParts) {
+    $addSummaryCard('stock', 'Low-stock parts', (string)dashboardLowStockCount($pdo), 'At or below recorded reorder level', APP_BASE . '/pages/parts.php', 'bi-box-seam');
+}
+if ($canBilling) {
+    $receivables = dashboardReceivables($pdo);
+    $addSummaryCard('receivables', 'Outstanding balances', '₱' . number_format($receivables['outstanding'], 2), 'Issued, partially paid, or overdue billing', APP_BASE . '/pages/billing.php', 'bi-receipt');
+}
+if ($canPayroll) {
+    $payrollCount = (int)$pdo->query('SELECT COUNT(*) FROM payroll_records')->fetchColumn();
+    $addSummaryCard('payroll', 'Recorded payroll entries', (string)$payrollCount, 'Existing payroll records', APP_BASE . '/pages/payroll.php', 'bi-cash-stack');
+    $paidPayrollThisMonth = dashboardCount($pdo, "SELECT COUNT(*) FROM payroll_records pr
+        WHERE " . payrollPaidDateSql('pr') . " >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+          AND " . payrollPaidDateSql('pr') . " < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 1 MONTH)");
+    $addSummaryCard('payroll-current', 'Payroll paid this month', (string)$paidPayrollThisMonth, 'Recorded paid dates in the current month', APP_BASE . '/pages/payroll.php', 'bi-calendar-check');
+    if ($canPayrollManage) {
+        $employeeCount = dashboardCount($pdo, "SELECT COUNT(*) FROM employees
+            WHERE employment_status = 'Active' AND (position IS NULL OR LOWER(position) NOT IN ('driver', 'helper'))");
+        $addSummaryCard('employees', 'Active employee records', (string)$employeeCount, 'Employees included in payroll management', APP_BASE . '/pages/payroll.php', 'bi-people');
+    }
+}
+if ($canPurchasing && $pendingPurchaseRequests !== null) {
+    $addSummaryCard('purchasing', 'Purchase requests needing attention', (string)$pendingPurchaseRequests, 'Pending approval or rejected purchase requests', APP_BASE . '/pages/purchasing.php', 'bi-cart-check');
+}
+if ($canAudit && $roleKey !== 'admin') {
+    $recentAuditCount = dashboardCount($pdo, "SELECT COUNT(*) FROM audit_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)");
+    $recentApprovalCount = dashboardCount($pdo, "SELECT COUNT(*) FROM approval_history WHERE acted_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)");
+    $recentWorkflowCount = dashboardCount($pdo, "SELECT COUNT(*) FROM workflow_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)");
+    $addSummaryCard('audit-records', 'Record changes · 7 days', (string)$recentAuditCount, 'Read-only audit activity', APP_BASE . '/pages/audit_history.php', 'bi-journal-text');
+    $addSummaryCard('audit-approvals', 'Approval decisions · 7 days', (string)$recentApprovalCount, 'Read-only approval history', APP_BASE . '/pages/audit_history.php', 'bi-check2-square');
+    $addSummaryCard('audit-workflows', 'Workflow events · 7 days', (string)$recentWorkflowCount, 'Read-only workflow history', APP_BASE . '/pages/audit_history.php', 'bi-clock-history');
+}
+
+$summaryPriority = match ($roleKey) {
+    'admin' => ['trips', 'fleet', 'approvals', 'receivables', 'dispatch', 'maintenance', 'stock'],
+    'operations_head' => ['trips', 'dispatch', 'maintenance', 'fleet', 'approvals'],
+    'car_carrier_dispatcher', 'container_wing_van_dispatcher' => ['trips', 'dispatch', 'fleet', 'approvals'],
+    'maintenance' => ['maintenance', 'fleet', 'stock', 'trips'],
+    'purchasing_officer' => ['purchasing', 'stock', 'approvals', 'fleet'],
+    'finance' => ['receivables', 'approvals', 'payroll', 'trips'],
+    'billing_collection' => ['receivables', 'approvals', 'trips', 'fleet'],
+    'payroll' => ['payroll-current', 'payroll', 'employees', 'approvals'],
+    'audit' => ['audit-records', 'audit-approvals', 'audit-workflows'],
+    'driver', 'helper' => ['trips', 'approvals'],
+    default => array_keys($summaryCards),
+};
+uksort($summaryCards, static function (string $left, string $right) use ($summaryPriority): int {
+    $leftRank = array_search($left, $summaryPriority, true);
+    $rightRank = array_search($right, $summaryPriority, true);
+    return ($leftRank === false ? PHP_INT_MAX : $leftRank) <=> ($rightRank === false ? PHP_INT_MAX : $rightRank);
+});
+$summaryCards = array_slice($summaryCards, 0, 4, true);
+
+$quickActionDefinitions = [
+    ['label' => 'Trip monitoring', 'url' => '/pages/trip_monitor.php', 'permission' => 'trips.view', 'icon' => 'bi-map'],
+    ['label' => 'Dispatch workspace', 'url' => '/pages/dispatch.php', 'permission' => 'trips.view', 'icon' => 'bi-send'],
+    ['label' => 'Dispatch planning', 'url' => '/pages/dispatch_planning.php', 'permission' => 'dispatch.instructions.manage', 'icon' => 'bi-list-check'],
+    ['label' => 'Fleet status', 'url' => '/pages/fleet_status.php', 'permission' => 'fleet.view', 'icon' => 'bi-truck'],
+    ['label' => 'Requests & approvals', 'url' => '/pages/requests.php', 'permission' => 'approvals.review', 'icon' => 'bi-inbox'],
+    ['label' => 'Maintenance', 'url' => '/pages/maintenance.php', 'permission' => 'maintenance.view', 'icon' => 'bi-tools'],
+    ['label' => 'Parts inventory', 'url' => '/pages/parts.php', 'permission' => 'parts.view', 'icon' => 'bi-box-seam'],
+    ['label' => 'Purchasing', 'url' => '/pages/purchasing.php', 'permission' => 'purchasing.view', 'icon' => 'bi-cart-check'],
+    ['label' => 'Finance', 'url' => '/pages/finance.php', 'permissions' => ['finance.funds.view', 'finance.disbursements.view', 'finance.ap.view'], 'icon' => 'bi-wallet2'],
+    ['label' => 'Payroll', 'url' => '/pages/payroll.php', 'permission' => 'payroll.view', 'icon' => 'bi-cash-stack'],
+    ['label' => 'Billing & collections', 'url' => '/pages/billing.php', 'permission' => 'billing.view', 'icon' => 'bi-receipt'],
+    ['label' => 'Audit history', 'url' => '/pages/audit_history.php', 'permission' => 'audit.view', 'icon' => 'bi-journal-text'],
+    ['label' => 'Analytics', 'url' => '/pages/analytics.php', 'permissions' => ['reports.view', 'operations.reports.view', 'maintenance.reports.view', 'billing.view'], 'icon' => 'bi-graph-up-arrow'],
+];
+$quickActions = [];
+if ($isCrew) {
+    if ($canViewAssignedTrips) {
+        $quickActions[] = [
+            'label' => 'My assigned trips',
+            'url' => '/pages/dashboard.php#home-active-trips-heading',
+            'icon' => 'bi-map',
+        ];
+    }
+} else {
+    foreach ($quickActionDefinitions as $action) {
+        $permitted = isset($action['permission'])
+            ? currentUserHasAnyPermission([$action['permission']])
+            : currentUserHasAnyPermission($action['permissions']);
+        if ($permitted) {
+            $quickActions[] = $action;
+        }
+    }
+}
+
+$auditActivity = [];
+if ($canAudit && $roleKey === 'audit') {
+    $auditActivity = $pdo->query(
+        "SELECT a.action, a.entity_type, a.entity_id, a.created_at,
+                COALESCE(e.full_name, u.username, 'System') AS actor_name
+         FROM audit_logs a
+         LEFT JOIN users u ON u.user_id = a.user_id
+         LEFT JOIN employees e ON e.employee_id = u.employee_id
+         ORDER BY a.created_at DESC, a.audit_id DESC
+         LIMIT 5"
+    )->fetchAll(PDO::FETCH_ASSOC);
+}
+
 $hour = (int)date('G');
 $greeting = $hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good evening');
 $fullName = trim((string)($_SESSION['full_name'] ?? ''));
 layoutHead('Home', APP_BASE . '/assets/css/dashboard.css');
 ?>
-<main class="container py-4">
-  <header class="mb-4">
-    <p class="text-muted mb-1"><?= htmlspecialchars($roleName) ?></p>
-    <h1 class="h3"><?= htmlspecialchars($greeting . ($fullName !== '' ? ', ' . $fullName : '')) ?></h1>
-    <p class="text-muted mb-0"><?= date('l, F j, Y') ?></p>
+<div class="fleet-dash">
+  <header class="fleet-dash-header">
+    <div>
+      <p class="fleet-dash-eyebrow">Mulawin FleetOps · <?= htmlspecialchars($roleName) ?></p>
+      <h1><?= htmlspecialchars($greeting . ($fullName !== '' ? ', ' . $fullName : '')) ?></h1>
+      <p>Here is the work and activity relevant to your access.</p>
+    </div>
+    <time datetime="<?= htmlspecialchars(date('Y-m-d')) ?>"><?= date('l, F j, Y') ?></time>
   </header>
 
-  <section class="card mb-4" aria-labelledby="home-alerts-heading">
-    <div class="card-header-custom"><h2 id="home-alerts-heading" class="card-title-custom mb-0">Alerts</h2></div>
-    <div class="card-body-custom">
+  <?php if ($summaryCards): ?>
+  <section class="fleet-dash-kpis" aria-label="Dashboard summary">
+    <?php foreach ($summaryCards as $card): ?>
+      <a class="fleet-dash-kpi" href="<?= htmlspecialchars($card['url'], ENT_QUOTES) ?>">
+        <span class="fleet-dash-kpi-icon"><i class="bi <?= htmlspecialchars($card['icon']) ?>" aria-hidden="true"></i></span>
+        <span class="fleet-dash-kpi-copy">
+          <strong><?= htmlspecialchars($card['value']) ?></strong>
+          <span><?= htmlspecialchars($card['label']) ?></span>
+          <small><?= htmlspecialchars($card['detail']) ?></small>
+        </span>
+        <i class="bi bi-arrow-up-right fleet-dash-kpi-link" aria-hidden="true"></i>
+      </a>
+    <?php endforeach; ?>
+  </section>
+  <?php endif; ?>
+
+  <section class="fleet-dash-panel fleet-dash-quick mb-4" aria-labelledby="home-quick-actions-heading">
+    <div class="fleet-dash-panel-heading">
+      <div><span class="fleet-dash-panel-icon"><i class="bi bi-lightning-charge" aria-hidden="true"></i></span><h2 id="home-quick-actions-heading">Quick Actions</h2></div>
+    </div>
+    <?php if ($quickActions): ?>
+      <nav class="fleet-dash-actions" aria-label="Quick actions">
+        <?php foreach ($quickActions as $action): ?>
+          <a href="<?= APP_BASE . htmlspecialchars($action['url'], ENT_QUOTES) ?>">
+            <i class="bi <?= htmlspecialchars($action['icon']) ?>" aria-hidden="true"></i>
+            <span><?= htmlspecialchars($action['label']) ?></span>
+            <i class="bi bi-arrow-right-short" aria-hidden="true"></i>
+          </a>
+        <?php endforeach; ?>
+      </nav>
+    <?php else: ?>
+      <p class="fleet-dash-empty">No additional shortcuts are available for your permissions.</p>
+    <?php endif; ?>
+  </section>
+
+  <section class="fleet-dash-panel fleet-dash-work mb-4" aria-labelledby="home-work-heading">
+    <div class="fleet-dash-panel-heading">
+      <div><span class="fleet-dash-panel-icon"><i class="bi bi-clipboard-check" aria-hidden="true"></i></span><h2 id="home-work-heading"><?= $roleKey === 'audit' ? 'Recent audit activity' : 'Work to Address' ?></h2></div>
+      <?php if ($roleKey === 'audit'): ?><a href="<?= APP_BASE ?>/pages/audit_history.php">View history</a><?php endif; ?>
+    </div>
+    <div class="fleet-dash-work-content">
       <?php if ($alertsUnavailable): ?>
-        <p class="alert alert-warning mb-3" role="alert">Some alerts could not be loaded. Please refresh or open the relevant workspace.</p>
+        <p class="alert alert-warning mx-3 mt-3" role="alert">Some alerts could not be loaded. Please refresh or open the relevant workspace.</p>
       <?php endif; ?>
-      <?php if (!$alerts): ?>
-        <p class="text-muted mb-0"><?= $alertsUnavailable ? 'No additional alerts are available.' : 'No actionable alerts for your access.' ?></p>
-      <?php else: ?>
-        <ul class="list-group list-group-flush">
-          <?php foreach ($alerts as $alert): ?>
-            <li class="list-group-item d-flex justify-content-between align-items-center gap-3">
-              <span>
-                <strong class="text-<?= htmlspecialchars($alert['tone']) ?>"><?= htmlspecialchars($alert['title']) ?></strong>
-                <span class="d-block small text-muted"><?= htmlspecialchars($alert['detail']) ?></span>
+      <?php if ($roleKey === 'audit'): ?>
+        <?php if (!$auditActivity): ?><p class="fleet-dash-empty">No audit activity is recorded yet.</p>
+        <?php else: ?><ul class="fleet-dash-list">
+          <?php foreach ($auditActivity as $activity): ?>
+            <li>
+              <span class="fleet-dash-list-icon"><i class="bi bi-journal-text" aria-hidden="true"></i></span>
+              <span class="fleet-dash-list-copy">
+                <strong><?= htmlspecialchars($activity['action'] . ' · ' . ($activity['entity_type'] ?? 'Record') . ' #' . ($activity['entity_id'] ?? '—')) ?></strong>
+                <span><?= htmlspecialchars($activity['actor_name'] . ' · ' . date('M j, Y g:i A', strtotime($activity['created_at']))) ?></span>
               </span>
-              <a class="btn btn-sm btn-outline-primary flex-shrink-0" href="<?= htmlspecialchars($alert['url']) ?>">Open</a>
+              <a class="fleet-dash-work-link" href="<?= APP_BASE ?>/pages/audit_history.php">Open history</a>
+            </li>
+          <?php endforeach; ?>
+        </ul><?php endif; ?>
+      <?php elseif (!$alerts): ?>
+        <p class="fleet-dash-empty"><?= $alertsUnavailable ? 'No additional alerts are available.' : 'No pending alerts for your access.' ?></p>
+      <?php else: ?>
+        <ul class="fleet-dash-list">
+          <?php foreach (array_slice($alerts, 0, 8) as $alert): ?>
+            <li>
+              <span class="fleet-dash-list-icon"><i class="bi bi-exclamation-circle" aria-hidden="true"></i></span>
+              <span class="fleet-dash-list-copy">
+                <strong><?= htmlspecialchars($alert['title']) ?></strong>
+                <span><?= htmlspecialchars($alert['detail']) ?></span>
+              </span>
+              <a class="fleet-dash-work-link" href="<?= htmlspecialchars($alert['url'], ENT_QUOTES) ?>">Open</a>
             </li>
           <?php endforeach; ?>
         </ul>
@@ -178,33 +423,30 @@ layoutHead('Home', APP_BASE . '/assets/css/dashboard.css');
     </div>
   </section>
 
-  <section class="card" aria-labelledby="home-active-trips-heading">
-    <div class="card-header-custom d-flex justify-content-between align-items-center">
-      <h2 id="home-active-trips-heading" class="card-title-custom mb-0"><?= $isCrew ? 'My Assigned Trips' : 'Active Trips' ?></h2>
-      <?php if ($canTrips && !$isCrew): ?><a href="<?= APP_BASE ?>/pages/trip_monitor.php">Trip monitoring</a><?php endif; ?>
+  <?php if ($canViewTripList): ?>
+  <section class="fleet-dash-panel fleet-dash-work" aria-labelledby="home-active-trips-heading">
+    <div class="fleet-dash-panel-heading">
+      <div><span class="fleet-dash-panel-icon"><i class="bi bi-map" aria-hidden="true"></i></span><h2 id="home-active-trips-heading"><?= $isCrew ? 'My Assigned Trips' : 'Active Trips' ?></h2></div>
+      <?php if (!$isCrew): ?><a href="<?= APP_BASE ?>/pages/trip_monitor.php">Trip monitoring</a><?php endif; ?>
     </div>
-    <div class="table-responsive">
-      <table class="table align-middle mb-0">
-        <thead><tr><th>Trip</th><th>Truck</th><th>Route</th><th>Status</th><th>Expected arrival</th></tr></thead>
-        <tbody>
-          <?php if ($isCrew && !$employee): ?>
-            <tr><td colspan="5" class="text-center text-muted py-4">An active employee profile must be linked to your account before assigned trips can be shown.</td></tr>
-          <?php elseif (!$canViewTripList): ?>
-            <tr><td colspan="5" class="text-center text-muted py-4">Trip access is not assigned to your account.</td></tr>
-          <?php elseif (!$activeTrips): ?>
-            <tr><td colspan="5" class="text-center text-muted py-4"><?= $isCrew ? 'No approved, upcoming, or active trips are assigned to you.' : 'No active trips in your permitted scope.' ?></td></tr>
-          <?php else: foreach ($activeTrips as $trip): ?>
-            <tr>
-              <td><?= htmlspecialchars($trip['trip_number']) ?></td>
-              <td><?= htmlspecialchars($trip['plate_number'] ?? '—') ?></td>
-              <td><?= htmlspecialchars($trip['origin'] . ' → ' . $trip['destination']) ?></td>
-              <td><?= htmlspecialchars($trip['status']) ?><?= (int)$trip['is_late'] === 1 ? ' · Past ETA' : '' ?></td>
-              <td><?= $trip['expected_arrival'] ? htmlspecialchars(date('M j, Y g:i A', strtotime($trip['expected_arrival']))) : '—' ?></td>
-            </tr>
-          <?php endforeach; endif; ?>
-        </tbody>
-      </table>
-    </div>
+    <?php if ($isCrew && !$employee): ?>
+      <p class="fleet-dash-empty">An active employee profile must be linked to your account before assigned trips can be shown.</p>
+    <?php elseif (!$activeTrips): ?>
+      <p class="fleet-dash-empty"><?= $isCrew ? 'No approved, upcoming, or active trips are assigned to you.' : 'No active trips in your permitted scope.' ?></p>
+    <?php else: ?>
+      <ul class="fleet-dash-trips">
+        <?php foreach ($activeTrips as $trip): ?>
+          <li>
+            <span class="fleet-dash-trip-ref"><?= htmlspecialchars($trip['trip_number']) ?></span>
+            <span class="fleet-dash-trip-route"><?= htmlspecialchars($trip['origin'] . ' → ' . $trip['destination']) ?></span>
+            <span class="fleet-dash-trip-detail"><?= htmlspecialchars($trip['plate_number'] ?? '—') ?> · <?= htmlspecialchars($trip['status']) ?><?= (int)$trip['is_late'] === 1 ? ' · Past ETA' : '' ?></span>
+            <span class="fleet-dash-trip-detail"><?= $trip['expected_arrival'] ? htmlspecialchars(date('M j, g:i A', strtotime($trip['expected_arrival']))) : 'No ETA' ?></span>
+            <?php if ($isCrew): ?><a class="fleet-dash-work-link" href="<?= APP_BASE ?>/pages/trip_workflow.php?trip_id=<?= (int)$trip['trip_id'] ?>">Open trip</a><?php endif; ?>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+    <?php endif; ?>
   </section>
-</main>
+  <?php endif; ?>
+</div>
 <?php layoutFoot(); ?>

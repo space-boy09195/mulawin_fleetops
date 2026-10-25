@@ -578,6 +578,104 @@ textarea {
   color: #a61b1b;
 }
 
+.profile-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  margin: 0;
+  font-size: 0.84rem;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+/* Notification bell list */
+.notif-menu {
+  width: 340px;
+  max-width: 92vw;
+}
+
+.notif-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.notif-clear-btn {
+  background: none;
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.notif-clear-btn:hover:not(:disabled) {
+  background: var(--card-border);
+  color: var(--text-primary);
+}
+
+.notif-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.notif-menu-body {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.notif-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 12px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--card-border);
+}
+
+.notif-group-count {
+  display: inline-block;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  text-align: center;
+}
+
+.notif-item {
+  white-space: normal;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--card-border);
+  color: var(--text-secondary);
+}
+
+.notif-item.unread {
+  color: var(--text-primary);
+  border-left: 3px solid var(--danger);
+}
+
+.notif-item:not(.unread) strong {
+  font-weight: 500;
+}
+
+.notif-time {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
 /* Notification bell */
 .notif-btn {
   position: relative;
@@ -962,7 +1060,7 @@ textarea {
 }
 
 /* Analytics keeps its title and filters as an open page header, not a card. */
-.an-page .an-header {
+.page-content .an-page .an-header {
   background: transparent !important;
   border: 0 !important;
   box-shadow: none !important;

@@ -156,14 +156,16 @@ function buildSidebarNav(): string {
 }
 
 // ---- Fetch latest active announcements for the current audience (max 3) ----
+// Latest notifications of every type, read and unread, newest first.
 function getLatestNotifications(): array {
     try {
         $stmt = getDBConnection()->prepare("
-            SELECT notification_id, title, message, entity_type, entity_id, created_at
+            SELECT notification_id, notification_type, title, message, entity_type, entity_id,
+                   is_read, created_at
             FROM notifications
-            WHERE user_id = ? AND is_read = 0
-            ORDER BY created_at DESC
-            LIMIT 5
+            WHERE user_id = ?
+            ORDER BY created_at DESC, notification_id DESC
+            LIMIT 50
         ");
         $stmt->execute([currentUserId()]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -171,6 +173,33 @@ function getLatestNotifications(): array {
         error_log('Unable to load notifications: ' . $e->getMessage());
         return [];
     }
+}
+
+function getUnreadNotificationCount(): int {
+    try {
+        $stmt = getDBConnection()->prepare('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0');
+        $stmt->execute([currentUserId()]);
+        return (int)$stmt->fetchColumn();
+    } catch (PDOException $e) {
+        error_log('Unable to count notifications: ' . $e->getMessage());
+        return 0;
+    }
+}
+
+// Bell group for a notification, used to keep the list from being a flat mess.
+function notificationCategory(array $n): string {
+    $type = (string)($n['notification_type'] ?? '');
+    if ($type === 'reminder' || str_starts_with($type, 'automation:')) {
+        return 'Reminders';
+    }
+    return match ((string)($n['entity_type'] ?? '')) {
+        'approval_request', 'route' => 'Approvals',
+        'dispatch_request', 'trip', 'trip_incident', 'trip_completion' => 'Trips & Dispatch',
+        'truck', 'truck_document', 'maintenance' => 'Fleet & Maintenance',
+        'billing', 'fund_request', 'payment_voucher', 'purchase_request' => 'Billing & Finance',
+        'document', 'employee' => 'Documents & Staff',
+        default => 'Other',
+    };
 }
 
 // Announcement audience for a role key: operations, maintenance or accounting.
@@ -250,6 +279,8 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     $homePath    = parse_url(roleDashboardUrl(), PHP_URL_PATH) ?: '';
     $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '';
     $homeActive  = $homePath !== '' && $homePath === $currentPath ? ' active' : '';
+    // On the role's home page the header always reads "Dashboard".
+    $breadcrumbTitle = $homeActive !== '' ? 'Dashboard' : $pageTitle;
     $base        = APP_BASE;
     $csrfName    = htmlspecialchars(CSRF_TOKEN_NAME);
     $cssTag      = $extraCss ? "<link rel=\"stylesheet\" href=\"{$extraCss}\">" : '';
@@ -265,22 +296,36 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
     $badgeClass     = $unreadCount > 0 ? '' : 'd-none';
     $isHead         = isAdmin() ? 'true' : 'false';
     $notifications  = getLatestNotifications();
-    $notificationCount = count($notifications);
-    $notificationItems = '';
+    $notificationCount = getUnreadNotificationCount();
+    $notificationGroups = [];
     foreach ($notifications as $notification) {
-        $notificationItems .= '<a class="dropdown-item small" href="'
-            . htmlspecialchars(notificationLinkFor($notification['entity_type'], $notification['entity_id']) ?? '#')
-            . '"><strong>' . htmlspecialchars($notification['title']) . '</strong><br>'
-            . htmlspecialchars($notification['message']) . '</a>';
+        $notificationGroups[notificationCategory($notification)][] = $notification;
+    }
+    $notificationItems = '';
+    foreach ($notificationGroups as $groupName => $groupItems) {
+        $groupUnread = count(array_filter($groupItems, static fn(array $n): bool => !(int)$n['is_read']));
+        $notificationItems .= '<div class="notif-group-title">' . htmlspecialchars($groupName)
+            . ($groupUnread ? ' <span class="notif-group-count">' . $groupUnread . '</span>' : '') . '</div>';
+        foreach ($groupItems as $notification) {
+            $isUnread = !(int)$notification['is_read'];
+            $notificationItems .= '<a class="dropdown-item small notif-item' . ($isUnread ? ' unread' : '') . '" href="'
+                . htmlspecialchars(notificationLinkFor($notification['entity_type'], $notification['entity_id']) ?? '#')
+                . '"><strong>' . htmlspecialchars($notification['title']) . '</strong><br>'
+                . htmlspecialchars($notification['message'])
+                . '<span class="notif-time">' . htmlspecialchars(date('M j, g:i A', strtotime($notification['created_at']))) . '</span></a>';
+        }
     }
     $notificationHtml = '<div class="dropdown">'
         . '<button class="notif-btn" type="button" title="Notifications" data-bs-toggle="dropdown">'
-        . '<i class="bi bi-bell"></i><span class="notif-badge ' . ($notificationCount ? '' : 'd-none') . '">'
+        . '<i class="bi bi-bell"></i><span class="notif-badge ' . ($notificationCount ? '' : 'd-none') . '" id="notifBellBadge">'
         . $notificationCount . '</span></button>'
-        . '<div class="dropdown-menu dropdown-menu-end p-2" style="min-width:300px;">'
-        . '<div class="fw-semibold px-2 py-1">Notifications</div>'
-        . ($notificationItems ?: '<div class="text-muted small px-2 py-2">No new notifications.</div>')
-        . '</div></div>';
+        . '<div class="dropdown-menu dropdown-menu-end p-0 notif-menu">'
+        . '<div class="notif-menu-head"><span class="fw-semibold">Notifications</span>'
+        . '<button type="button" class="notif-clear-btn" data-notif-clear title="Mark all as read (nothing is deleted)"'
+        . ($notificationCount ? '' : ' disabled') . '>Clear</button></div>'
+        . '<div class="notif-menu-body">'
+        . ($notificationItems ?: '<div class="text-muted small px-3 py-3">No notifications.</div>')
+        . '</div></div></div>';
     $profileHtml = '<div class="dropdown profile-dropdown">'
         . '<button class="profile-trigger" type="button" data-bs-toggle="dropdown"'
         . ' aria-expanded="false" aria-label="Account menu for ' . $fullName . '">'
@@ -290,6 +335,11 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
         . '<div class="dropdown-menu dropdown-menu-end profile-menu">'
         . '<div class="profile-menu-user"><span class="profile-menu-name">' . $fullName . '</span>'
         . '<span class="profile-menu-role">' . $roleName . '</span></div>'
+        . '<div class="dropdown-divider"></div>'
+        . '<label class="profile-setting" for="autoLogoutToggle" title="Sign out automatically after ' . (int)round(SESSION_TIMEOUT / 60) . ' minutes of inactivity">'
+        . '<span><i class="bi bi-clock-history" aria-hidden="true"></i> Auto log out when inactive</span>'
+        . '<span class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" role="switch" id="autoLogoutToggle" data-auto-logout-toggle'
+        . ((($_COOKIE['fleetops_auto_logout'] ?? '') === '1') ? ' checked' : '') . '></span></label>'
         . '<div class="dropdown-divider"></div>'
         . '<form method="post" action="' . htmlspecialchars($base . '/auth/login_handler.php') . '"'
         . ' onsubmit="return confirm(\'Log out of Mulawin FleetOps?\')">'
@@ -397,7 +447,7 @@ function layoutHead(string $pageTitle = 'Mulawin FleetOps', string $extraCss = '
           <i class="bi bi-house"></i>
         </a>
         <i class="bi bi-chevron-right"></i>
-        <span class="bc-current">{$pageTitle}</span>
+        <span class="bc-current">{$breadcrumbTitle}</span>
       </div>
 
       <div class="topnav-actions">

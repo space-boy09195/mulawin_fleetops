@@ -532,3 +532,38 @@ async function deleteAnnouncement(id) {
     }
   });
 })();
+
+// Account menu: per-browser auto log out preference (read by includes/session.php).
+document.addEventListener('change', (event) => {
+  const toggle = event.target.closest?.('[data-auto-logout-toggle]');
+  if (!toggle) return;
+  const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = 'fleetops_auto_logout=' + (toggle.checked ? '1' : '0')
+    + '; path=/; max-age=31536000; SameSite=Strict' + secure;
+});
+
+// Notification bell: "Clear" marks everything read without deleting it.
+document.addEventListener('click', async (event) => {
+  const btn = event.target.closest?.('[data-notif-clear]');
+  if (!btn || btn.disabled) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const fd = new FormData();
+  fd.append('action', 'clear');
+  fd.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
+  try {
+    const res = await fetch(window.APP_BASE + '/ajax/notifications_handler.php', {
+      method: 'POST',
+      body: fd,
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    });
+    const result = await res.json();
+    if (!result.success) return;
+    document.querySelectorAll('.notif-item.unread').forEach((el) => el.classList.remove('unread'));
+    document.querySelectorAll('.notif-group-count').forEach((el) => el.remove());
+    document.getElementById('notifBellBadge')?.classList.add('d-none');
+    btn.disabled = true;
+  } catch (e) {
+    // Leave the list unchanged; the user can retry.
+  }
+});

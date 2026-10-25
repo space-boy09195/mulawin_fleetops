@@ -360,7 +360,8 @@ try {
 
 // ---- Redirect to role-specific dashboard -------------------
 $defaultDashboard = dashboardUrlForRoleKey($user['role_key'] ?? null);
-$destination = $returnTo ?? $defaultDashboard;
+// Logging in always lands on the role's home page, never the last page visited.
+$destination = $defaultDashboard;
 unset($_SESSION['return_to']);
 
 header('Location: ' . $destination);

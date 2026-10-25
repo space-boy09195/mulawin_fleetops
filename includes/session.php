@@ -44,20 +44,17 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// ---- Idle Timeout ------------------------------------------
-if (isset($_SESSION['last_activity'])) {
+// ---- Idle Timeout (opt-in) ---------------------------------
+// Auto logout is a per-browser preference toggled from the account menu.
+// When off (default) an idle session simply stays signed in.
+if (($_COOKIE['fleetops_auto_logout'] ?? '') === '1' && isset($_SESSION['last_activity'])) {
     if ((time() - $_SESSION['last_activity']) > SESSION_TIMEOUT) {
-        $returnTo = validatedLocalReturnPath($_SERVER['REQUEST_URI'] ?? null);
         session_unset();
         session_destroy();
         if (isJsonRequest()) {
             sendJsonAccessResponse(401, 'Your session expired. Sign in again and retry.');
         }
-        $loginUrl = APP_BASE . '/login.php?reason=timeout';
-        if ($returnTo !== null) {
-            $loginUrl .= '&return_to=' . rawurlencode($returnTo);
-        }
-        header('Location: ' . $loginUrl);
+        header('Location: ' . APP_BASE . '/login.php?reason=timeout');
         exit;
     }
 }

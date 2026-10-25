@@ -5,14 +5,13 @@
 require_once __DIR__ . '/includes/session.php';
 require_once __DIR__ . '/includes/csrf.php';
 
-$returnTo = validatedLocalReturnPath($_GET['return_to'] ?? $_SESSION['return_to'] ?? null);
-if ($returnTo !== null) {
-    $_SESSION['return_to'] = $returnTo;
-}
+// Login always lands on the role's home page; return_to is intentionally ignored.
+$returnTo = null;
+unset($_SESSION['return_to']);
 
 // Already logged in? Send to dashboard
 if (isLoggedIn()) {
-    $destination = $returnTo ?? dashboardUrlForRole((string)($_SESSION['role_name'] ?? ''), currentRoleId());
+    $destination = dashboardUrlForRole((string)($_SESSION['role_name'] ?? ''), currentRoleId());
     unset($_SESSION['return_to']);
     header('Location: ' . $destination);
     exit;

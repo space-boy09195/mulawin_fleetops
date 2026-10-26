@@ -26,6 +26,7 @@ if (!$trip) {
     http_response_code(404);
     exit('Trip not found.');
 }
+requireTripInDispatcherScope($trip['shift'], $trip['truck_type']);
 
 // Trip documents through document_links (target).
 $docsStmt = $pdo->prepare("

@@ -131,16 +131,22 @@ function storeUploadedDocument(
  * Visibility scopes the signed-in user may see, or null for every scope.
  * Unchanged rule: Admin pages (legacy.role.1) see all; the legacy page
  * grants add operations / maintenance / accounting; everyone with
- * documents.view sees 'all'.
+ * documents.view sees 'all'. The current roles hold no legacy grants, so
+ * each scope also follows the permission of the role that needs it:
+ *   operations   Operations Head (operations.dashboard.view) and Billing
+ *                and Collection (billing.manage: delivery receipts and
+ *                waybills attached at trip completion support billing)
+ *   maintenance  maintenance.view (inspection photos, maintenance files)
+ *   accounting   finance.view or billing.manage
  */
 function documentVisibilityScopesForCurrentUser(): ?array {
     if (currentUserHasAnyPermission(['legacy.role.1'])) {
         return null;
     }
     $scopes = ['all'];
-    if (currentUserHasAnyPermission(['legacy.role.2'])) $scopes[] = 'operations';
-    if (currentUserHasAnyPermission(['legacy.role.3'])) $scopes[] = 'maintenance';
-    if (currentUserHasAnyPermission(['legacy.role.4'])) $scopes[] = 'accounting';
+    if (currentUserHasAnyPermission(['legacy.role.2', 'operations.dashboard.view', 'billing.manage'])) $scopes[] = 'operations';
+    if (currentUserHasAnyPermission(['legacy.role.3', 'maintenance.view'])) $scopes[] = 'maintenance';
+    if (currentUserHasAnyPermission(['legacy.role.4', 'finance.view', 'billing.manage'])) $scopes[] = 'accounting';
     return $scopes;
 }
 

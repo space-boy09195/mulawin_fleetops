@@ -86,7 +86,26 @@ function validateDispatchInstruction(PDO $pdo, array $entry, string $label): arr
         throw new InvalidArgumentException("Select an active, approved route for {$label}.");
     }
 
+    // Optional client booking / nomination reference (container trips). It
+    // is kept in client_bookings.booking_reference; blank = INS-<id>.
+    $clientReference = trim((string)($entry['client_booking_reference'] ?? ''));
+    if ($clientReference !== '') {
+        if (mb_strlen($clientReference) > 100 || !preg_match('/^[\p{L}\p{N} ._\/#-]+$/u', $clientReference)
+            || preg_match('/^(INS|TMP)-/i', $clientReference)) {
+            throw new InvalidArgumentException("The client booking reference for {$label} must be up to 100 letters, numbers, spaces or . _ / # - characters.");
+        }
+        if ($truckType !== 'Container') {
+            throw new InvalidArgumentException("A client booking reference applies to container trips ({$label}).");
+        }
+        $duplicate = $pdo->prepare('SELECT 1 FROM client_bookings WHERE booking_reference = ? LIMIT 1');
+        $duplicate->execute([$clientReference]);
+        if ($duplicate->fetchColumn()) {
+            throw new InvalidArgumentException("The client booking reference for {$label} is already recorded.");
+        }
+    }
+
     return [
+        'client_reference' => $clientReference === '' ? null : $clientReference,
         'client_id'    => $clientId,
         'route_id'     => $routeId,
         'origin'       => $routeRow['origin'],
@@ -124,8 +143,9 @@ function insertDispatchInstruction(PDO $pdo, array $entry): int {
     ]);
     $bookingId = (int)$pdo->lastInsertId();
     $pdo->prepare('UPDATE client_bookings SET booking_reference = ? WHERE booking_id = ?')
-        ->execute([sprintf('INS-%06d', $bookingId), $bookingId]);
+        ->execute([$entry['client_reference'] ?? sprintf('INS-%06d', $bookingId), $bookingId]);
     auditLog('CREATE_DISPATCH_INSTRUCTION', 'client_bookings', $bookingId, null, [
+        'booking_reference' => $entry['client_reference'] ?? sprintf('INS-%06d', $bookingId),
         'client_id'    => $entry['client_id'],
         'route_id'     => $entry['route_id'],
         'truck_type'   => $entry['truck_type'],

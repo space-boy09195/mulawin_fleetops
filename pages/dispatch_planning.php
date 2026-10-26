@@ -116,6 +116,11 @@ layoutHead('Dispatch Planning');
         <label class="form-label" for="instructionUnits">Unit Count (optional)</label>
         <input class="form-control" type="number" min="1" max="999999" step="1" id="instructionUnits">
       </div>
+      <div class="col-md-8">
+        <label class="form-label" for="instructionBookingReference">Client Booking / Nomination Reference (optional, container trips)</label>
+        <input class="form-control" type="text" maxlength="100" id="instructionBookingReference"
+               placeholder="Leave blank to generate an instruction number">
+      </div>
       <div class="col-12">
         <label class="form-label" for="instructionNotes">Instructions for Dispatcher (optional)</label>
         <textarea class="form-control" id="instructionNotes" rows="3" maxlength="1000"
@@ -202,6 +207,11 @@ layoutHead('Dispatch Planning');
       <div class="col-md-4">
         <label class="form-label">Unit Count (optional)</label>
         <input class="form-control batch-unit-count" type="number" min="1" max="999999" step="1">
+      </div>
+      <div class="col-md-8">
+        <label class="form-label">Client Booking / Nomination Reference (optional, container trips)</label>
+        <input class="form-control batch-booking-reference" type="text" maxlength="100"
+               placeholder="Leave blank to generate an instruction number">
       </div>
       <div class="col-12">
         <label class="form-label">Instructions for Dispatcher (optional)</label>

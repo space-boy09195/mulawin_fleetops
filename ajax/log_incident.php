@@ -15,8 +15,25 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
 require_once __DIR__ . '/../includes/workflow_events.php';
+require_once __DIR__ . '/../includes/dispatcher_scope.php';
 
 header('Content-Type: application/json');
+
+// A dispatcher may report or resolve problems only on trips in their
+// assigned truck types and shift (same 403 as the other trip endpoints).
+function enforceIncidentTripScope(PDO $pdo, int $tripId): void {
+    $stmt = $pdo->prepare(
+        'SELECT t.shift, tr.truck_type FROM trips t
+         LEFT JOIN trucks tr ON tr.truck_id = t.truck_id
+         WHERE t.trip_id = ?'
+    );
+    $stmt->execute([$tripId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['shift' => '', 'truck_type' => ''];
+    $violation = dispatcherScopeViolation((string)$row['shift'], (string)$row['truck_type']);
+    if ($violation !== null) {
+        jsonFail($violation, 403);
+    }
+}
 
 requireAnyPermission(['incidents.manage', 'legacy.role.3']);
 requirePostMethod();
@@ -49,6 +66,7 @@ if ($action === 'log') {
 
     // Verify trip exists and is still active
     $trip = findOrFail($pdo, 'trips', 'trip_id', $tripId, 'Trip not found.');
+    enforceIncidentTripScope($pdo, $tripId);
 
     if (in_array($trip['status'], TRIP_TERMINAL_STATUSES, true) || $trip['status'] === 'Pending Approval') {
         jsonFail('Problems can only be reported against active trips.');
@@ -89,6 +107,7 @@ if ($action === 'resolve') {
     $resolutionNotes = optionalString('resolution_notes', null, 1000);
 
     $incident = findOrFail($pdo, 'trip_incidents', 'incident_id', $incidentId, 'Incident not found.');
+    enforceIncidentTripScope($pdo, (int)$incident['trip_id']);
 
     if (!empty($incident['resolved_at'])) {
         jsonFail('This incident is already resolved.');

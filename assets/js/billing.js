@@ -127,12 +127,13 @@
     setBusy(submitBillingBtn, bilBtnSpinner, false);
   });
 
-  // Choosing a trip fills its client and the charge suggested by the
-  // client's rate card (both stay editable; the server re-validates).
+  // Choosing a trip always sets its client (read-only; the server checks it
+  // against the trip) and fills the charge suggested by the client's rate
+  // card when the amount is empty (the amount stays editable).
   bilTripId?.addEventListener('change', () => {
     const option = bilTripId.options[bilTripId.selectedIndex];
-    if (bilClientName && !bilClientName.value && option?.dataset.client) {
-      bilClientName.value = option.dataset.client;
+    if (bilClientName) {
+      bilClientName.value = option?.dataset.client ?? '';
     }
     if (!bilTripId.value || !bilAmount || bilAmount.value) return;
     postAjax({ action: 'suggest_amount', trip_id: bilTripId.value })
@@ -172,7 +173,7 @@
       return;
     }
     if (!clientName || !Array.from(document.querySelectorAll('#billingClientsList option')).some(option => option.value === clientName)) {
-      showAlert(billingFormAlert, 'Select a registered active client.');
+      showAlert(billingFormAlert, "The selected trip's client is not a registered active client.");
       return;
     }
     if (!window.confirm('Create this billing record?')) return;
@@ -315,14 +316,20 @@
     const row = billingsTbody.querySelector(`tr[data-id="${billingId}"]`);
     if (!row) { window.softReload(); return; }
 
+    // Same display labels as the page: a past-due billing stays Overdue
+    // until fully paid; 'Partially Paid' shows as Partial.
+    const displayStatus = newStatus === 'Paid' ? 'Paid'
+      : row.dataset.status === 'Overdue' ? 'Overdue'
+      : newStatus === 'Partially Paid' ? 'Partial' : newStatus;
+
     // Update data-status for filter
-    row.dataset.status = newStatus;
+    row.dataset.status = displayStatus;
 
     // Status badge
     const badge = row.querySelector('.bil-status-badge');
     if (badge) {
-      badge.className   = `bil-status-badge bil-status-${newStatus.toLowerCase()}`;
-      badge.textContent = newStatus;
+      badge.className   = `bil-status-badge bil-status-${displayStatus === 'Overdue' ? 'unpaid' : displayStatus.toLowerCase()}`;
+      badge.textContent = displayStatus;
     }
 
     // Balance cell

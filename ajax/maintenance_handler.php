@@ -18,6 +18,7 @@ require_once __DIR__ . '/../includes/db_helpers.php';
 require_once __DIR__ . '/../includes/truck_status_history.php';
 require_once __DIR__ . '/../includes/trip_workflow.php';
 require_once __DIR__ . '/../includes/inspections.php';
+require_once __DIR__ . '/../includes/document_upload.php';
 
 header('Content-Type: application/json');
 
@@ -325,11 +326,28 @@ if ($action === 'create_work_order') {
 
 if ($action === 'update_work_order') {
     $workOrderId = requiredInt('work_order_id', 'Work order', 1);
-    $nextStatus = requiredEnum('status', ['In Progress', 'Completed', 'Cancelled'], 'Work order status');
+    $nextStatus = requiredEnum('status', ['In Progress', 'Waiting for Parts', 'Completed', 'Cancelled'], 'Work order status');
     $closureNotes = optionalString('closure_notes', null, 1000);
-    if ($nextStatus !== 'In Progress' && $closureNotes === null) {
+    if (in_array($nextStatus, ['Completed', 'Cancelled'], true) && $closureNotes === null) {
         jsonFail('Add closure notes before completing or cancelling this work order.');
     }
+    // Optional labour / other cost (replaces the recorded value; parts cost
+    // comes from issued parts) and an optional finding for the job.
+    $costInputs = [];
+    foreach (['labor_cost' => 'Labour cost', 'other_cost' => 'Other cost'] as $costField => $costLabel) {
+        $rawCost = trim((string)($_POST[$costField] ?? ''));
+        if ($rawCost === '') {
+            continue;
+        }
+        if (!preg_match('/^\d{1,12}(?:\.\d{1,2})?$/', $rawCost)) {
+            jsonFail($costLabel . ' must be zero or a positive amount with at most two decimal places.');
+        }
+        $costInputs[$costField] = round((float)$rawCost, 2);
+    }
+    $findingText = optionalString('finding', null, 1000);
+    $findingSeverity = $findingText === null
+        ? null
+        : requiredEnum('finding_severity', ['Low', 'Medium', 'High', 'Critical'], 'Finding severity');
 
     try {
         $pdo->beginTransaction();
@@ -362,16 +380,21 @@ if ($action === 'update_work_order') {
             $pdo->rollBack();
             jsonFail('This repair work order is already closed.', 409);
         }
-        if ($nextStatus === 'In Progress' && $workOrder['status'] !== 'Reported') {
+        // Open (Reported or Scheduled, shown as Open) or Waiting for Parts.
+        if ($nextStatus === 'In Progress' && !in_array($workOrder['status'], ['Reported', 'Scheduled', 'Waiting for Parts'], true)) {
             $pdo->rollBack();
-            jsonFail('Only an open work order can be started.', 409);
+            jsonFail('Only an open work order, or one waiting for parts, can be started.', 409);
+        }
+        if ($nextStatus === 'Waiting for Parts' && $workOrder['status'] !== 'In Progress') {
+            $pdo->rollBack();
+            jsonFail('Only a work order in progress can be put on hold for parts.', 409);
         }
         $closed = $nextStatus === 'Completed' || $nextStatus === 'Cancelled';
-        if ($nextStatus === 'In Progress') {
+        if ($nextStatus === 'In Progress' || $nextStatus === 'Waiting for Parts') {
             $pdo->prepare(
-                "UPDATE maintenance_records SET status = 'In Progress', start_date = COALESCE(start_date, CURDATE())
+                "UPDATE maintenance_records SET status = ?, start_date = COALESCE(start_date, CURDATE())
                  WHERE maintenance_id = ?"
-            )->execute([$workOrderId]);
+            )->execute([$nextStatus, $workOrderId]);
         } else {
             $pdo->prepare(
                 "UPDATE maintenance_records
@@ -380,6 +403,20 @@ if ($action === 'update_work_order') {
                      completed_by = IF(? = 'Completed', ?, completed_by)
                  WHERE maintenance_id = ?"
             )->execute([$nextStatus, $closureNotes, $nextStatus, $nextStatus, currentUserId(), $workOrderId]);
+        }
+        foreach ($costInputs as $costField => $costValue) {
+            // $costField is one of the two fixed column names above.
+            $pdo->prepare(
+                "UPDATE maintenance_records
+                 SET {$costField} = ?, total_cost = labor_cost + parts_cost + other_cost
+                 WHERE maintenance_id = ?"
+            )->execute([$costValue, $workOrderId]);
+        }
+        if ($findingText !== null) {
+            $pdo->prepare(
+                'INSERT INTO maintenance_findings (maintenance_id, finding_type, description, severity)
+                 VALUES (?, ?, ?, ?)'
+            )->execute([$workOrderId, 'Work order finding', $findingText, $findingSeverity]);
         }
 
         if ($nextStatus === 'Completed'
@@ -393,13 +430,17 @@ if ($action === 'update_work_order') {
         ], [
             'status' => $nextStatus,
             'closure_notes' => $closed ? $closureNotes : null,
+            'costs' => $costInputs ?: null,
+            'finding' => $findingText,
         ]);
         $pdo->commit();
         jsonOk([], $nextStatus === 'Completed'
             ? 'Work order completed. Truck availability was updated when safe.'
             : ($nextStatus === 'Cancelled'
                 ? 'Work order cancelled. The truck remains under maintenance pending a safety review.'
-                : 'Work order marked in progress.'));
+                : ($nextStatus === 'Waiting for Parts'
+                    ? 'Work order marked as waiting for parts.'
+                    : 'Work order marked in progress.')));
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         if ($e instanceof DomainException) {
@@ -719,6 +760,32 @@ if ($action === 'save_inspection') {
         }
     }
 
+    // Optional photos of a trip (departure / return) inspection, stored as
+    // files + inspection_photos (and listed with the trip's documents).
+    // Every file is checked before anything is written.
+    $photoUploads = [];
+    $photoFiles = $_FILES['inspection_photos'] ?? null;
+    if ($stage !== 'General' && is_array($photoFiles) && is_array($photoFiles['name'] ?? null)) {
+        if (count($photoFiles['name']) > 8) {
+            jsonFail('Attach up to 8 inspection photos.');
+        }
+        foreach (array_keys($photoFiles['name']) as $index) {
+            $file = [];
+            foreach (['name', 'tmp_name', 'error', 'size'] as $key) {
+                $file[$key] = $photoFiles[$key][$index] ?? null;
+            }
+            if ($file['error'] === null || $file['error'] === UPLOAD_ERR_NO_FILE) {
+                continue;
+            }
+            try {
+                $photoUploads[] = inspectTruckImageUpload($file) + ['tmp_name' => $file['tmp_name']];
+            } catch (InvalidArgumentException $e) {
+                jsonFail('Inspection photo: ' . $e->getMessage());
+            }
+        }
+    }
+    $storedPhotoPaths = [];
+
     $timerToken = (string)($_POST['timer_token'] ?? '');
     $timerTarget = $tripId ?? $truckId;
     $timerStartedAt = null;
@@ -803,6 +870,24 @@ if ($action === 'save_inspection') {
                 $timerStartedAt,
                 currentUserId()
             );
+            $photoInsert = $pdo->prepare(
+                'INSERT INTO inspection_photos (inspection_id, file_id, photo_type)
+                 SELECT ?, file_id, ? FROM documents WHERE document_id = ?'
+            );
+            foreach ($photoUploads as $photo) {
+                $storedName = bin2hex(random_bytes(16)) . '.' . $photo['extension'];
+                $destination = documentStorageDirectory() . DIRECTORY_SEPARATOR . $storedName;
+                if (!move_uploaded_file($photo['tmp_name'], $destination)) {
+                    throw new RuntimeException('Inspection photo could not be saved.');
+                }
+                $storedPhotoPaths[] = $destination;
+                $documentId = recordStoredDocument(
+                    $pdo, $photo, $storedName, $destination, 'Maintenance Record',
+                    ($stage === 'Departure' ? 'Departure' : 'Return') . ' inspection photo',
+                    'maintenance', currentUserId(), null, [['trip', $tripId]]
+                );
+                $photoInsert->execute([$inspectionId, $stage === 'Departure' ? 'Departure' : 'Arrival', $documentId]);
+            }
             if ($stage === 'Departure') {
                 recordPreDepartureReadyIfComplete($pdo, $tripId, currentUserId());
             } elseif (tripArrivalInspectionComplete($pdo, $tripId)) {
@@ -825,11 +910,15 @@ if ($action === 'save_inspection') {
             'truck_id' => $truckId,
             'trip_id' => $tripId,
             'inspection_stage' => $stage,
+            'photos' => count($photoUploads),
         ]);
         $pdo->commit();
         jsonOk([], 'Vehicle inspection saved.');
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
+        foreach ($storedPhotoPaths as $storedPath) {
+            if (is_file($storedPath)) unlink($storedPath);
+        }
         if ($timerStartedAt !== null) {
             restoreInspectionFormTimer($timerToken, $formType, $timerTarget, $timerStartedAt);
         }

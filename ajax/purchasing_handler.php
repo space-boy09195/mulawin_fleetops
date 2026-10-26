@@ -53,6 +53,55 @@ if ($action === 'create_supplier') {
     }
 }
 
+// Edit or deactivate a supplier. Suppliers are never deleted: an inactive
+// supplier keeps its purchase orders and parts and is only left out of new
+// purchase orders.
+if ($action === 'edit_supplier') {
+    requirePermission('purchasing.manage');
+    $supplierId = requiredInt('supplier_id', 'Supplier', 1);
+    $name = requiredString('supplier_name', 'Supplier name', 180);
+    $contact = optionalString('contact_person', null, 150);
+    $phone = optionalString('phone', null, 50);
+    $email = optionalString('email', null, 150);
+    $status = requiredEnum('status', ['Active', 'Inactive'], 'Supplier status');
+    if ($email !== null && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        jsonFail('Enter a valid supplier email.');
+    }
+    try {
+        $pdo->beginTransaction();
+        $old = $pdo->prepare(
+            'SELECT supplier_name, contact_person, contact_number, email, status
+             FROM suppliers WHERE supplier_id = ? FOR UPDATE'
+        );
+        $old->execute([$supplierId]);
+        $oldData = $old->fetch(PDO::FETCH_ASSOC);
+        if (!$oldData) {
+            $pdo->rollBack();
+            jsonFail('Supplier not found.', 404);
+        }
+        $duplicate = $pdo->prepare('SELECT 1 FROM suppliers WHERE supplier_name = ? AND supplier_id <> ? LIMIT 1');
+        $duplicate->execute([$name, $supplierId]);
+        if ($duplicate->fetchColumn()) {
+            $pdo->rollBack();
+            jsonFail('A supplier with that name already exists.', 409);
+        }
+        $pdo->prepare(
+            'UPDATE suppliers SET supplier_name = ?, contact_person = ?, contact_number = ?, email = ?, status = ?
+             WHERE supplier_id = ?'
+        )->execute([$name, $contact, $phone, $email, $status, $supplierId]);
+        auditLog('UPDATE', 'suppliers', $supplierId, $oldData, [
+            'supplier_name' => $name, 'contact_person' => $contact, 'contact_number' => $phone,
+            'email' => $email, 'status' => $status,
+        ]);
+        $pdo->commit();
+        jsonOk([], $status === 'Active' ? 'Supplier updated.' : 'Supplier updated and deactivated.');
+    } catch (PDOException $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('purchasing_handler/edit_supplier: ' . $e->getMessage());
+        jsonFail('Could not update supplier.', 500);
+    }
+}
+
 if ($action === 'create_order') {
     requirePermission('purchasing.manage');
     $supplierId = requiredInt('supplier_id', 'Supplier', 1);

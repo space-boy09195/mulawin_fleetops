@@ -75,9 +75,11 @@ Known limitations:
 `db/reference/mulawin_fleetops_new.sql` itself contains
 `CREATE DATABASE IF NOT EXISTS mulawin_fleetops_new` and
 `USE mulawin_fleetops_new`. Imported unmodified it builds
-**`mulawin_fleetops_new`**, not the approved test database
-`mulawin_fleetops_test`. Building the test database is a later, separately
-approved step; the tool only reports this (lint INFO).
+**`mulawin_fleetops_new`**, not the intended test database. The test
+database is the separate `mulawin_fleetops_e2e` (not created yet);
+`mulawin_fleetops_test` is the working database and is not a test target.
+Building the test database is a later, separately approved step; the tool
+only reports this (lint INFO).
 
 ## Recommended draft order (all drafts are review-only, none executed)
 

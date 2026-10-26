@@ -101,7 +101,7 @@ layoutHead('Payroll');
       </div>
       <div class="col-md-4">
         <label class="form-label" for="payrollNotes">Notes</label>
-        <input class="form-control" type="text" id="payrollNotes" maxlength="1000">
+        <input class="form-control" type="text" id="payrollNotes" maxlength="120">
       </div>
       <div class="col-12"><button class="btn btn-primary" type="submit">Record payment</button></div>
     </form>

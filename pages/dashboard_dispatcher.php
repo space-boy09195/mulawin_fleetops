@@ -5,6 +5,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/crew_trip_access.php';
 require_once __DIR__ . '/../includes/trip_queries.php';
 require_once __DIR__ . '/../includes/dispatcher_scope.php';
+require_once __DIR__ . '/../includes/dashboard_metrics.php';
 
 requirePermission('trips.view');
 refuseHelpers();
@@ -49,19 +50,46 @@ $requestStmt = $pdo->prepare(
 );
 $requestStmt->execute([$currentUserId]);
 $myRequests = $requestStmt->fetchAll(PDO::FETCH_ASSOC);
+$canFleet = currentUserHasAnyPermission(['fleet.view']);
+$availableTruckCount = $canFleet ? (int)(dashboardFleetCounts($pdo)['Available'] ?? 0) : null;
+$pastEtaCount = count(array_filter($liveTrips, static fn(array $trip): bool => (int)$trip['is_late'] === 1));
 
 $GLOBALS['page_needs_chart'] = false;
 layoutHead('Dispatcher Dashboard', APP_BASE . '/assets/css/dashboard_dispatcher.css');
+$fullName = trim((string)($_SESSION['full_name'] ?? $_SESSION['username'] ?? ''));
+$roleName = (string)($_SESSION['role_name'] ?? 'Dispatcher');
+$hour = (int)date('G');
+$greeting = $hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good evening');
 ?>
 <div class="dd-page">
   <header class="dd-header">
     <div>
-      <p class="dd-eyebrow">Dispatch workspace</p>
-      <h1 class="dd-title">Dispatcher Dashboard</h1>
+      <p class="dd-eyebrow"><?= htmlspecialchars($roleName) ?> · Dispatch workspace</p>
+      <h1 class="dd-title"><?= htmlspecialchars($greeting . ($fullName !== '' ? ', ' . $fullName : '')) ?></h1>
       <p class="dd-subtitle">Your permitted trip scope, upcoming departures, and submitted requests.</p>
     </div>
-    <a href="<?= APP_BASE ?>/pages/dispatch.php" class="btn dd-btn-primary"><i class="bi bi-plus-lg me-1"></i>New Request</a>
+    <time class="text-muted"><?= date('l, F j, Y') ?></time>
   </header>
+
+  <section class="row row-cols-1 row-cols-md-2 row-cols-xl-4 g-3 mb-4" aria-label="Dashboard summary">
+    <div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/trip_monitor.php"><span class="stat-icon blue"><i class="bi bi-map"></i></span><span class="stat-info"><span class="stat-value"><?= count($liveTrips) ?></span><span class="stat-label">Active trips in view</span></span></a></div>
+    <div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/trip_monitor.php"><span class="stat-icon red"><i class="bi bi-clock-history"></i></span><span class="stat-info"><span class="stat-value"><?= $pastEtaCount ?></span><span class="stat-label">Past ETA in view</span></span></a></div>
+    <div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/trip_monitor.php"><span class="stat-icon amber"><i class="bi bi-calendar-event"></i></span><span class="stat-info"><span class="stat-value"><?= count($upcomingTrips) ?></span><span class="stat-label">Upcoming in 48 hours</span></span></a></div>
+    <?php if ($canFleet): ?>
+      <div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/fleet_status.php"><span class="stat-icon green"><i class="bi bi-truck"></i></span><span class="stat-info"><span class="stat-value"><?= $availableTruckCount ?></span><span class="stat-label">Available trucks</span></span></a></div>
+    <?php else: ?>
+      <div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/dispatch.php"><span class="stat-icon blue"><i class="bi bi-send"></i></span><span class="stat-info"><span class="stat-value"><?= count($myRequests) ?></span><span class="stat-label">Recent requests in view</span></span></a></div>
+    <?php endif; ?>
+  </section>
+
+  <section class="dd-widget mb-4" aria-labelledby="dispatcher-quick-heading">
+    <div class="dd-widget-header"><span id="dispatcher-quick-heading" class="dd-widget-title"><i class="bi bi-lightning-charge me-2"></i>Quick Actions</span></div>
+    <div class="d-flex flex-wrap gap-2">
+      <a href="<?= APP_BASE ?>/pages/dispatch.php" class="btn dd-btn-primary"><i class="bi bi-plus-lg me-1"></i>New Request</a>
+      <?php if ($canFleet): ?><a href="<?= APP_BASE ?>/pages/fleet_status.php" class="btn btn-outline-primary">Truck availability</a><?php endif; ?>
+      <?php if (currentUserHasAnyPermission(['dispatch.instructions.manage'])): ?><a href="<?= APP_BASE ?>/pages/dispatch_planning.php" class="btn btn-outline-primary">Trip planning</a><?php endif; ?>
+    </div>
+  </section>
 
   <section class="dd-widget dd-widget-wide mb-4" aria-labelledby="dispatcher-live-heading">
     <div class="dd-widget-header">

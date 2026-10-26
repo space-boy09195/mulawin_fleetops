@@ -3,6 +3,7 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/enums.php';
+require_once __DIR__ . '/../includes/dispatcher_scope.php';
 
 requireAnyPermission(['incidents.manage', 'legacy.role.3']);
 
@@ -11,6 +12,10 @@ $GLOBALS['page_js'] = APP_BASE . '/assets/js/incidents.js';
 layoutHead('Trip Problem Reports', APP_BASE . '/assets/css/incidents.css');
 
 $pdo = getDBConnection();
+
+// Dispatchers see only trips in their assigned truck types and shift.
+$scopeParams = [];
+$scopeSql = dispatcherScopeReadSql('tr.truck_type', 't.shift', $scopeParams);
 
 // ── All incidents with full context (target trip_incidents) ─────────────────
 // resolution_notes = action_taken; reported_at = incident_date.
@@ -37,10 +42,13 @@ $sql = "
     LEFT JOIN routes r        ON r.route_id     = t.route_id
     LEFT JOIN users u         ON u.user_id      = i.reported_by
     LEFT JOIN employees ue    ON ue.employee_id = u.employee_id
+    WHERE 1 = 1 $scopeSql
     ORDER BY i.incident_date DESC
     LIMIT 1000
 ";
-$incidents = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+$incidentStmt = $pdo->prepare($sql);
+$incidentStmt->execute($scopeParams);
+$incidents = $incidentStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Active trips for the log form dropdown ───────────────────────────────────
 // Approved trips that are not finished (legacy: trips that existed and were
@@ -55,10 +63,12 @@ $tripsSql = "
     FROM trips t
     LEFT JOIN trucks tr ON tr.truck_id = t.truck_id
     LEFT JOIN routes r  ON r.route_id  = t.route_id
-    WHERE t.status NOT IN ('Pending Approval', 'Completed', 'Cancelled')
+    WHERE t.status NOT IN ('Pending Approval', 'Completed', 'Cancelled') $scopeSql
     ORDER BY t.trip_number
 ";
-$activeTrips = $pdo->query($tripsSql)->fetchAll(PDO::FETCH_ASSOC);
+$tripsStmt = $pdo->prepare($tripsSql);
+$tripsStmt->execute($scopeParams);
+$activeTrips = $tripsStmt->fetchAll(PDO::FETCH_ASSOC);
 
 $incidentTypes = INCIDENT_TYPES;
 ?>

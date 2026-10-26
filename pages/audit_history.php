@@ -66,7 +66,17 @@ layoutHead('Audit History');
   Deleted-record archives, restore and purge actions are not available here. Screen views are not logged by the system. Sensitive credential-like values in recorded change details are redacted.
 </div>
 
-<ul class="nav nav-tabs mb-3" role="tablist">
+<style>
+  .audit-tabs { border-bottom: 0; gap: .5rem; }
+  .audit-tabs .nav-link {
+    border: 1px solid #0d6efd; border-radius: 6px; color: #0d6efd; background: transparent;
+    font-size: .875rem; font-weight: 600; padding: .4rem .9rem;
+  }
+  .audit-tabs .nav-link:hover { background: rgba(13, 110, 253, .1); }
+  .audit-tabs .nav-link.active { background: #0d6efd; border-color: #0d6efd; color: #fff; }
+  .audit-tabs .nav-link.active .badge { background: rgba(255, 255, 255, .25) !important; color: #fff !important; }
+</style>
+<ul class="nav audit-tabs mb-3" role="tablist">
   <li class="nav-item" role="presentation"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#audit-record-changes" type="button" role="tab">Record changes <span class="badge text-bg-secondary"><?= count($auditLogs) ?></span></button></li>
   <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#audit-approvals" type="button" role="tab">Approval history <span class="badge text-bg-secondary"><?= count($approvalHistory) ?></span></button></li>
   <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#audit-workflows" type="button" role="tab">Workflow events <span class="badge text-bg-secondary"><?= count($workflowEvents) ?></span></button></li>

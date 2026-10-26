@@ -1,12 +1,24 @@
-# Isolated test database: setup and migration checklist
+# Disposable test database: setup and migration checklist
 
 **Status: PREPARED — NOT EXECUTED.** Nothing in this file has been run. Every
 step that changes a database needs the owner's separate, explicit approval,
 given after the owner has verified the backup and the target name.
 
-Target: `mulawin_fleetops_test` on the local XAMPP MariaDB 10.4.
-Never touch the legacy database `mulawin_fleetops` (no connect, import,
-drop, truncate or migration).
+> **Warning — `mulawin_fleetops_test` is the working database.** Despite its
+> name, the application's `.env` points to `mulawin_fleetops_test`, and it
+> holds the current working data. Treat it as the working database until
+> that is separately verified otherwise. It is **not** disposable: never
+> drop, truncate, import over, migrate or clean it up with this checklist.
+>
+> The test database must be a **separate** database named
+> **`mulawin_fleetops_e2e`**. Database isolation has **not** been
+> implemented or verified; this checklist describes what still has to be
+> set up.
+
+Target: `mulawin_fleetops_e2e` on the local XAMPP MariaDB 10.4.
+Never touch the working database `mulawin_fleetops_test` or the legacy
+database `mulawin_fleetops` (no import, drop, truncate, migration or
+clean-up).
 
 Commands are written for Git Bash on Windows with XAMPP's client
 (`/c/xampp/mysql/bin/mysql.exe`). `-p` prompts for the password; never put a
@@ -16,14 +28,24 @@ password on the command line or in a file in the repository.
 
 ## 0. Preconditions (owner)
 
-- [ ] A fresh backup of the legacy database exists **and was test-restored**
-      somewhere other than the live database (owner verifies; not done here).
+- [ ] A fresh backup of the working database `mulawin_fleetops_test` exists
+      **and was test-restored** somewhere other than the live database, before
+      any database-backed testing or potentially destructive operation
+      (owner verifies; not done here).
+- [ ] Separately, a fresh backup of the legacy database `mulawin_fleetops`
+      exists **and was test-restored** somewhere other than the live database
+      (owner verifies; not done here). This does not replace the backup of
+      `mulawin_fleetops_test` above.
 - [ ] The owner confirms the server is the local XAMPP instance.
-- [ ] The owner confirms the name `mulawin_fleetops_test` does not exist yet,
-      or that it may be dropped (read-only check):
+- [ ] The owner confirms the name `mulawin_fleetops_e2e` does not exist yet
+      (read-only check; it must return no rows). If it already exists, stop
+      and find out what it holds; do not drop it to make room:
       ```sh
-      /c/xampp/mysql/bin/mysql.exe -u root -p -e "SHOW DATABASES LIKE 'mulawin_fleetops_test'"
+      /c/xampp/mysql/bin/mysql.exe -u root -p -e "SHOW DATABASES LIKE 'mulawin_fleetops_e2e'"
       ```
+- [ ] The owner confirms that `DB_NAME` in the project `.env` is **not**
+      `mulawin_fleetops_e2e` (today it is the working database,
+      `mulawin_fleetops_test`).
 - [ ] Scheduled automation, reminders, email and external notifications stay
       disabled (`scripts/run_automations.php` and `scripts/generate_reminders.php`
       are not scheduled; automation settings stay off).
@@ -33,7 +55,7 @@ password on the command line or in a file in the repository.
 ## 1. Create the empty test database — APPROVAL REQUIRED
 
 ```sh
-/c/xampp/mysql/bin/mysql.exe -u root -p -e "CREATE DATABASE mulawin_fleetops_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+/c/xampp/mysql/bin/mysql.exe -u root -p -e "CREATE DATABASE mulawin_fleetops_e2e CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
 ```
 
 ## 2. Prepare a test-only copy of the reference schema (no DB change — filter dry-run verified on a scratch copy: removes only the 4 CREATE DATABASE / USE lines, keeps 70 tables)
@@ -59,11 +81,11 @@ grep -c '^CREATE TABLE' "$OUT/reference_for_test.sql"
 ## 3. Import the schema into the test database — APPROVAL REQUIRED
 
 The database name is given explicitly on the command line, so the import
-can only land in `mulawin_fleetops_test`:
+can only land in `mulawin_fleetops_e2e`:
 
 ```sh
-/c/xampp/mysql/bin/mysql.exe -u root -p mulawin_fleetops_test < "$OUT/reference_for_test.sql"
-/c/xampp/mysql/bin/mysql.exe -u root -p mulawin_fleetops_test -e "SELECT DATABASE(); SHOW TABLES"
+/c/xampp/mysql/bin/mysql.exe -u root -p mulawin_fleetops_e2e < "$OUT/reference_for_test.sql"
+/c/xampp/mysql/bin/mysql.exe -u root -p mulawin_fleetops_e2e -e "SELECT DATABASE(); SHOW TABLES"
 ```
 
 MariaDB 10.4 compatibility to watch during import (the reference header
@@ -79,7 +101,7 @@ first, then apply it with the database named explicitly, then run its
 post-checks.
 
 Each draft's pre-check `SELECT DATABASE()` expects `mulawin_fleetops_new`;
-on the test copy the expected value is **`mulawin_fleetops_test`** — that is
+on the test copy the expected value is **`mulawin_fleetops_e2e`** — that is
 the only expected value that changes.
 
 | # | Draft | Notes |
@@ -109,7 +131,7 @@ the only expected value that changes.
 Example (repeat per file):
 
 ```sh
-/c/xampp/mysql/bin/mysql.exe -u root -p mulawin_fleetops_test < db/target_migrations/20261010_batch1a_security_support_tables.sql
+/c/xampp/mysql/bin/mysql.exe -u root -p mulawin_fleetops_e2e < db/target_migrations/20261010_batch1a_security_support_tables.sql
 ```
 
 Several drafts contain DDL (`ALTER TABLE`, `CREATE TABLE`), which MariaDB
@@ -126,18 +148,26 @@ container_wing_van_dispatcher, maintenance, purchasing_officer, finance,
 billing_collection, payroll, audit, driver, helper) and who holds them.
 Use obviously fake names and non-real emails; never copy real people.
 
-## 6. Point the application at the test database (owner)
+The application under test must connect with its own **restricted database
+account**, granted only `SELECT, INSERT, UPDATE, DELETE` on
+`mulawin_fleetops_e2e` and nothing on any other database, so it cannot
+reach the working database even by mistake. Never use `root` for the
+application under test. Creating that account needs separate approval.
 
-The owner edits `.env` personally (it is never read or changed by the
-assistant): set the database name to `mulawin_fleetops_test`, keep the
-legacy database untouched, keep mail/notification delivery disabled.
-Restore the previous value after testing.
+## 6. Point a separate application copy at the test database (owner)
+
+Do **not** change the project `.env`: it stays pointed at the working
+database. Run the tests against a separate copy of the application, outside
+`htdocs`, with its own configuration file (`.env`) that sets
+`DB_NAME=mulawin_fleetops_e2e` and the restricted account from step 5.
+Keep mail and notification delivery disabled. See
+`tests/integration/README.md` for the full set of checks.
 
 ## 7. Verification (read-only)
 
 ```sql
-SELECT DATABASE();                                   -- mulawin_fleetops_test
-SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'mulawin_fleetops_test';  -- 86 = 70 reference tables + 13 draft tables + 3 views (static model: 83 tables)
+SELECT DATABASE();                                   -- mulawin_fleetops_e2e
+SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'mulawin_fleetops_e2e';  -- 86 = 70 reference tables + 13 draft tables + 3 views (static model: 83 tables)
 SELECT system_key FROM roles ORDER BY system_key;    -- the seeded role keys
 SELECT workflow_key FROM approval_workflows;         -- dispatch, route_request, purchase_request, fund_request, payment_voucher, payroll
 SELECT p.permission_key FROM role_permissions rp JOIN roles r ON r.role_id = rp.role_id
@@ -150,11 +180,19 @@ in ROLLBACK) and the MariaDB integration checklist.
 
 ## 8. Rollback / clean-up — APPROVAL REQUIRED
 
-Only the test database is ever dropped, and only after the owner confirms
-the name on screen:
+Destructive clean-up is permitted only for `mulawin_fleetops_e2e`, and only
+after the owner has independently verified, in the same session, that:
+
+- the target name on screen is exactly `mulawin_fleetops_e2e`;
+- it is the disposable test database, not the working database
+  `mulawin_fleetops_test` (for example: `SELECT DATABASE()` and the setup
+  marker row agree with the test setup, and it holds only synthetic records);
+- `DB_NAME` in the project `.env` is a different database.
+
+A matching name alone is not enough. Never drop by pattern.
 
 ```sh
-/c/xampp/mysql/bin/mysql.exe -u root -p -e "DROP DATABASE mulawin_fleetops_test"
+/c/xampp/mysql/bin/mysql.exe -u root -p -e "DROP DATABASE mulawin_fleetops_e2e"
 ```
 
 ## Pre-run static checks (safe, no database)

@@ -16,9 +16,9 @@ Prepared 2026-10-15. Branch `system-hardening`, HEAD
 
 ## 1. Current readiness: not ready for meaningful assignment checks
 
-The isolated test database planned in `database_setup_checklist.md`
-(`mulawin_fleetops_test`, built from the reference schema plus the migration
-drafts) would contain the `dispatcher_assignments` table but **no assignment
+The disposable test database planned in `database_setup_checklist.md`
+(`mulawin_fleetops_e2e`, built from the reference schema plus the migration
+drafts; not created yet) would contain the `dispatcher_assignments` table but **no assignment
 rows**. Unless test data is loaded, it would also have **no users and no
 trips**.
 
@@ -119,31 +119,42 @@ IMPLEMENTED):
 
 From `database_setup_checklist.md` §0 (none confirmed):
 
-- a fresh backup of the legacy database exists **and was restored
-  successfully elsewhere** (owner verifies);
+- `mulawin_fleetops_test` is the **working database** (the application's
+  `.env` points to it). It is not disposable and is never a test target;
+- a fresh backup of the working database `mulawin_fleetops_test` exists
+  **and was restored successfully elsewhere** (owner verifies);
+- separately, a fresh backup of the legacy database exists **and was
+  restored successfully elsewhere** (owner verifies); it does not replace the
+  working-database backup;
 - the target is the **local XAMPP** MariaDB instance;
-- the name `mulawin_fleetops_test` is available (or may be dropped);
+- the name `mulawin_fleetops_e2e` does not exist yet (if it does, stop and
+  identify it; never drop it just because it exists);
 - static checks reviewed and passing on the code to be tested;
 - automation, reminders, email and external notifications stay **disabled**.
 
 Target safety (from the checklist and the assessment):
 
-- every command names `mulawin_fleetops_test` explicitly, and the target is
+- every command names `mulawin_fleetops_e2e` explicitly, and the target is
   confirmed (`SELECT DATABASE()` / `SHOW DATABASES LIKE`) before each step;
 - the reference schema's own `CREATE DATABASE` / `USE` lines are stripped from
   a filtered copy first;
 - passwords are typed by the owner, never stored;
-- `.env` is changed only by the owner;
-- **nothing ever names, connects to, imports into, drops or truncates the
-  legacy `mulawin_fleetops` database.**
+- the project `.env` is not changed; tests run on a separate copy of the
+  application, outside `htdocs`, with its own `.env` and a restricted
+  database account that cannot reach the working database (not set up yet);
+- **nothing ever imports into, drops, truncates or runs tests against the
+  working database `mulawin_fleetops_test`, and nothing ever names, connects
+  to, imports into, drops or truncates the legacy `mulawin_fleetops`
+  database.**
 
 ## 6. Separate explicit approval required for each step
 
 Each of the following needs its own explicit owner approval. None has been
 given:
 
-1. Confirmation that the legacy backup exists and was test-restored.
-2. Creating the test database `mulawin_fleetops_test`.
+1. Confirmation that the working-database and legacy backups exist and were
+   test-restored.
+2. Creating the separate test database `mulawin_fleetops_e2e`.
 3. Importing the filtered reference schema.
 4. Applying migration drafts, named individually (all 21 or a listed subset).
 5. Loading synthetic test data (and, separately and later, any real assignment

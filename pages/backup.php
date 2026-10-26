@@ -23,12 +23,12 @@ layoutHead('Backup');
 
 $backups = listSystemBackups();
 ?>
-  <div class="page-header">
-    <h1 class="page-title">Backup</h1>
+  <div class="page-header d-flex justify-content-between align-items-center mb-4">
+    <h1 class="page-title mb-0">Backup</h1>
     <button type="button" class="btn btn-primary" id="createBackupBtn">
       <i class="bi bi-hdd-network"></i> Back Up Now
     </button>
-  </div>
+</div>
 
   <p class="text-muted">
     Saves a full copy of all system data and uploaded documents on the server

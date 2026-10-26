@@ -362,4 +362,55 @@
     window.history.replaceState({}, '', window.location.pathname);
   })();
 
+  // ── Edit / deactivate part (catalog managers) ─────────────────────────────
+  const editPartModal = document.getElementById('editPartModal');
+  const editPartAlert = document.getElementById('editPartAlert');
+  const submitEditPartBtn = document.getElementById('submitEditPartBtn');
+
+  editPartModal?.addEventListener('show.bs.modal', event => {
+    const trigger = event.relatedTarget;
+    if (!(trigger instanceof HTMLElement)) return;
+    const d = trigger.dataset;
+    document.getElementById('epPartId').value = d.partId || '';
+    document.getElementById('epName').value = d.partName || '';
+    document.getElementById('epCategory').value = d.category || '';
+    document.getElementById('epUnit').value = d.unit || '';
+    document.getElementById('epReorder').value = d.reorder || '0';
+    document.getElementById('epWarranty').value = d.warranty || '';
+    document.getElementById('epSupplier').value = d.supplier || '';
+    document.getElementById('epActive').checked = d.active === '1';
+    hideAlert(editPartAlert);
+  });
+
+  submitEditPartBtn?.addEventListener('click', () => {
+    hideAlert(editPartAlert);
+    const name = document.getElementById('epName').value.trim();
+    const category = document.getElementById('epCategory').value.trim();
+    const reorder = document.getElementById('epReorder').value;
+    if (!name || !category || reorder === '') {
+      showAlert(editPartAlert, 'Part name, category, and reorder level are required.');
+      return;
+    }
+    submitEditPartBtn.disabled = true;
+    postAjax({
+      action: 'edit_part',
+      part_id: document.getElementById('epPartId').value,
+      part_name: name,
+      category,
+      unit: document.getElementById('epUnit').value.trim(),
+      reorder_level: reorder,
+      warranty_days: document.getElementById('epWarranty').value.trim(),
+      supplier: document.getElementById('epSupplier').value.trim(),
+      is_active: document.getElementById('epActive').checked ? '1' : '0',
+    }).then(res => {
+      if (res.success) {
+        bootstrap.Modal.getInstance(editPartModal)?.hide();
+        window.softReload();
+      } else {
+        showAlert(editPartAlert, res.message || 'Could not update the part.');
+      }
+    }).catch(() => showAlert(editPartAlert, 'Network error. Please try again.'))
+      .finally(() => { submitEditPartBtn.disabled = false; });
+  });
+
 })();

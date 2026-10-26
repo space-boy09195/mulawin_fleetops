@@ -1,7 +1,7 @@
 .an-page { --an-gap: 1rem; max-width: 1400px; margin: 0 auto; color: var(--text-primary, #1f2a24); }
 .an-muted { color: var(--text-secondary, #66736b); }
 
-.an-header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; justify-content: space-between; margin-bottom: 1rem; }
+.an-header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; justify-content: space-between; margin-bottom: 1rem; background-color: transparent !important; border: none !important; box-shadow:none !important; }
 .an-title { font-size: 1.6rem; font-weight: 700; margin: 0; }
 .an-subtitle { margin: .15rem 0 0; color: var(--text-secondary, #66736b); font-size: .9rem; }
 .an-filters { display: flex; gap: .75rem; flex-wrap: wrap; }

@@ -188,6 +188,33 @@ function dispatcherScope(): array
     return [];
 }
 
+// Read filter for listings: " AND ..." limiting rows to the signed-in
+// dispatcher's truck types and shift (the same rule as dispatcherScope()),
+// or '' when no scope applies (Admin, Operations Head, other roles). A
+// denied dispatcher gets a condition that matches nothing. $truckTypeExpr
+// and $shiftExpr are fixed column references from the calling query; the
+// values are added to $params as named placeholders.
+function dispatcherScopeReadSql(string $truckTypeExpr, string $shiftExpr, array &$params): string
+{
+    foreach ([$truckTypeExpr, $shiftExpr] as $expr) {
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$/', $expr)) {
+            throw new InvalidArgumentException('Invalid scope column.');
+        }
+    }
+    $scope = dispatcherScope();
+    if (!$scope) {
+        return '';
+    }
+    $typeKeys = [];
+    foreach (array_values($scope['truck_types']) as $index => $truckType) {
+        $key = ':dscopeType' . $index;
+        $typeKeys[] = $key;
+        $params[$key] = $truckType;
+    }
+    $params[':dscopeShift'] = (string)$scope['shift'];
+    return " AND {$truckTypeExpr} IN (" . implode(', ', $typeKeys) . ") AND {$shiftExpr} = :dscopeShift";
+}
+
 // The 403 message for an action outside the scope, or null when allowed.
 function dispatcherScopeViolation(string $shift, string $truckType, ?string $scheduledDate = null): ?string
 {

@@ -22,18 +22,26 @@ Bootstrap Icons, and Chart.js are already included under `assets/vendor/`.
    a different folder or URL path, update `APP_BASE` in `.env` to match it.
 3. In phpMyAdmin, create an empty database named `mulawin_fleetops` using
    `utf8mb4` (or choose another name and use that name in `.env`).
-4. > **Schema note (2026-10-14):** the application code on the
-   > `system-hardening` branch targets the new schema
-   > [`../db/reference/mulawin_fleetops_new.sql`](../db/reference/mulawin_fleetops_new.sql)
-   > plus the review-only drafts in `../db/target_migrations/`. The legacy file
-   > below does not match that code. For a test installation follow
-   > [`../docs/testing/database_setup_checklist.md`](../docs/testing/database_setup_checklist.md)
-   > (not yet executed; each database change needs owner approval). The
-   > legacy steps below are kept for the legacy installation only.
+4. **Schema (current code).** The application code on the `system-hardening`
+   branch runs only on the new schema
+   [`../db/reference/mulawin_fleetops_new.sql`](../db/reference/mulawin_fleetops_new.sql)
+   plus the drafts in `../db/target_migrations/`, applied in file-name order
+   to an empty database. Follow
+   [`../docs/testing/database_setup_checklist.md`](../docs/testing/database_setup_checklist.md);
+   each database change needs owner approval. The development database
+   `mulawin_fleetops_test` already has the reference schema and the drafts
+   up to `20261021_route_locations_client_routes.sql` (checked read-only on
+   2026-10-21), even though the draft headers still say "not executed".
 
-   Select the empty database in phpMyAdmin and import
+   > **Legacy installation only — do not use with the current code.** The
+   > file [`../db/mulawin_fleetops_db.sql`](../db/mulawin_fleetops_db.sql) is
+   > the old schema: it has no `client_bookings`, `route_locations` or
+   > `trip_pay_records`, so the current pages fail on it. The steps below
+   > apply only to an old installation of the legacy code.
+
+   Legacy only: select the empty database in phpMyAdmin and import
    [`../db/mulawin_fleetops_db.sql`](../db/mulawin_fleetops_db.sql). This file
-   contains the complete schema and bundled database additions. It does not
+   contains the legacy schema and bundled database additions. It does not
    create the database or any login accounts.
 
    **Fresh database only:** the SQL contains non-idempotent table creation.
@@ -197,10 +205,35 @@ php scripts/generate_reminders.php
 ```
 
 The automation command executes enabled FleetOps automations. The reminder
-command sends configured expiry reminders. Configure a system scheduler (for
-example, Windows Task Scheduler or cron on Linux) only if those features are
-needed, and choose an interval appropriate for the configured automation and
-reminder rules. Review the command output and PHP/server logs when validating
+command sends the configured expiry reminders: vehicle documents (OR/CR,
+insurance), uploaded documents, driver licenses and part warranties.
+
+How reminders are matched: the setting `reminder_thresholds_days`
+(app_settings; default `60,30,15,7`) lists the days before expiry. Each run
+sends, for every item, the smallest threshold that still covers its days left,
+once per recipient (`reminder_deliveries`). A skipped day therefore does not
+lose a reminder: the next run sends the tier that applies. Add `0` to the
+setting to also notify on the expiry date itself. Every run of
+`generate_reminders.php` is recorded in `automation_runs` (job
+`expiry_reminders`), and the command can be repeated safely.
+
+**Scheduling status (checked 2026-10-21):** no Windows Task Scheduler task
+for these scripts exists on the development machine, and every automation job
+is off in `automation_settings`. Reminders are therefore only sent when the
+command is run by hand. To schedule the daily reminder run on this XAMPP
+machine, an administrator can create the task (review it first; it is not
+created automatically):
+
+```powershell
+schtasks /Create /TN "Mulawin FleetOps Expiry Reminders" /SC DAILY /ST 06:00 `
+  /TR "\"C:\xampp\php\php.exe\" \"C:\xampp\htdocs\mulawin_fleetops\scripts\generate_reminders.php\""
+```
+
+Check it with `schtasks /Query /TN "Mulawin FleetOps Expiry Reminders"` and
+look for a `success` row in `automation_runs` the next day. On a Linux host
+use an equivalent cron entry. `run_automations.php` runs only the jobs
+enabled in `automation_settings`; schedule it the same way if those jobs are
+turned on. Review the command output and PHP/server logs when validating
 scheduled runs.
 
 ## Troubleshooting

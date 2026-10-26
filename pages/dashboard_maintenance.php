@@ -10,6 +10,7 @@ requireAnyPermission(['maintenance.view', 'parts.view']);
 $pdo = getDBConnection();
 $canMaintenance = currentUserHasAnyPermission(['maintenance.view']);
 $canParts = currentUserHasAnyPermission(['parts.view']);
+$canFleet = currentUserHasAnyPermission(['fleet.view']);
 $maintenanceDue = $canMaintenance ? dashboardMaintenanceDue($pdo, 14, 20) : [];
 $openJobs = [];
 if ($canMaintenance) {
@@ -38,23 +39,43 @@ if ($canParts) {
         LIMIT 20
     ")->fetchAll(PDO::FETCH_ASSOC);
 }
+$availableTruckCount = $canFleet ? (int)(dashboardFleetCounts($pdo)['Available'] ?? 0) : null;
 
 $GLOBALS['page_needs_chart'] = false;
 layoutHead('Maintenance Workspace', APP_BASE . '/assets/css/dashboard_maintenance.css');
+$fullName = trim((string)($_SESSION['full_name'] ?? $_SESSION['username'] ?? ''));
+$roleName = (string)($_SESSION['role_name'] ?? 'Maintenance');
+$hour = (int)date('G');
+$greeting = $hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good evening');
 ?>
 <div class="dm-page">
   <header class="dm-header">
     <div>
-      <p class="dm-eyebrow">Maintenance and parts work queues</p>
-      <h1 class="dm-title">Maintenance Workspace</h1>
+      <p class="dm-eyebrow"><?= htmlspecialchars($roleName) ?> · Maintenance and parts work queues</p>
+      <h1 class="dm-title"><?= htmlspecialchars($greeting . ($fullName !== '' ? ', ' . $fullName : '')) ?></h1>
       <p class="dm-subtitle">Open records and scheduled work from current system data.</p>
     </div>
+    <time class="text-muted"><?= date('l, F j, Y') ?></time>
+  </header>
+
+  <section class="row row-cols-1 row-cols-md-2 row-cols-xl-4 g-3 mb-4" aria-label="Dashboard summary">
+    <?php if ($canMaintenance): ?>
+      <div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/maintenance.php"><span class="stat-icon amber"><i class="bi bi-tools"></i></span><span class="stat-info"><span class="stat-value"><?= count($openJobs) ?></span><span class="stat-label">Open records in view</span></span></a></div>
+      <div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/maintenance.php"><span class="stat-icon blue"><i class="bi bi-calendar2-week"></i></span><span class="stat-info"><span class="stat-value"><?= count($maintenanceDue) ?></span><span class="stat-label">Due items in view</span></span></a></div>
+    <?php endif; ?>
+    <?php if ($canParts): ?><div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/parts.php"><span class="stat-icon red"><i class="bi bi-box-seam"></i></span><span class="stat-info"><span class="stat-value"><?= count($parts) ?></span><span class="stat-label">Low-stock parts in view</span></span></a></div><?php endif; ?>
+    <?php if ($canFleet): ?><div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/fleet_status.php"><span class="stat-icon green"><i class="bi bi-truck"></i></span><span class="stat-info"><span class="stat-value"><?= $availableTruckCount ?></span><span class="stat-label">Available trucks</span></span></a></div><?php endif; ?>
+  </section>
+
+  <section class="dm-widget mb-4" aria-labelledby="maintenance-quick-heading">
+    <div class="dm-widget-header"><span id="maintenance-quick-heading" class="dm-widget-title"><i class="bi bi-lightning-charge me-2"></i>Quick Actions</span></div>
     <div class="d-flex flex-wrap gap-2">
       <?php if ($canMaintenance): ?><a href="<?= APP_BASE ?>/pages/maintenance.php" class="btn btn-primary">Open Maintenance</a><?php endif; ?>
       <?php if ($canParts): ?><a href="<?= APP_BASE ?>/pages/parts.php" class="btn btn-outline-primary">Open Parts</a><?php endif; ?>
+      <?php if ($canFleet): ?><a href="<?= APP_BASE ?>/pages/fleet_status.php" class="btn btn-outline-primary">Truck availability</a><?php endif; ?>
       <?php if ($canMaintenance && currentUserHasAnyPermission(['maintenance.reports.view'])): ?><a href="<?= APP_BASE ?>/pages/analytics.php" class="btn btn-outline-secondary">Analytics</a><?php endif; ?>
     </div>
-  </header>
+  </section>
 
   <?php if ($canMaintenance): ?>
   <section class="dm-widget mb-4" aria-labelledby="maintenance-open-heading">

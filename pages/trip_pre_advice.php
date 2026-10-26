@@ -35,6 +35,7 @@ if (!$trip) {
     http_response_code(404);
     exit('Trip not found.');
 }
+requireTripInDispatcherScope($trip['shift'], $trip['truck_type']);
 // Target trips exist from submission (D2); a pre-advice is only issued for an
 // approved trip, as before.
 if ($trip['status'] === 'Pending Approval' || in_array($trip['dispatch_status'], ['Pending', 'Rejected', 'Cancelled'], true)) {

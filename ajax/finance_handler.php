@@ -140,12 +140,28 @@ if ($action === 'create_fund_request') {
              VALUES (?, ?, ?, ?, ?, ?, 'Pending Approval', NOW())"
         )->execute([$number, $tripId, currentUserId(), $type, $fullPurpose, $amount]);
         $requestId = (int)$pdo->lastInsertId();
-        $approvalId = createApprovalRequest($pdo, 'fund_request', 'fund_request', $requestId, currentUserId(), $notes);
+        $approvalRouting = null;
+        $approvalId = createApprovalRequest($pdo, 'fund_request', 'fund_request', $requestId, currentUserId(), $notes, $approvalRouting);
         auditLog('CREATE', 'fund_requests', $requestId, null, [
             'request_number' => $number, 'request_type' => $type, 'amount' => $amount, 'approval_request_id' => $approvalId,
         ]);
+        if ($approvalRouting !== null) {
+            // The requester belongs to the configured approver role, so this
+            // request's approval step went to Admin (decision E2).
+            auditLog('APPROVAL_ROUTED_TO_ADMIN', 'approval_requests', $approvalId,
+                ['approver_role_id' => $approvalRouting['configured_role_id']],
+                [
+                    'approver_role_id' => $approvalRouting['routed_role_id'],
+                    'step_number'      => $approvalRouting['step_number'],
+                    'reason'           => $approvalRouting['reason'],
+                    'fund_request_id'  => $requestId,
+                    'notified_users'   => count($approvalRouting['notified_user_ids']),
+                ]);
+        }
         $pdo->commit();
-        jsonOk(['fund_request_id' => $requestId, 'request_number' => $number], 'Fund request submitted for approval.');
+        jsonOk(['fund_request_id' => $requestId, 'request_number' => $number], $approvalRouting !== null
+            ? 'Fund request submitted for Admin approval, because you belong to the approving role.'
+            : 'Fund request submitted for approval.');
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         if ($e instanceof DomainException) jsonFail($e->getMessage(), 409);

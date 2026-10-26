@@ -224,6 +224,23 @@ if ($canOperations) {
     $stmt->execute($tripParams);
     $statusRows = $orderBy($stmt->fetchAll(PDO::FETCH_ASSOC), 'status', $tripStatusOrder);
 
+    // Current status breakdown: every open (not Completed / Cancelled) trip,
+    // whatever its scheduled date, plus trips that finished or were
+    // cancelled with a scheduled departure in the period (the Trip Monitor
+    // convention). The period KPIs above keep using $statusRows.
+    $stmt = $pdo->prepare("
+        SELECT t.status, COUNT(DISTINCT t.trip_id) AS trip_count
+        FROM trips t
+        LEFT JOIN trucks tr ON tr.truck_id = t.truck_id
+        WHERE (t.status NOT IN ('Completed', 'Cancelled')
+               OR (t.scheduled_departure >= :rangeStart AND t.scheduled_departure < :rangeEnd))
+          $tripScopeSql
+        GROUP BY t.status
+        ORDER BY t.status
+    ");
+    $stmt->execute($tripParams);
+    $currentStatusRows = $orderBy($stmt->fetchAll(PDO::FETCH_ASSOC), 'status', $tripStatusOrder);
+
     $fleetRows = [];
     if ($canFleet) {
         $fleetSql = 'SELECT tr.status, COUNT(*) AS truck_count FROM trucks tr';
@@ -277,16 +294,16 @@ if ($canOperations) {
     ];
     $charts['opsTripStatus'] = [
         'title' => 'Trips by current status', 'span' => 4, 'height' => 'tall', 'type' => 'doughnut', 'format' => 'count', 'unit' => 'trip',
-        'note' => 'Scheduled in ' . strtolower($periodLabel) . '. Statuses are never merged.',
-        'labels' => array_map(static fn($r) => (string)$r['status'], $statusRows),
+        'note' => 'All open trips now, plus completed and cancelled trips scheduled in ' . strtolower($periodLabel) . '. Statuses are never merged.',
+        'labels' => array_map(static fn($r) => (string)$r['status'], $currentStatusRows),
         'datasets' => [[
-            'label' => 'Trips', 'data' => array_map(static fn($r) => (int)$r['trip_count'], $statusRows),
-            'colors' => array_map(static fn($r) => $colorOf($tripStatusColors, $r['status']), $statusRows),
+            'label' => 'Trips', 'data' => array_map(static fn($r) => (int)$r['trip_count'], $currentStatusRows),
+            'colors' => array_map(static fn($r) => $colorOf($tripStatusColors, $r['status']), $currentStatusRows),
         ]],
         'method' => [
             'Formula' => 'COUNT(DISTINCT trip_id) grouped by trips.status',
             'Source' => 'trips.trip_id, trips.status',
-            'Date basis' => 'Scheduled departure in the period; the status is the current one, not a historical snapshot.',
+            'Date basis' => 'Open trips (not Completed or Cancelled) regardless of date; Completed and Cancelled trips by scheduled departure in the period. The status is the current stored one.',
             'Limits' => 'Delivered / Returned / Completed does not prove all required units were delivered. Pending approval and cancelled are separate slices.',
         ],
     ];
@@ -343,7 +360,7 @@ if ($canOperations) {
             ['title' => 'Trips by actual departure period', 'headers' => [$granularities[$granularity] . ' bucket', 'Trips'],
              'rows' => array_map(static fn($r) => [(string)$r['bucket'], (int)$r['trip_count']], $departureRows)],
             ['title' => 'Trips by current status', 'headers' => ['Recorded status', 'Trips'],
-             'rows' => array_map(static fn($r) => [(string)$r['status'], (int)$r['trip_count']], $statusRows)],
+             'rows' => array_map(static fn($r) => [(string)$r['status'], (int)$r['trip_count']], $currentStatusRows)],
             ['title' => 'Trips by recorded client field', 'headers' => ['Client field', 'Trips'],
              'rows' => array_map(static fn($r) => [(string)$r['client_name'], (int)$r['trip_count']], $sortDesc($clientRows, 'trip_count'))],
             ['title' => 'Trips by truck', 'headers' => ['Truck', 'Trips'],
@@ -377,6 +394,7 @@ if ($canFinancials) {
     $stmt = $pdo->prepare("
         SELECT COUNT(*) AS record_count, SUM(c.amount) AS total_amount
         FROM collections c
+        JOIN billings cb ON cb.billing_id = c.billing_id AND cb.status <> 'Cancelled'
         WHERE c.payment_date >= :rangeStart AND c.payment_date < :rangeEnd
     ");
     $stmt->execute($rangeParams);
@@ -394,6 +412,7 @@ if ($canFinancials) {
     $collectedTrend = qRange($pdo, "
         SELECT $payBucket AS bucket, SUM(c.amount) AS amount
         FROM collections c
+        JOIN billings cb ON cb.billing_id = c.billing_id AND cb.status <> 'Cancelled'
         WHERE c.payment_date >= :rangeStart AND c.payment_date < :rangeEnd
         GROUP BY bucket
         ORDER BY bucket
@@ -421,6 +440,7 @@ if ($canFinancials) {
     $paymentMethodRows = qRange($pdo, "
         SELECT c.payment_method, COUNT(*) AS record_count, SUM(c.amount) AS amount
         FROM collections c
+        JOIN billings cb ON cb.billing_id = c.billing_id AND cb.status <> 'Cancelled'
         WHERE c.payment_date >= :rangeStart AND c.payment_date < :rangeEnd
         GROUP BY c.payment_method
         ORDER BY amount DESC
@@ -531,7 +551,8 @@ if ($canMaintenance) {
 
     $maintenanceRows = qRange($pdo, "
         SELECT COALESCE(NULLIF(TRIM(tr.plate_number), ''), 'Unassigned') AS plate_number,
-               COUNT(*) AS record_count, SUM(mr.total_cost) AS recorded_cost
+               COUNT(*) AS record_count,
+               SUM(CASE WHEN mr.status = 'Completed' THEN mr.total_cost END) AS recorded_cost
         FROM maintenance_records mr
         LEFT JOIN trucks tr ON tr.truck_id = mr.truck_id
         WHERE mr.status <> 'Cancelled'
@@ -543,7 +564,7 @@ if ($canMaintenance) {
     $maintTrend = qRange($pdo, "
         SELECT $maintBucket AS bucket, SUM(mr.total_cost) AS cost
         FROM maintenance_records mr
-        WHERE mr.status <> 'Cancelled'
+        WHERE mr.status = 'Completed'
           AND $maintenanceDate >= :rangeStart AND $maintenanceDate < :rangeEnd
         GROUP BY bucket
         ORDER BY bucket
@@ -552,7 +573,7 @@ if ($canMaintenance) {
     $maintTypeRows = qRange($pdo, "
         SELECT mr.maintenance_type, COUNT(*) AS record_count, SUM(mr.total_cost) AS cost
         FROM maintenance_records mr
-        WHERE mr.status <> 'Cancelled'
+        WHERE mr.status = 'Completed'
           AND $maintenanceDate >= :rangeStart AND $maintenanceDate < :rangeEnd
         GROUP BY mr.maintenance_type
         ORDER BY cost DESC
@@ -572,7 +593,7 @@ if ($canMaintenance) {
     $waitingParts = $countOf($maintStatusRows, 'status', 'Waiting for Parts', 'record_count');
 
     $kpis = [
-        ['label' => 'Recorded maintenance cost', 'value' => $withCost ? $peso($maintTotal) : '—', 'sub' => 'Non-cancelled records, ' . $periodLabel, 'tone' => 'primary', 'hero' => true],
+        ['label' => 'Completed maintenance cost', 'value' => $withCost ? $peso($maintTotal) : '—', 'sub' => 'Completed records only, ' . $periodLabel, 'tone' => 'primary', 'hero' => true],
         ['label' => 'Maintenance records', 'value' => number_format($maintRecords), 'sub' => 'Excludes cancelled', 'tone' => ''],
         ['label' => 'Trucks with records', 'value' => number_format(count($maintenanceRows)), 'sub' => 'Distinct plates in the period', 'tone' => ''],
         ['label' => 'Waiting for parts', 'value' => number_format($waitingParts), 'sub' => 'Records at this status now', 'tone' => $waitingParts > 0 ? 'warn' : 'good'],
@@ -581,27 +602,27 @@ if ($canMaintenance) {
 
     $mt = $buckets($maintTrend);
     $charts['mntTrend'] = [
-        'title' => 'Recorded maintenance cost over time', 'span' => 8, 'height' => 'tall', 'type' => 'bar', 'format' => 'peso', 'unit' => '',
-        'note' => $granularities[$granularity] . ' totals of recorded cost.',
+        'title' => 'Completed maintenance cost over time', 'span' => 8, 'height' => 'tall', 'type' => 'bar', 'format' => 'peso', 'unit' => '',
+        'note' => $granularities[$granularity] . ' totals of the recorded cost of completed records.',
         'labels' => $mt['labels'],
         'datasets' => [['label' => 'Recorded cost', 'data' => $series($mt['keys'], $maintTrend, 'cost'), 'color' => '#d99a00']],
         'method' => [
-            'Formula' => 'SUM(total_cost) per bucket, excluding Cancelled',
+            'Formula' => 'SUM(total_cost) per bucket, Completed records only',
             'Source' => 'maintenance_records.total_cost, status, actual_completion_date, start_date, scheduled_date, created_at',
             'Date basis' => 'Completion date, else start date, else scheduled date, else record creation date.',
-            'Limits' => 'System-entered cost only; may not be all company maintenance spending. Parts are not added again (they are already part of the record total).',
+            'Limits' => 'System-entered cost of completed records only; amounts on scheduled or open records may be estimates and are not included. May not be all company maintenance spending. Parts are not added again (they are already part of the record total).',
         ],
     ];
     $charts['mntType'] = [
         'title' => 'Cost by maintenance type', 'span' => 4, 'height' => 'tall', 'type' => 'doughnut', 'format' => 'peso', 'unit' => '',
-        'note' => 'Share of recorded cost in ' . strtolower($periodLabel) . '.',
+        'note' => 'Share of completed maintenance cost in ' . strtolower($periodLabel) . '.',
         'labels' => array_map(static fn($r) => (string)$r['maintenance_type'], $maintTypeRows),
         'datasets' => [[
             'label' => 'Cost', 'data' => array_map(static fn($r) => (float)$r['cost'], $maintTypeRows),
             'colors' => array_map(static fn($r) => $colorOf($maintTypeColors, $r['maintenance_type']), $maintTypeRows),
         ]],
         'method' => [
-            'Formula' => 'SUM(total_cost) grouped by maintenance_type, excluding Cancelled',
+            'Formula' => 'SUM(total_cost) grouped by maintenance_type, Completed records only',
             'Source' => 'maintenance_records.maintenance_type, total_cost',
             'Date basis' => 'Same maintenance date rule as the trend.',
             'Limits' => 'Types are as entered (Preventive, Repair, Inspection, Other).',
@@ -609,14 +630,14 @@ if ($canMaintenance) {
     ];
     $topMaint = array_slice($sortDesc($withCost, 'recorded_cost'), 0, 8);
     $charts['mntTrucks'] = [
-        'title' => 'Top trucks by recorded cost', 'span' => 6, 'height' => 'medium', 'type' => 'hbar', 'format' => 'peso', 'unit' => '',
+        'title' => 'Top trucks by completed maintenance cost', 'span' => 6, 'height' => 'medium', 'type' => 'hbar', 'format' => 'peso', 'unit' => '',
         'note' => 'Top 8 of ' . count($withCost) . ' trucks with a recorded amount.',
         'labels' => array_map(static fn($r) => (string)$r['plate_number'], $topMaint),
         'datasets' => [['label' => 'Recorded cost', 'data' => array_map(static fn($r) => (float)$r['recorded_cost'], $topMaint), 'color' => '#d6403f']],
         'method' => [
-            'Formula' => 'SUM(total_cost) per truck, highest first',
+            'Formula' => 'SUM(total_cost) of Completed records per truck, highest first',
             'Source' => 'maintenance_records.truck_id → trucks.plate_number; total_cost',
-            'Date basis' => 'Same maintenance date rule; Cancelled excluded.',
+            'Date basis' => 'Same maintenance date rule; Completed records only.',
             'Limits' => 'Records without an amount are not plotted and not treated as zero.',
         ],
     ];
@@ -642,9 +663,9 @@ if ($canMaintenance) {
         'kpis' => $kpis,
         'charts' => ['mntTrend', 'mntType', 'mntTrucks', 'mntStatus'],
         'tables' => [
-            ['title' => 'Recorded cost by truck', 'headers' => ['Truck', 'Records', 'Recorded cost'],
-             'rows' => array_map(static fn($r) => [(string)$r['plate_number'], (int)$r['record_count'], $r['recorded_cost'] === null ? 'No recorded amount' : $peso($r['recorded_cost'])], $maintenanceRows)],
-            ['title' => 'Recorded cost by type', 'headers' => ['Type', 'Records', 'Recorded cost'],
+            ['title' => 'Completed maintenance cost by truck', 'headers' => ['Truck', 'Records (non-cancelled)', 'Completed cost'],
+             'rows' => array_map(static fn($r) => [(string)$r['plate_number'], (int)$r['record_count'], $r['recorded_cost'] === null ? 'No completed amount' : $peso($r['recorded_cost'])], $maintenanceRows)],
+            ['title' => 'Completed maintenance cost by type', 'headers' => ['Type', 'Completed records', 'Completed cost'],
              'rows' => array_map(static fn($r) => [(string)$r['maintenance_type'], (int)$r['record_count'], $peso($r['cost'])], $maintTypeRows)],
             ['title' => 'Records by status', 'headers' => ['Status', 'Records'],
              'rows' => array_map(static fn($r) => [(string)$r['status'], (int)$r['record_count']], $maintStatusRows)],

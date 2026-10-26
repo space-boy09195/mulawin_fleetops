@@ -6,6 +6,8 @@ require_once __DIR__ . '/../config/database.php';
 requirePermission('purchasing.view');
 $pdo = getDBConnection();
 $suppliers = $pdo->query("SELECT supplier_id, supplier_name FROM suppliers WHERE status = 'Active' ORDER BY supplier_name")->fetchAll(PDO::FETCH_ASSOC);
+// Every supplier (active and inactive) for the supplier maintenance form.
+$allSuppliers = $pdo->query("SELECT supplier_id, supplier_name, contact_person, contact_number, email, status FROM suppliers ORDER BY supplier_name")->fetchAll(PDO::FETCH_ASSOC);
 $parts = $pdo->query('SELECT part_id, part_number, part_name, unit, unit_cost FROM parts WHERE is_active = 1 ORDER BY part_name')->fetchAll(PDO::FETCH_ASSOC);
 // Status: the purchase request's while it awaits (or failed) approval, the
 // purchase order's afterwards.
@@ -29,9 +31,11 @@ layoutHead('Purchasing');
 <div id="purchasingFeedback" class="alert d-none" role="alert"></div>
 <?php if (currentUserHasAnyPermission(['purchasing.manage'])): ?>
 <div class="card mb-4">
-  <div class="card-header-custom"><h2 class="card-title-custom">Add supplier</h2></div>
+  <div class="card-header-custom"><h2 class="card-title-custom">Add or edit supplier</h2></div>
   <div class="card-body-custom">
     <form id="supplierForm" class="row g-3">
+      <div class="col-md-6"><label class="form-label" for="supplierPick">Supplier record</label><select id="supplierPick" class="form-select"><option value="">New supplier</option><?php foreach ($allSuppliers as $supplier): ?><option value="<?= (int)$supplier['supplier_id'] ?>" data-name="<?= htmlspecialchars($supplier['supplier_name'], ENT_QUOTES) ?>" data-contact="<?= htmlspecialchars((string)$supplier['contact_person'], ENT_QUOTES) ?>" data-phone="<?= htmlspecialchars((string)$supplier['contact_number'], ENT_QUOTES) ?>" data-email="<?= htmlspecialchars((string)$supplier['email'], ENT_QUOTES) ?>" data-status="<?= htmlspecialchars($supplier['status'], ENT_QUOTES) ?>"><?= htmlspecialchars($supplier['supplier_name']) ?><?= $supplier['status'] === 'Inactive' ? ' (Inactive)' : '' ?></option><?php endforeach; ?></select></div>
+      <div class="col-md-3"><label class="form-label" for="supplierStatus">Status</label><select id="supplierStatus" class="form-select"><option value="Active">Active</option><option value="Inactive">Inactive</option></select></div>
       <div class="col-md-4"><label class="form-label" for="supplierName">Supplier name</label><input id="supplierName" class="form-control" maxlength="180" required></div>
       <div class="col-md-3"><label class="form-label" for="supplierContact">Contact person</label><input id="supplierContact" class="form-control" maxlength="150"></div>
       <div class="col-md-2"><label class="form-label" for="supplierPhone">Phone</label><input id="supplierPhone" class="form-control" maxlength="50"></div>
@@ -82,10 +86,22 @@ layoutHead('Purchasing');
     });
     list.replaceChildren(...rows);
   };
+  const supplierPick = document.getElementById('supplierPick');
+  supplierPick.addEventListener('change', () => {
+    const option = supplierPick.options[supplierPick.selectedIndex];
+    const editing = supplierPick.value !== '';
+    document.getElementById('supplierName').value = editing ? option.dataset.name : '';
+    document.getElementById('supplierContact').value = editing ? option.dataset.contact : '';
+    document.getElementById('supplierPhone').value = editing ? option.dataset.phone : '';
+    document.getElementById('supplierEmail').value = editing ? option.dataset.email : '';
+    document.getElementById('supplierStatus').value = editing ? option.dataset.status : 'Active';
+  });
   document.getElementById('supplierForm').addEventListener('submit', async event => {
     event.preventDefault();
     const body = new URLSearchParams({
-      action: 'create_supplier',
+      action: supplierPick.value ? 'edit_supplier' : 'create_supplier',
+      supplier_id: supplierPick.value,
+      status: document.getElementById('supplierStatus').value,
       supplier_name: document.getElementById('supplierName').value,
       contact_person: document.getElementById('supplierContact').value,
       phone: document.getElementById('supplierPhone').value,

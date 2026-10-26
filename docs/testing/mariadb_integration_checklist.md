@@ -1,8 +1,11 @@
 # MariaDB integration test checklist
 
-**Status: NOT TESTED.** No item below has been run. Run only against
-`mulawin_fleetops_test`, after `docs/testing/database_setup_checklist.md`
-steps 1–7 were approved and completed. Record each result as PASS / FAIL
+**Status: NOT TESTED.** No item below has been run. Run only against the
+separate test database `mulawin_fleetops_e2e`, through a separate copy of the
+application with its own `.env` and a restricted database account, after
+`docs/testing/database_setup_checklist.md` steps 1–7 were approved and
+completed (none of this is set up yet). Never run these items against the
+working database `mulawin_fleetops_test`. Record each result as PASS / FAIL
 with the date, the account used and the evidence (row counts, audit row
 ids, screenshots). Stubs, SQLite or static checks never count as a PASS here.
 
@@ -87,3 +90,24 @@ are needed for the concurrency items.
 - [ ] Soft delete archives the row and its children; restore validates columns; purge removes the archive only.
 - [ ] Automation and reminders stay disabled; running them manually (if approved) sends nothing externally.
 - [ ] Notifications link to the right entity and are only visible to their recipient.
+
+## Objective-alignment corrections (2026-10-21) — NOT TESTED
+
+Run each item on the isolated test database and record PASS / FAIL with
+evidence. Expected results come from the code as changed; they are not
+observed results.
+
+- [ ] 1.5 / 1.9 / 4.2 Car Carrier dispatcher (Day assignment): Trip Monitor, Dispatch request list and Trip Problem Reports show no Container / Wing Van or Night-shift trips; opening `trip_workflow.php`, `trip_report.php` or `trip_pre_advice.php` with such a `trip_id` returns 403; Admin and Operations Head still see every trip.
+- [ ] 1.10 Starting an inspection timer and submitting before 900 s is refused by the server (also with a crafted request); at or after 900 s it saves. Departure / return inspection photos (JPG/PNG/WebP, up to 8) create `files`, `documents` (scope `maintenance`) and `inspection_photos` rows linked to the new `inspection_id`; a failed save leaves no stored file.
+- [ ] 1.2 Approving a dispatch sets the truck to Assigned / availability Unavailable; departure sets On Trip / Unavailable; completion or cancellation sets Available / Available.
+- [ ] 1.3 / 2.7 With a truck document expiring in 28 days and thresholds `60,30,15,7`, `php scripts/generate_reminders.php` sends one 30-day reminder per recipient; a second run sends nothing; an `automation_runs` row with status `success` is written.
+- [ ] 2.1 Work order: In Progress → Waiting for Parts → In Progress → Completed with labour and other cost and a finding; `total_cost` = labour + parts + other; a `maintenance_findings` row exists.
+- [ ] 2.5 Maintenance user issues a part to a job (Stock Out with linked job): stock decreases, `maintenance_parts` row added, job `parts_cost` increases. The same user is refused (403) for Stock In, Adjustment, an unlinked movement and `add_part`. A linked Return above the issued quantity is refused; a valid Return lowers the job's parts cost.
+- [ ] 2.4 Purchasing edits a part (reorder level, warranty) and deactivates it: history is kept and the part disappears from new movements and purchase orders. Editing and deactivating a supplier works; an inactive supplier is not offered on new purchase orders.
+- [ ] 1.7 A Container instruction with a client booking reference stores it as `client_bookings.booking_reference`; a duplicate reference is refused; non-container instructions refuse it.
+- [ ] 3.2 Creating a billing with a client other than the trip's client returns 422.
+- [ ] 3.3 Billing and Collection can list and download a delivery receipt uploaded at trip completion (scope `operations`); a dispatcher cannot.
+- [ ] 3.4 After the approved permission/workflow update: a Finance user sees a dispatcher's Trip Allowance request on Requests and approves it (audit row `APPROVAL_DECISION`); Finance does not see the dispatch or route request sections; a Payroll user gets 403 on `approval_decision_handler.php`.
+- [ ] 3.5 A second Driver Allowance expense for the same trip is refused (409); editing the existing one works.
+- [ ] 3.7 Trip Pay for a Cancelled trip is refused; resubmitting an unchanged amount changes nothing; a changed amount for an existing entry is refused (409) until an Admin cancels the entry; re-logging a cancelled entry is audited with its old values.
+- [ ] 5.2 / 5.4 Analytics: an In Progress trip scheduled before the selected period appears in "Trips by current status"; maintenance cost charts include only Completed records; collections on a Cancelled billing are excluded.

@@ -45,7 +45,7 @@
     let busy = false;
     let ready = false;
     let availableAt = 0;
-    const minimumSeconds = Number(modal?.dataset.minDurationSeconds || 300);
+    const minimumSeconds = Number(modal?.dataset.minDurationSeconds || 900);
 
     function refresh() {
       if (button) button.disabled = busy || !ready || Date.now() < availableAt;
@@ -295,19 +295,24 @@
     const currentStatus = trigger.dataset.currentStatus || '';
     const options = currentStatus === 'Open'
       ? ['In Progress', 'Completed', 'Cancelled']
-      : currentStatus === 'In Progress' ? ['Completed', 'Cancelled'] : [];
+      : currentStatus === 'In Progress' ? ['Waiting for Parts', 'Completed', 'Cancelled']
+      : currentStatus === 'Waiting for Parts' ? ['In Progress', 'Completed', 'Cancelled'] : [];
     workOrderUpdateId.value = trigger.dataset.workOrderId || '';
     document.getElementById('workOrderUpdateTitle').textContent =
       trigger.dataset.workOrderTitle || 'Repair Work Order';
     workOrderNextStatus.innerHTML = options
       .map(status => `<option value="${status}">${status}</option>`).join('');
     workOrderClosureNotes.value = '';
+    ['workOrderLaborCost', 'workOrderOtherCost', 'workOrderFinding'].forEach(id => {
+      const field = document.getElementById(id);
+      if (field) field.value = '';
+    });
     hideAlert(workOrderUpdateAlert);
     workOrderNextStatus.dispatchEvent(new Event('change'));
   });
 
   workOrderNextStatus?.addEventListener('change', () => {
-    const closureRequired = workOrderNextStatus.value !== 'In Progress';
+    const closureRequired = ['Completed', 'Cancelled'].includes(workOrderNextStatus.value);
     workOrderClosureNotes.required = closureRequired;
     workOrderClosureNotes.closest('.modal-body')?.querySelector('label[for="workOrderClosureNotes"]')
       ?.classList.toggle('text-danger', closureRequired);
@@ -317,16 +322,21 @@
     hideAlert(workOrderUpdateAlert);
     const status = workOrderNextStatus?.value || '';
     const closureNotes = workOrderClosureNotes?.value.trim() || '';
-    if (!workOrderUpdateId?.value || !status || (status !== 'In Progress' && !closureNotes)) {
+    if (!workOrderUpdateId?.value || !status || (['Completed', 'Cancelled'].includes(status) && !closureNotes)) {
       showAlert(workOrderUpdateAlert, 'Provide the next status and required closure notes.');
       return;
     }
+    const finding = document.getElementById('workOrderFinding')?.value.trim() || '';
     saveWorkOrderStatusBtn.disabled = true;
     postAjax({
       action: 'update_work_order',
       work_order_id: workOrderUpdateId.value,
       status,
       closure_notes: closureNotes,
+      labor_cost: document.getElementById('workOrderLaborCost')?.value.trim() || '',
+      other_cost: document.getElementById('workOrderOtherCost')?.value.trim() || '',
+      finding,
+      finding_severity: finding ? (document.getElementById('workOrderFindingSeverity')?.value || 'Medium') : '',
     }).then(response => {
       if (response.success) window.softReload();
       else showAlert(workOrderUpdateAlert, response.message || 'Could not update the work order.');
@@ -827,8 +837,16 @@
       showAlert(inspectionAlert, 'Select or update at least one inspection part before saving.');
       return;
     }
+    const photoInput = document.getElementById('inspectionPhotos');
+    const photos = stage === 'General' ? [] : [...(photoInput?.files || [])];
+    if (photos.length > 8) {
+      showAlert(inspectionAlert, 'Attach up to 8 inspection photos.');
+      return;
+    }
     inspectionTimer.setBusy(true);
-    postAjax({
+    // Multipart so trip-inspection photos travel with the findings.
+    const formData = new FormData();
+    Object.entries({
       action: 'save_inspection',
       truck_id: inspectionTruck.value,
       inspection_stage: stage,
@@ -837,7 +855,10 @@
       inspection_date: inspectionDate.value,
       notes: inspectionNotes.value.trim(),
       findings: JSON.stringify(findings),
-    }).then(res => {
+      [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN,
+    }).forEach(([key, value]) => formData.append(key, value));
+    photos.forEach(file => formData.append('inspection_photos[]', file));
+    fetch(AJAX_URL, { method: 'POST', body: formData }).then(r => r.json()).then(res => {
       if (res.success) window.softReload();
       else showAlert(inspectionAlert, res.message || 'Could not save inspection.');
     }).catch(() => showAlert(inspectionAlert, 'Network error. Please try again.'))

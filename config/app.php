@@ -19,11 +19,19 @@ define('CSRF_TOKEN_NAME', env('CSRF_TOKEN_NAME', 'csrf_token'));
 define('APP_TIMEZONE', env('APP_TIMEZONE', 'Asia/Manila'));
 define('COMPANY_EMAIL_DOMAIN', strtolower(ltrim((string) env('COMPANY_EMAIL_DOMAIN', 'rpm.com'), '@')));
 define('DOCUMENT_STORAGE_PATH', env('DOCUMENT_STORAGE_PATH', dirname(__DIR__) . '/uploads'));
-// Change this value to adjust the minimum time required for checklist and vehicle inspection submissions.
-define('MAINTENANCE_FORM_MIN_DURATION_SECONDS', 300);
+// Minimum time required for checklist and vehicle inspection submissions
+// (objective 1.10: fifteen minutes). Enforced on the server by
+// includes/inspections.php; a template may only raise it.
+define('MAINTENANCE_FORM_MIN_DURATION_SECONDS', 900);
 date_default_timezone_set(APP_TIMEZONE);
 
-// ---- Role IDs (must match roles table in DB) ---------------
+// ---- Legacy role numbers -------------------------------------
+// These are the legacy role numbers, NOT the current roles.role_id values,
+// and they are not used for authorization: roles are identified by
+// roles.system_key and access by permission grants (includes/session.php).
+// requireRole() maps a number N to the permission key 'legacy.role.N', so
+// renumbering would change the meaning of those grants. Kept for the role
+// labels and auth/seed_users.php.
 define('ROLE_ADMIN',           1);
 define('ROLE_OPERATIONS_HEAD',      5);
 define('ROLE_DISPATCHER',      2);

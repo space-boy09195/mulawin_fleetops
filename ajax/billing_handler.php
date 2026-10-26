@@ -106,7 +106,7 @@ if ($action === 'create_billing') {
     try {
         $pdo->beginTransaction();
         // Verify trip exists and is completed (locked).
-        $tripQuery = $pdo->prepare('SELECT trip_id, trip_number, status FROM trips WHERE trip_id = ? FOR UPDATE');
+        $tripQuery = $pdo->prepare('SELECT trip_id, trip_number, status, client_id FROM trips WHERE trip_id = ? FOR UPDATE');
         $tripQuery->execute([$tripId]);
         $trip = $tripQuery->fetch(PDO::FETCH_ASSOC);
         if (!$trip) {
@@ -116,6 +116,11 @@ if ($action === 'create_billing') {
         if ($trip['status'] !== 'Completed') {
             $pdo->rollBack();
             jsonFail('Billings can only be created for completed trips.');
+        }
+        // The billed client must be the trip's client.
+        if ((int)$trip['client_id'] !== (int)$clientId) {
+            $pdo->rollBack();
+            jsonFail('The selected client does not match the client of this trip.', 422);
         }
 
         $pdo->prepare("

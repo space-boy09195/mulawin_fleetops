@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
         truck_type: document.getElementById('instructionTruckType').value,
         unit_count: document.getElementById('instructionUnits').value,
         instruction_notes: document.getElementById('instructionNotes').value.trim(),
+        client_booking_reference: document.getElementById('instructionBookingReference')?.value.trim() || '',
       }, window.fleetOpsIdempotencyHeaders(scope));
       if (!result.success) {
         showAlert(result.message || 'Could not send the instruction.');
@@ -115,7 +116,21 @@ document.addEventListener('DOMContentLoaded', () => {
       truck_type: row.querySelector('.batch-truck-type').value,
       unit_count: row.querySelector('.batch-unit-count').value,
       instruction_notes: row.querySelector('.batch-instruction-notes').value.trim(),
+      client_booking_reference: row.querySelector('.batch-booking-reference')?.value.trim() || '',
     }));
+    // The server checks each reference against saved bookings, not against
+    // the other trips in the same batch (the database compares references
+    // case-insensitively), so repeated references are caught here.
+    const seenReferences = new Map();
+    for (const [index, entry] of entries.entries()) {
+      const key = entry.client_booking_reference.toLowerCase();
+      if (!key) continue;
+      if (seenReferences.has(key)) {
+        showAlert(`Trip ${index + 1} repeats the client booking reference of trip ${seenReferences.get(key)}. Each trip needs its own reference.`);
+        return;
+      }
+      seenReferences.set(key, index + 1);
+    }
     const scope = 'dispatch-instruction:batch-create';
     sendBatchButton.disabled = true;
     try {

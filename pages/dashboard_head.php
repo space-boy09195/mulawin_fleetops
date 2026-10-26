@@ -8,22 +8,29 @@ require_once __DIR__ . '/../includes/trip_queries.php';
 requirePermission('company.dashboard.view');
 
 $pdo = getDBConnection();
+$canTrips = currentUserHasAnyPermission(['trips.view']);
+$canFleet = currentUserHasAnyPermission(['fleet.view']);
+$canBilling = currentUserHasAnyPermission(['billing.view']);
 $canApprovals = currentUserHasAnyPermission(['approvals.review']);
 $canIncidents = currentUserHasAnyPermission(['incidents.manage']);
 $canMaintenance = currentUserHasAnyPermission(['maintenance.view']);
 $canParts = currentUserHasAnyPermission(['parts.view']);
+$activeTripCount = $canTrips ? dashboardActiveTripCount($pdo) : 0;
+$fleetCounts = $canFleet ? dashboardFleetCounts($pdo) : [];
+$receivables = $canBilling ? dashboardReceivables($pdo) : ['outstanding' => 0.0];
+$pendingApprovals = $canApprovals ? dashboardPendingApprovalCount($pdo, true, currentRoleId()) : 0;
 
-$activeTrips = $pdo->query(
+$activeTrips = $canTrips ? $pdo->query(
     tripSelectSql() . "
      WHERE t.status IN (" . metricSqlList(TRIP_ACTIVE_STATUSES) . ")
      ORDER BY " . tripOverdueSql('t') . " DESC, t.scheduled_departure ASC
      LIMIT 10"
-)->fetchAll(PDO::FETCH_ASSOC);
-$pastEtaTrips = $pdo->query(
+)->fetchAll(PDO::FETCH_ASSOC) : [];
+$pastEtaTrips = $canTrips ? $pdo->query(
     tripSelectSql() . "
      WHERE " . tripOverdueSql('t') . "
      ORDER BY t.scheduled_arrival ASC LIMIT 5"
-)->fetchAll(PDO::FETCH_ASSOC);
+)->fetchAll(PDO::FETCH_ASSOC) : [];
 
 $alerts = [];
 foreach ($pastEtaTrips as $trip) {
@@ -34,11 +41,10 @@ foreach ($pastEtaTrips as $trip) {
     ];
 }
 if ($canApprovals) {
-    $pending = dashboardPendingApprovalCount($pdo, true, currentRoleId());
-    if ($pending > 0) {
+    if ($pendingApprovals > 0) {
         $alerts[] = [
             'title' => 'Requests awaiting approval',
-            'detail' => $pending . ' request' . ($pending === 1 ? '' : 's'),
+            'detail' => $pendingApprovals . ' request' . ($pendingApprovals === 1 ? '' : 's'),
             'url' => APP_BASE . '/pages/requests.php',
         ];
     }
@@ -73,17 +79,41 @@ if ($canParts) {
 
 $GLOBALS['page_needs_chart'] = false;
 layoutHead('Management Dashboard');
+$fullName = trim((string)($_SESSION['full_name'] ?? $_SESSION['username'] ?? ''));
+$roleName = (string)($_SESSION['role_name'] ?? 'Admin');
+$hour = (int)date('G');
+$greeting = $hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good evening');
 ?>
 <div class="page-header d-flex justify-content-between align-items-start flex-wrap gap-3">
   <div>
-    <h1 class="page-title">Management Dashboard</h1>
-    <p class="page-subtitle">Actionable alerts and current active trips.</p>
+    <h1 class="page-title"><?= htmlspecialchars($greeting . ($fullName !== '' ? ', ' . $fullName : '')) ?></h1>
+    <p class="page-subtitle"><?= htmlspecialchars($roleName) ?> · Fleet, operations, finance, approvals, and current alerts.</p>
   </div>
-  <a class="btn btn-outline-primary" href="<?= APP_BASE ?>/pages/analytics.php">Analytics</a>
+  <time class="text-muted"><?= date('l, F j, Y') ?></time>
 </div>
 
+<section class="row row-cols-1 row-cols-md-2 row-cols-xl-4 g-3 mb-4" aria-label="Dashboard summary">
+  <?php if ($canTrips): ?><div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/trip_monitor.php"><span class="stat-icon blue"><i class="bi bi-map"></i></span><span class="stat-info"><span class="stat-value"><?= $activeTripCount ?></span><span class="stat-label">Active trips</span></span></a></div><?php endif; ?>
+  <?php if ($canFleet): ?><div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/fleet_status.php"><span class="stat-icon green"><i class="bi bi-truck"></i></span><span class="stat-info"><span class="stat-value"><?= (int)($fleetCounts['Available'] ?? 0) ?></span><span class="stat-label">Available trucks</span></span></a></div><?php endif; ?>
+  <?php if ($canBilling): ?><div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/billing.php"><span class="stat-icon amber"><i class="bi bi-receipt"></i></span><span class="stat-info"><span class="stat-value">₱<?= number_format($receivables['outstanding'], 2) ?></span><span class="stat-label">Outstanding balances</span></span></a></div><?php endif; ?>
+  <?php if ($canApprovals): ?><div class="col"><a class="stat-card text-decoration-none h-100" href="<?= APP_BASE ?>/pages/requests.php"><span class="stat-icon red"><i class="bi bi-inbox"></i></span><span class="stat-info"><span class="stat-value"><?= $pendingApprovals ?></span><span class="stat-label">Pending approvals</span></span></a></div><?php endif; ?>
+</section>
+
+<section class="card mb-4" aria-labelledby="management-quick-heading">
+  <div class="card-header-custom"><h2 id="management-quick-heading" class="card-title-custom mb-0">Quick Actions</h2></div>
+  <div class="card-body-custom d-flex flex-wrap gap-2">
+    <?php if ($canApprovals): ?><a class="btn btn-outline-primary" href="<?= APP_BASE ?>/pages/requests.php">Requests &amp; approvals</a><?php endif; ?>
+    <?php if ($canTrips): ?><a class="btn btn-outline-primary" href="<?= APP_BASE ?>/pages/dispatch.php">Dispatch workspace</a><?php endif; ?>
+    <?php if ($canFleet): ?><a class="btn btn-outline-primary" href="<?= APP_BASE ?>/pages/fleet_status.php">Fleet status</a><?php endif; ?>
+    <?php if ($canBilling): ?><a class="btn btn-outline-primary" href="<?= APP_BASE ?>/pages/billing.php">Billing</a><?php endif; ?>
+    <?php if (currentUserHasAnyPermission(['finance.funds.view', 'finance.disbursements.view', 'finance.ap.view'])): ?><a class="btn btn-outline-primary" href="<?= APP_BASE ?>/pages/finance.php">Finance</a><?php endif; ?>
+    <?php if ($canMaintenance): ?><a class="btn btn-outline-primary" href="<?= APP_BASE ?>/pages/maintenance.php">Maintenance</a><?php endif; ?>
+    <?php if (currentUserHasAnyPermission(['reports.view', 'operations.reports.view', 'maintenance.reports.view', 'billing.view'])): ?><a class="btn btn-outline-primary" href="<?= APP_BASE ?>/pages/analytics.php">Analytics</a><?php endif; ?>
+  </div>
+</section>
+
 <section class="card mb-4" aria-labelledby="management-alerts-heading">
-  <div class="card-header-custom"><h2 id="management-alerts-heading" class="card-title-custom mb-0">Alerts</h2></div>
+  <div class="card-header-custom"><h2 id="management-alerts-heading" class="card-title-custom mb-0">Work to Address</h2></div>
   <div class="card-body-custom">
     <?php if (!$alerts): ?><p class="text-muted mb-0">No current actionable alerts.</p>
     <?php else: ?><ul class="list-group list-group-flush">
@@ -97,7 +127,7 @@ layoutHead('Management Dashboard');
   </div>
 </section>
 
-<section class="card" aria-labelledby="management-active-heading">
+<?php if ($canTrips): ?><section class="card" aria-labelledby="management-active-heading">
   <div class="card-header-custom d-flex justify-content-between align-items-center">
     <h2 id="management-active-heading" class="card-title-custom mb-0">Active Trips</h2>
     <a href="<?= APP_BASE ?>/pages/trip_monitor.php">Trip monitoring</a>
@@ -122,4 +152,5 @@ layoutHead('Management Dashboard');
     </table>
   </div>
 </section>
+<?php endif; ?>
 <?php layoutFoot(); ?>

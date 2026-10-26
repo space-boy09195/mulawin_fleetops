@@ -196,7 +196,7 @@ try {
     if ($status === 'In Progress') {
         if ($truckId > 0) {
             $truckUpdate = $pdo->prepare(
-                "UPDATE trucks SET status = 'On Trip' WHERE truck_id = ? AND status = 'Assigned'"
+                "UPDATE trucks SET status = 'On Trip', availability_status = 'Unavailable' WHERE truck_id = ? AND status = 'Assigned'"
             );
             $truckUpdate->execute([$truckId]);
             if ($truckUpdate->rowCount() === 1) {

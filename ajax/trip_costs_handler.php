@@ -93,6 +93,27 @@ findOrFail($pdo, 'trips', 'trip_id', $tripId, 'Trip not found.');
 // notes share the NOT NULL description column.
 try {
     $pdo->beginTransaction();
+    // A trip's allowance is one financial transaction (one active Trip
+    // Allowance fund request per trip, finance_handler.php), so it is
+    // recorded as at most one Driver Allowance expense; a correction edits
+    // that record. The trip row lock serializes concurrent saves.
+    $addsAllowance = $action === 'create_expense'
+        ? count(array_filter($expenseEntries, static fn($e) => $e['expense_type'] === 'Driver Allowance'))
+        : ($type === 'Driver Allowance' ? 1 : 0);
+    if ($addsAllowance > 0) {
+        $pdo->prepare('SELECT trip_id FROM trips WHERE trip_id = ? FOR UPDATE')->execute([$tripId]);
+        $existingAllowance = $pdo->prepare(
+            "SELECT expense_id FROM expense_records
+             WHERE reference_type = 'trip' AND reference_id = ? AND expense_type = 'Driver Allowance'
+               AND expense_id <> ?
+             LIMIT 1"
+        );
+        $existingAllowance->execute([$tripId, $action === 'update_expense' ? $expenseId : 0]);
+        if ($addsAllowance > 1 || $existingAllowance->fetchColumn()) {
+            $pdo->rollBack();
+            jsonFail('This trip already has its Driver Allowance expense recorded. Edit that record instead of adding another.', 409);
+        }
+    }
     if ($action === 'create_expense') {
         $insertStmt = $pdo->prepare("
             INSERT INTO expense_records

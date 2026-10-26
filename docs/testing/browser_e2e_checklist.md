@@ -1,8 +1,11 @@
 # Manual browser end-to-end checklist
 
 **Status: NOT TESTED.** Browser end-to-end testing has not been run. Run it
-against the application pointed at `mulawin_fleetops_test` only (see
-`database_setup_checklist.md`), with test accounts the owner created. Use a
+only against a separate copy of the application whose own `.env` points to
+the separate test database `mulawin_fleetops_e2e` through a restricted
+database account (see `database_setup_checklist.md`; none of this is set up
+yet), with test accounts the owner created. Never run it against the working
+database `mulawin_fleetops_test`. Use a
 current Chrome/Edge and Firefox, with DevTools open (Console + Network).
 
 For each item record: role, browser, PASS/FAIL, console errors, screenshot.

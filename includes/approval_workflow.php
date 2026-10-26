@@ -106,8 +106,77 @@ function pendingApprovalRequestId(PDO $pdo, string $workflowKey, string $entityT
 }
 
 /**
+ * Workflows whose request goes to Admin when the requester belongs to the
+ * role configured for the first approval step (owner decision E2): a Finance
+ * user's own fund request is reviewed by Admin, not by Finance. Other
+ * workflows keep their configured approver roles.
+ */
+const APPROVAL_SELF_ROLE_TO_ADMIN_WORKFLOWS = ['fund_request'];
+
+/**
+ * Role of the requesting user account, or null when the account is missing.
+ */
+function approvalRequesterRoleId(PDO $pdo, int $userId): ?int {
+    $stmt = $pdo->prepare('SELECT role_id FROM users WHERE user_id = ?');
+    $stmt->execute([$userId]);
+    $roleId = $stmt->fetchColumn();
+    return $roleId === false || $roleId === null ? null : (int)$roleId;
+}
+
+/**
+ * The active Admin role (roles.system_key = 'admin'), or null.
+ */
+function approvalAdminRoleId(PDO $pdo): ?int {
+    $stmt = $pdo->prepare("SELECT role_id FROM roles WHERE system_key = 'admin' AND is_active = 1");
+    $stmt->execute();
+    $roleId = $stmt->fetchColumn();
+    return $roleId === false ? null : (int)$roleId;
+}
+
+/**
+ * Per-request copy of the workflow's step template. For a workflow listed in
+ * APPROVAL_SELF_ROLE_TO_ADMIN_WORKFLOWS, when the requester's role is the
+ * first step's approver role, that request's first step is assigned to the
+ * Admin role instead; the template (approval_workflow_steps) is never
+ * changed. Returns [steps, routing], routing being null when nothing was
+ * rerouted. Throws when the requester or an active Admin role is missing, so
+ * no request is created that nobody may review.
+ */
+function approvalStepsForRequester(PDO $pdo, string $workflowKey, array $configuredSteps, int $requestedBy): array {
+    if (!$configuredSteps || !in_array($workflowKey, APPROVAL_SELF_ROLE_TO_ADMIN_WORKFLOWS, true)) {
+        return [$configuredSteps, null];
+    }
+    $requesterRoleId = approvalRequesterRoleId($pdo, $requestedBy);
+    if ($requesterRoleId === null) {
+        throw new RuntimeException('The requesting user account was not found.');
+    }
+    $configuredRoleId = (int)$configuredSteps[0]['approver_role_id'];
+    if ($requesterRoleId !== $configuredRoleId) {
+        return [$configuredSteps, null];
+    }
+    $adminRoleId = approvalAdminRoleId($pdo);
+    if ($adminRoleId === null) {
+        throw new RuntimeException('No active Admin role is available to review this request.');
+    }
+    if ($adminRoleId === $configuredRoleId) {
+        // Already an Admin step (an Admin's own request): the decision
+        // handler's audited self-review rule applies.
+        return [$configuredSteps, null];
+    }
+    $configuredSteps[0]['approver_role_id'] = $adminRoleId;
+    return [$configuredSteps, [
+        'reason'             => 'requester_in_approver_role',
+        'step_number'        => (int)$configuredSteps[0]['step_number'],
+        'configured_role_id' => $configuredRoleId,
+        'routed_role_id'     => $adminRoleId,
+    ]];
+}
+
+/**
  * Create a Pending approval request for an entity from the workflow's step
  * template. $entityType must equal the workflow's configured entity_type.
+ * $routing is set (by reference) when the first step was routed to Admin by
+ * approvalStepsForRequester(), with the users notified; the caller audits it.
  */
 function createApprovalRequest(
     PDO $pdo,
@@ -115,8 +184,10 @@ function createApprovalRequest(
     string $entityType,
     int $entityId,
     int $requestedBy,
-    ?string $remarks = null
+    ?string $remarks = null,
+    ?array &$routing = null
 ): int {
+    $routing = null;
     $workflow = approvalWorkflowByKey($pdo, $workflowKey);
     if ($workflow === null) {
         throw new RuntimeException('No active approval workflow is configured for ' . $workflowKey . '.');
@@ -138,7 +209,8 @@ function createApprovalRequest(
     if (!$configuredSteps) {
         throw new RuntimeException('No approval roles are configured for this request type.');
     }
-    foreach ($configuredSteps as $step) {
+    [$requestSteps, $routedFrom] = approvalStepsForRequester($pdo, $workflowKey, $configuredSteps, $requestedBy);
+    foreach ($requestSteps as $step) {
         if (!roleHasApprovalReview($pdo, (int)$step['approver_role_id'])) {
             throw new RuntimeException('An approval-chain role is missing the approvals.review permission.');
         }
@@ -167,7 +239,7 @@ function createApprovalRequest(
         "INSERT INTO approval_steps (approval_request_id, step_number, approver_role_id, status)
          VALUES (?, ?, ?, 'Pending')"
     );
-    foreach ($configuredSteps as $step) {
+    foreach ($requestSteps as $step) {
         $insertStep->execute([
             $approvalId,
             (int)$step['step_number'],
@@ -180,17 +252,23 @@ function createApprovalRequest(
          VALUES (?, 'Submitted', ?, ?)"
     )->execute([$approvalId, $requestedBy, $remarks]);
 
-    $firstRoleId = (int)$configuredSteps[0]['approver_role_id'];
+    $firstRoleId = (int)$requestSteps[0]['approver_role_id'];
+    $notifiedUserIds = [];
     foreach (approvalReviewerUserIds($pdo, $firstRoleId) as $userId) {
         createNotification(
             $pdo,
             $userId,
             'Approval required',
-            $workflow['workflow_name'] . ' #' . $entityId . ' is awaiting review.',
+            $workflow['workflow_name'] . ' #' . $entityId . ' is awaiting review.'
+                . ($routedFrom !== null ? ' Routed to Admin because the requester belongs to the approver role.' : ''),
             'approval',
             'approval_request',
             $approvalId
         );
+        $notifiedUserIds[] = $userId;
+    }
+    if ($routedFrom !== null) {
+        $routing = $routedFrom + ['notified_user_ids' => $notifiedUserIds];
     }
 
     return $approvalId;

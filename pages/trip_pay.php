@@ -159,7 +159,7 @@ layoutHead('Trip Pay', APP_BASE . '/assets/css/billing.css');
         <div id="crewPayRows" class="d-grid gap-2 mb-3"></div>
         <div class="mb-3">
           <label class="form-label">Notes</label>
-          <input type="text" id="crewPayNotes" class="form-control" maxlength="255">
+          <input type="text" id="crewPayNotes" class="form-control" maxlength="200">
         </div>
         <div id="crewPayExisting"></div>
       </div>

@@ -96,8 +96,10 @@ $canManageTripPay = currentUserHasAnyPermission(['payroll.manage']);
   <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="alert">
     <i class="bi bi-exclamation-triangle-fill mt-1"></i>
     <div>
-      <strong>Crew pay data is not available.</strong> The <code>trip_pay</code> table hasn't been created yet.
-      Run <code>db/trip_pay_migration.sql</code> against the database to enable Driver/Helper pay tracking.
+      <strong>Crew pay data is not available.</strong> The <code>trip_pay_records</code> table was not found in the connected database.
+      It is part of the current schema (<code>db/reference/mulawin_fleetops_new.sql</code> with the drafts in
+      <code>db/target_migrations/</code>; see <code>docs/testing/database_setup_checklist.md</code>). Ask the system
+      administrator to check the database setup; schema changes need owner approval.
     </div>
   </div>
   <?php endif; ?>
@@ -200,7 +202,7 @@ $canManageTripPay = currentUserHasAnyPermission(['payroll.manage']);
         <div id="crewPayRows" class="d-grid gap-2 mb-3"></div>
         <div class="mb-3">
           <label class="form-label">Notes</label>
-          <input type="text" id="crewPayNotes" class="form-control" maxlength="255">
+          <input type="text" id="crewPayNotes" class="form-control" maxlength="200">
         </div>
         <div id="crewPayExisting"></div>
       </div>

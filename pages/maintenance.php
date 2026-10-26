@@ -6,6 +6,7 @@ require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/inspections.php';
 require_once __DIR__ . '/../includes/trip_workflow.php';
 require_once __DIR__ . '/../includes/truck_records.php';
+require_once __DIR__ . '/../includes/document_upload.php';
 
 requireAnyPermission(['maintenance.view', 'maintenance.manage']);
 $hideMaintenanceEntryButtons = isAdmin() || currentRoleKey() === 'operations_head';
@@ -131,6 +132,33 @@ $generalInspectionRows = $pdo->query("
 ")->fetchAll(PDO::FETCH_ASSOC);
 $inspectionRows = array_merge($tripInspectionRows->fetchAll(PDO::FETCH_ASSOC), $generalInspectionRows);
 usort($inspectionRows, static fn(array $a, array $b): int => strcmp((string)$b['sort_at'], (string)$a['sort_at']));
+
+// Inspection photos (inspection_photos -> documents), linked through the
+// existing authorized download endpoint. Only documents the user may
+// download and see (documents.download + visibility scope) are listed;
+// ajax/document_download.php re-checks both.
+$inspectionPhotoDocuments = [];
+$tripInspectionIds = array_values(array_filter(
+    array_map(static fn(array $row): int => (int)$row['inspection_id'], $inspectionRows),
+    static fn(int $id): bool => $id > 0
+));
+if ($tripInspectionIds && currentUserHasAnyPermission(['documents.download'])) {
+    $photoParams = $tripInspectionIds;
+    $photoVisibility = documentVisibilitySql(documentVisibilityScopesForCurrentUser(), 'd', $photoParams);
+    $photoStmt = $pdo->prepare(
+        'SELECT ip.inspection_id, MIN(d.document_id) AS document_id
+         FROM inspection_photos ip
+         JOIN documents d ON d.file_id = ip.file_id
+         WHERE ip.inspection_id IN (' . implode(',', array_fill(0, count($tripInspectionIds), '?')) . ")
+         $photoVisibility
+         GROUP BY ip.photo_id, ip.inspection_id
+         ORDER BY ip.photo_id"
+    );
+    $photoStmt->execute($photoParams);
+    foreach ($photoStmt->fetchAll(PDO::FETCH_ASSOC) as $photoRow) {
+        $inspectionPhotoDocuments[(int)$photoRow['inspection_id']][] = (int)$photoRow['document_id'];
+    }
+}
 
 // Findings in the legacy shape (view_name, part_name, condition, notes).
 // condition_description holds "Condition — notes" (includes/inspections.php).
@@ -302,7 +330,7 @@ $workOrders = $pdo->query("
     SELECT mr.maintenance_id AS work_order_id, mr.truck_id, mr.reported_issue AS title,
            mr.description, mr.work_order_priority AS priority,
            CASE mr.status WHEN 'Reported' THEN 'Open' WHEN 'Scheduled' THEN 'Open'
-                          WHEN 'Waiting for Parts' THEN 'In Progress' ELSE mr.status END AS status,
+                          ELSE mr.status END AS status,
            mr.expected_completion_date AS expected_completion_at, mr.created_at AS opened_at,
            mr.closed_at, mr.closure_notes,
            tr.plate_number, tr.brand, tr.model,
@@ -538,6 +566,8 @@ $checklistItems = [
                 <input type="date" id="inspectionDate" class="form-control mnt-input" value="<?= date('Y-m-d') ?>" min="<?= date('Y-m-d') ?>">
                 <label class="form-label mnt-label mt-3" for="inspectionNotes">Overall notes</label>
                 <textarea id="inspectionNotes" class="form-control mnt-input" rows="4" placeholder="Optional findings or recommendations"></textarea>
+                <label class="form-label mnt-label mt-3" for="inspectionPhotos">Inspection photos (departure or return; JPG, PNG, or WebP; up to 8, max 10 MB each)</label>
+                <input type="file" id="inspectionPhotos" class="form-control mnt-input" accept="image/jpeg,image/png,image/webp" multiple>
                 <div class="small text-muted mt-3"><i class="bi bi-info-circle me-1"></i>Select a vehicle view, then choose the condition and add notes for each listed part. The image is a reference only.</div>
                 <div class="mt-3">
                   <label class="form-label mnt-label" for="customInspectionPart">Part not listed?</label>
@@ -643,6 +673,26 @@ $checklistItems = [
           <label class="form-label mnt-label mt-3" for="workOrderClosureNotes">Completion / cancellation notes</label>
           <textarea id="workOrderClosureNotes" class="form-control mnt-input" rows="3" maxlength="1000"></textarea>
           <div class="small text-muted mt-2">Closure notes are required to complete or cancel the order. Cancellation does not return the truck to service.</div>
+          <div class="row g-2 mt-1">
+            <div class="col-6">
+              <label class="form-label mnt-label mt-2" for="workOrderLaborCost">Labour cost (₱, optional)</label>
+              <input type="number" id="workOrderLaborCost" class="form-control mnt-input" min="0" step="0.01">
+            </div>
+            <div class="col-6">
+              <label class="form-label mnt-label mt-2" for="workOrderOtherCost">Other cost (₱, optional)</label>
+              <input type="number" id="workOrderOtherCost" class="form-control mnt-input" min="0" step="0.01">
+            </div>
+          </div>
+          <div class="small text-muted mt-1">Parts cost is added automatically when parts are issued to this job.</div>
+          <label class="form-label mnt-label mt-3" for="workOrderFinding">Finding (optional)</label>
+          <textarea id="workOrderFinding" class="form-control mnt-input" rows="2" maxlength="1000"></textarea>
+          <label class="form-label mnt-label mt-2" for="workOrderFindingSeverity">Finding severity</label>
+          <select id="workOrderFindingSeverity" class="form-select mnt-input">
+            <option value="Low">Low</option>
+            <option value="Medium" selected>Medium</option>
+            <option value="High">High</option>
+            <option value="Critical">Critical</option>
+          </select>
         </div>
         <div class="modal-footer mnt-modal-footer">
           <button type="button" class="btn btn-mnt-cancel" data-bs-dismiss="modal">Close</button>
@@ -839,7 +889,7 @@ $checklistItems = [
               <td><?= $workOrder['expected_completion_at'] ? date('M d, Y H:i', strtotime($workOrder['expected_completion_at'])) : '<span class="text-muted">Not set</span>' ?></td>
               <td><?= htmlspecialchars($downtimeLabel) ?><?= $workOrder['closed_at'] ? '<div class="small text-muted">ended ' . date('M d, Y H:i', strtotime($workOrder['closed_at'])) . '</div>' : '<div class="small text-warning">ongoing</div>' ?></td>
               <td>
-                <?php if (in_array($workOrder['status'], ['Open', 'In Progress'], true)): ?>
+                <?php if (in_array($workOrder['status'], ['Open', 'In Progress', 'Waiting for Parts'], true)): ?>
                 <button type="button" class="btn btn-sm btn-outline-primary work-order-manage-btn"
                         data-bs-toggle="modal" data-bs-target="#workOrderUpdateModal"
                         data-work-order-id="<?= (int)$workOrder['work_order_id'] ?>"
@@ -1110,6 +1160,13 @@ $checklistItems = [
                         ]), ENT_QUOTES, 'UTF-8') ?>">
                   View
                 </button>
+                <?php foreach ($inspectionPhotoDocuments[(int)$inspection['inspection_id']] ?? [] as $photoIndex => $photoDocumentId): ?>
+                <a class="btn btn-sm btn-outline-secondary ms-1"
+                   href="<?= APP_BASE ?>/ajax/document_download.php?id=<?= (int)$photoDocumentId ?>"
+                   title="Download inspection photo <?= $photoIndex + 1 ?>">
+                  <i class="bi bi-image" aria-hidden="true"></i> Photo <?= $photoIndex + 1 ?>
+                </a>
+                <?php endforeach; ?>
               </td>
             </tr>
           <?php endforeach; ?>

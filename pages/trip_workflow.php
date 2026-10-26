@@ -26,6 +26,7 @@ if (!$trip) {
     http_response_code(404);
     exit('Trip not found.');
 }
+requireTripInDispatcherScope($trip['shift'], $trip['truck_type']);
 
 // The workflow is tracked for every trip with a dispatch request (target
 // trips are always created through one, D2).

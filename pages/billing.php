@@ -56,8 +56,10 @@ $billingDateFilter    = $rangeStartDate ? "AND b.billing_date >= :rangeStart AND
 $collectionDateFilter = $rangeStartDate ? "AND c.payment_date >= :rangeStart AND c.payment_date < :rangeEnd" : '';
 
 // ── Billings (target billings + collections) ─────────────────────────────────
-// Status labels are normalized for the view; they are not recomputed from
-// due dates because billing terms and the overdue rule are not confirmed.
+// Status labels are normalized for the view from the derived display status
+// (billingDisplayStatusSql: an unpaid or partly paid billing past its due
+// date shows as Overdue, as in the AR export). The stored status is unchanged.
+$billingDisplayStatus = billingDisplayStatusSql('b');
 $billingSql = "
     SELECT
         b.billing_id,
@@ -67,8 +69,8 @@ $billingSql = "
         c.client_name,
         b.total_amount AS amount,
         b.due_date,
-        CASE b.status WHEN 'Issued' THEN 'Unpaid' WHEN 'Overdue' THEN 'Unpaid'
-                      WHEN 'Partially Paid' THEN 'Partial' ELSE b.status END AS status,
+        CASE ($billingDisplayStatus) WHEN 'Issued' THEN 'Unpaid'
+                      WHEN 'Partially Paid' THEN 'Partial' ELSE ($billingDisplayStatus) END AS status,
         b.status AS target_status,
         NULL AS notes,
         b.created_at,
@@ -295,6 +297,7 @@ $paymentModes = PAYMENT_MODES;
           <option value="">All Statuses</option>
           <option value="Unpaid">Unpaid</option>
           <option value="Partial">Partial</option>
+          <option value="Overdue">Overdue</option>
           <option value="Paid">Paid</option>
         </select>
         <input type="search" id="filterBilSearch" class="form-control bil-filter-search"
@@ -359,7 +362,7 @@ $paymentModes = PAYMENT_MODES;
                 <?= $bil['due_date'] ? date('M d, Y', strtotime($bil['due_date'])) : '<span class="text-muted">—</span>' ?>
               </td>
               <td>
-                <span class="bil-status-badge bil-status-<?= strtolower($bil['status']) ?>">
+                <span class="bil-status-badge bil-status-<?= $bil['status'] === 'Overdue' ? 'unpaid' : strtolower($bil['status']) ?>">
                   <?= $bil['status'] ?>
                 </span>
               </td>
@@ -651,7 +654,8 @@ $paymentModes = PAYMENT_MODES;
           <div class="col-md-6">
             <label class="form-label bil-label" for="bilClientName">Client Name *</label>
             <input type="text" class="form-control bil-input" id="bilClientName"
-                   list="billingClientsList" maxlength="180" placeholder="Select a registered client" required>
+                   maxlength="180" placeholder="Filled from the selected trip" readonly required>
+            <div class="form-text">Always the client of the selected trip.</div>
             <datalist id="billingClientsList">
               <?php foreach ($clients as $client): ?>
               <option value="<?= htmlspecialchars($client, ENT_QUOTES) ?>"></option>
@@ -670,12 +674,14 @@ $paymentModes = PAYMENT_MODES;
           <div class="col-md-4">
             <label class="form-label bil-label" for="bilBillingNumber">Billing No.</label>
             <input type="text" class="form-control bil-input" id="bilBillingNumber"
-                   placeholder="e.g. BIL-2025-0001" required>
+                   maxlength="80" placeholder="e.g. BIL-2025-0001" required>
+            <div class="form-text">Our reference, shown in the billing line description. Saved as the invoice number when no client invoice number is entered.</div>
           </div>
           <div class="col-md-4">
             <label class="form-label bil-label" for="bilInvoiceNumber">Client Invoice No. (optional)</label>
             <input type="text" class="form-control bil-input" id="bilInvoiceNumber"
                    maxlength="50" placeholder="Client's own invoice reference">
+            <div class="form-text">If entered, this is saved as the invoice number instead of the Billing No. Must be unique.</div>
           </div>
           <div class="col-md-4">
             <label class="form-label bil-label" for="bilInvoiceDate">Invoice Date (optional)</label>
@@ -683,7 +689,7 @@ $paymentModes = PAYMENT_MODES;
           </div>
           <div class="col-12">
             <label class="form-label bil-label" for="bilNotes">Notes (optional)</label>
-            <textarea class="form-control bil-input" id="bilNotes" rows="2"
+            <textarea class="form-control bil-input" id="bilNotes" rows="2" maxlength="200"
                       placeholder="Any additional remarks…"></textarea>
           </div>
         </div>

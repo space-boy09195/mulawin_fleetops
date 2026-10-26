@@ -10,6 +10,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/crew_trip_access.php';
 require_once __DIR__ . '/../includes/trip_queries.php';
+require_once __DIR__ . '/../includes/dispatcher_scope.php';
 
 // trips.view, or a Helper limited to trips assigned to them (employee ID).
 $helperEmployeeId = tripPageAccess(['trips.view']);
@@ -43,6 +44,9 @@ $rangeStartSql = $rangeStart ? $rangeStart->format('Y-m-d 00:00:00') : null;
 // Past ETA is an operational alert based on the scheduled arrival, not a
 // client-reported delay metric.
 $operational = tripOperationalSql('t', 'dr');
+// Dispatchers see only trips in their assigned truck types and shift.
+$scopeParams = [];
+$scopeSql = dispatcherScopeReadSql('tr.truck_type', 't.shift', $scopeParams);
 
 // ---- Fetch trips ------------------------------------------
 // Shared trip SELECT (includes/trip_queries.php) plus the incident flag.
@@ -58,7 +62,7 @@ $tripStmt = $pdo->prepare(
        AND (t.status NOT IN ('Completed','Cancelled') " .
      ($rangeStartSql ? "OR (t.status IN ('Completed','Cancelled') AND t.created_at >= :rangeStart)" : "OR t.status IN ('Completed','Cancelled')") . ")
 " .
-     ($helperEmployeeId !== null ? " AND t.helper_id = :helperEmployeeId" : "") . "
+     ($helperEmployeeId !== null ? " AND t.helper_id = :helperEmployeeId" : "") . $scopeSql . "
      ORDER BY
        FIELD(t.status,'In Progress','Dispatched','Ready for Dispatch','Assigned','Approved','Delivered','Returned','Completed','Cancelled'),
        is_late DESC,
@@ -67,6 +71,7 @@ $tripStmt = $pdo->prepare(
 );
 if ($rangeStartSql) $tripStmt->bindValue(':rangeStart', $rangeStartSql);
 if ($helperEmployeeId !== null) $tripStmt->bindValue(':helperEmployeeId', $helperEmployeeId, PDO::PARAM_INT);
+foreach ($scopeParams as $scopeKey => $scopeValue) $tripStmt->bindValue($scopeKey, $scopeValue);
 $tripStmt->execute();
 $trips = $tripStmt->fetchAll();
 foreach ($trips as &$tripRow) {

@@ -59,6 +59,17 @@ function requireHelperAssignedToTrip(int $tripId, int $employeeId): void
     }
 }
 
+// Refuses a dispatcher whose assigned scope (truck type and shift) does not
+// cover this trip. Admin, Operations Head and other roles have no scope and
+// pass. A trip outside the scope gets the same 403 as a missing trip.
+function requireTripInDispatcherScope(?string $shift, ?string $truckType): void
+{
+    require_once __DIR__ . '/dispatcher_scope.php';
+    if (dispatcherScopeViolation((string)$shift, (string)$truckType) !== null) {
+        denyTripAccess();
+    }
+}
+
 // For pages and endpoints that Helpers never use (dispatch board, exports).
 function refuseHelpers(): void
 {

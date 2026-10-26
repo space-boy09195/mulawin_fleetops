@@ -7,9 +7,11 @@
 // This is distinct from:
 //   - Driver Allowance: an expense_records row (reimbursement, not wages)
 //   - payroll_records: periodic salary for fixed-salary staff
-// A save is an upsert on the T-P1 unique key, so concurrent or repeated
-// saves can never create a second wage row for the same trip and person; a
-// cancelled row is re-activated instead of duplicated.
+// The T-P1 unique key keeps one wage row per trip and person. A save never
+// changes a recorded (non-cancelled) wage: it is refused, and a correction
+// goes through the Admin cancel action below and a new save. A cancelled
+// row is re-activated (audited with its old values) instead of duplicated.
+// Cancelled trips cannot receive Trip Pay.
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
@@ -73,6 +75,10 @@ if ($action === 'log') {
             $pdo->rollBack();
             jsonFail('Crew pay can be logged only for an approved trip.', 409);
         }
+        if ($assignment['status'] === 'Cancelled') {
+            $pdo->rollBack();
+            jsonFail('Crew pay cannot be logged for a cancelled trip.', 409);
+        }
 
         $validAssignments = [];
         foreach (['driver_id' => 'Driver', 'second_driver_id' => 'Driver', 'helper_id' => 'Helper'] as $column => $role) {
@@ -104,20 +110,48 @@ if ($action === 'log') {
         }
 
         $storedNotes = tripPayComposeNotes($date, $notes);
-        $upsert = $pdo->prepare("
+        // Existing rows for this trip's crew, locked. A recorded wage is never
+        // overwritten; only a cancelled row may be re-activated.
+        $existingStmt = $pdo->prepare(
+            'SELECT trip_pay_id, amount, status, notes FROM trip_pay_records
+             WHERE trip_id = ? AND employee_id = ? AND pay_type = ? FOR UPDATE'
+        );
+        $insert = $pdo->prepare("
             INSERT INTO trip_pay_records (trip_id, employee_id, pay_type, amount, status, recorded_by, notes)
             VALUES (?, ?, ?, ?, 'Paid', ?, ?)
-            ON DUPLICATE KEY UPDATE
-                amount = VALUES(amount), status = 'Paid',
-                recorded_by = VALUES(recorded_by), notes = VALUES(notes),
-                trip_pay_id = LAST_INSERT_ID(trip_pay_id)
+        ");
+        $reactivate = $pdo->prepare("
+            UPDATE trip_pay_records SET amount = ?, status = 'Paid', recorded_by = ?, notes = ?
+            WHERE trip_pay_id = ? AND status = 'Cancelled'
         ");
         foreach ($entries as $entry) {
             $payType = TRIP_PAY_TYPES[$entry['crew_role']];
-            $upsert->execute([
-                $tripId, $entry['employee_id'], $payType, $entry['amount'], currentUserId(), $storedNotes,
-            ]);
-            auditLog('LOG_TRIP_PAY', 'trip_pay_records', (int)$pdo->lastInsertId(), null, [
+            $existingStmt->execute([$tripId, $entry['employee_id'], $payType]);
+            $existing = $existingStmt->fetch(PDO::FETCH_ASSOC);
+            $oldValues = null;
+            if ($existing && $existing['status'] !== 'Cancelled'
+                && round((float)$existing['amount'], 2) === $entry['amount']) {
+                continue; // resubmitted unchanged (the form pre-fills logged amounts)
+            }
+            if ($existing && $existing['status'] !== 'Cancelled') {
+                $pdo->rollBack();
+                jsonFail('Crew pay is already recorded for this crew member on this trip. Ask an Admin to cancel the entry before recording a corrected amount.', 409);
+            }
+            if ($existing) {
+                $reactivate->execute([$entry['amount'], currentUserId(), $storedNotes, (int)$existing['trip_pay_id']]);
+                if ($reactivate->rowCount() !== 1) {
+                    $pdo->rollBack();
+                    jsonFail('This crew pay entry changed while saving. Refresh the page and try again.', 409);
+                }
+                $tripPayId = (int)$existing['trip_pay_id'];
+                $oldValues = ['amount' => $existing['amount'], 'status' => $existing['status'], 'notes' => $existing['notes']];
+            } else {
+                $insert->execute([
+                    $tripId, $entry['employee_id'], $payType, $entry['amount'], currentUserId(), $storedNotes,
+                ]);
+                $tripPayId = (int)$pdo->lastInsertId();
+            }
+            auditLog('LOG_TRIP_PAY', 'trip_pay_records', $tripPayId, $oldValues, [
                 'trip_id'     => $tripId,
                 'employee_id' => $entry['employee_id'],
                 'pay_type'    => $payType,
@@ -130,6 +164,10 @@ if ($action === 'log') {
     } catch (PDOException $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         error_log('trip_pay_handler/log: ' . $e->getMessage());
+        // 1062: a concurrent save recorded the same crew pay first.
+        if ((int)($e->errorInfo[1] ?? 0) === 1062) {
+            jsonFail('Crew pay was recorded for this trip at the same time. Refresh the page to see it.', 409);
+        }
         jsonFail('A database error occurred. Please try again.', 500);
     }
 }

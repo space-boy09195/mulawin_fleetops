@@ -5,6 +5,11 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/enums.php';
 
 requireAnyPermission(['parts.view', 'parts.manage']);
+// Purchasing (parts.manage) records every movement; Maintenance
+// (maintenance.manage) issues parts to and returns them from a job.
+$canManageParts = currentUserHasAnyPermission(['parts.manage']);
+$canIssueParts = !$canManageParts && currentUserHasAnyPermission(['maintenance.manage']);
+$canEditCatalog = currentUserHasAnyPermission(['parts.catalog.manage']);
 
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/parts.js';
 
@@ -70,6 +75,33 @@ $partsSql = "
     ORDER BY p.category ASC, p.part_name ASC
 ";
 $parts = $pdo->query($partsSql)->fetchAll(PDO::FETCH_ASSOC);
+// Deactivated parts, listed for catalog managers so they can be reactivated.
+$inactiveParts = !$canEditCatalog ? [] : $pdo->query("
+    SELECT p.part_id, p.part_number, p.part_name, p.category, p.unit, p.reorder_level,
+           p.warranty_period_days, s.supplier_name AS supplier, COALESCE(i.quantity_on_hand, 0) AS quantity
+    FROM parts p
+    LEFT JOIN inventory i ON i.part_id = p.part_id
+    LEFT JOIN suppliers s ON s.supplier_id = p.supplier_id
+    WHERE p.is_active = 0
+    ORDER BY p.part_name
+")->fetchAll(PDO::FETCH_ASSOC);
+$partEditAttributes = static function (array $part, int $active): string {
+    $attributes = [
+        'part-id' => (int)$part['part_id'],
+        'part-name' => $part['part_name'],
+        'category' => $part['category'],
+        'unit' => $part['unit'],
+        'reorder' => (int)$part['reorder_level'],
+        'warranty' => $part['warranty_period_days'] !== null ? (int)$part['warranty_period_days'] : '',
+        'supplier' => $part['supplier'] ?? '',
+        'active' => $active,
+    ];
+    $html = '';
+    foreach ($attributes as $name => $value) {
+        $html .= ' data-' . $name . '="' . htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8') . '"';
+    }
+    return $html;
+};
 $inventoryValue = array_reduce(
     $parts,
     static fn($carry, $part) => $carry + ((float)$part['unit_cost'] * (float)$part['quantity']),
@@ -155,9 +187,9 @@ $movementTypes = PARTS_MOVEMENT_TYPES;
           <?php endforeach; ?>
         </select>
       </form>
-      <?php if (currentUserHasAnyPermission(['parts.manage']) && !isAdmin()): ?>
+      <?php if (($canManageParts || $canIssueParts) && !isAdmin()): ?>
       <button class="btn btn-pts-secondary" data-bs-toggle="modal" data-bs-target="#movementModal">
-        <i class="bi bi-arrow-left-right me-1"></i> Record Movement
+        <i class="bi bi-arrow-left-right me-1"></i> <?= $canManageParts ? 'Record Movement' : 'Issue / Return Parts' ?>
       </button>
       <?php endif; ?>
       <?php if (currentUserHasAnyPermission(['parts.catalog.manage'])): ?>
@@ -274,6 +306,7 @@ $movementTypes = PARTS_MOVEMENT_TYPES;
               <th>Warranty Exp.</th>
               <th>Status</th>
               <th>Last Updated</th>
+              <?php if ($canEditCatalog): ?><th class="text-end">Actions</th><?php endif; ?>
             </tr>
           </thead>
           <tbody>
@@ -337,12 +370,46 @@ $movementTypes = PARTS_MOVEMENT_TYPES;
               </td>
               <td><span class="pts-status-badge <?= $statusCls ?>"><?= $statusLabel ?></span></td>
               <td class="pts-date"><?= date('M d, Y', strtotime($part['updated_at'])) ?></td>
+              <?php if ($canEditCatalog): ?>
+              <td class="text-end">
+                <button type="button" class="btn btn-sm btn-outline-secondary part-edit-btn"
+                        data-bs-toggle="modal" data-bs-target="#editPartModal"<?= $partEditAttributes($part, 1) ?>>
+                  <i class="bi bi-pencil"></i> Edit
+                </button>
+              </td>
+              <?php endif; ?>
             </tr>
             <?php endforeach; ?>
           </tbody>
         </table>
         <?php endif; ?>
       </div>
+      <?php if ($inactiveParts): ?>
+      <div class="pts-table-wrap mt-3">
+        <table class="table pts-table">
+          <thead>
+            <tr><th>Inactive part</th><th>Category</th><th>Part No.</th><th>Supplier</th><th>Stock</th><th class="text-end">Actions</th></tr>
+          </thead>
+          <tbody>
+            <?php foreach ($inactiveParts as $part): ?>
+            <tr>
+              <td><?= htmlspecialchars($part['part_name']) ?> <span class="badge text-bg-secondary">Inactive</span></td>
+              <td><?= htmlspecialchars($part['category']) ?></td>
+              <td><?= htmlspecialchars($part['part_number']) ?></td>
+              <td><?= $part['supplier'] ? htmlspecialchars($part['supplier']) : '—' ?></td>
+              <td><?= number_format((float)$part['quantity']) ?> <?= htmlspecialchars($part['unit']) ?></td>
+              <td class="text-end">
+                <button type="button" class="btn btn-sm btn-outline-secondary part-edit-btn"
+                        data-bs-toggle="modal" data-bs-target="#editPartModal"<?= $partEditAttributes($part, 0) ?>>
+                  <i class="bi bi-pencil"></i> Edit
+                </button>
+              </td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+      <?php endif; ?>
     </div>
 
     <!-- ── Movements pane ───────────────────────────────────────────────── -->
@@ -593,6 +660,60 @@ $movementTypes = PARTS_MOVEMENT_TYPES;
   </div>
 </div>
 
+<?php if ($canEditCatalog): ?>
+<!-- ══ Edit Part Modal ═══════════════════════════════════════════════════ -->
+<div class="modal fade" id="editPartModal" tabindex="-1" aria-labelledby="editPartLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content pts-modal-content">
+      <div class="modal-header pts-modal-header-primary">
+        <h5 class="modal-title" id="editPartLabel"><i class="bi bi-pencil me-2"></i>Edit Part</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pts-modal-body">
+        <div id="editPartAlert" class="alert d-none" role="alert"></div>
+        <input type="hidden" id="epPartId">
+        <div class="mb-3">
+          <label class="form-label pts-label" for="epName">Part Name <span class="text-danger">*</span></label>
+          <input type="text" class="form-control pts-input" id="epName" maxlength="150" required>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-6">
+            <label class="form-label pts-label" for="epCategory">Category <span class="text-danger">*</span></label>
+            <input type="text" class="form-control pts-input" id="epCategory" list="categoryList" maxlength="80" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label pts-label" for="epUnit">Unit</label>
+            <input type="text" class="form-control pts-input" id="epUnit" maxlength="30">
+          </div>
+        </div>
+        <div class="row g-3 mb-3">
+          <div class="col-6">
+            <label class="form-label pts-label" for="epReorder">Reorder Level <span class="text-danger">*</span></label>
+            <input type="number" class="form-control pts-input" id="epReorder" min="0" step="1" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label pts-label" for="epWarranty">Warranty (days)</label>
+            <input type="number" class="form-control pts-input" id="epWarranty" min="1" step="1">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label pts-label" for="epSupplier">Supplier</label>
+          <input type="text" class="form-control pts-input" id="epSupplier" maxlength="180">
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="epActive">
+          <label class="form-check-label" for="epActive">Active (unticked parts keep their history but cannot be used in new movements or orders)</label>
+        </div>
+      </div>
+      <div class="modal-footer pts-modal-footer">
+        <button type="button" class="btn btn-pts-cancel" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-pts-primary" id="submitEditPartBtn">Save Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
 <!-- ══ Record Movement Modal ══════════════════════════════════════════════ -->
 <div class="modal fade" id="movementModal" tabindex="-1" aria-labelledby="movementLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
@@ -627,6 +748,7 @@ $movementTypes = PARTS_MOVEMENT_TYPES;
           <select class="form-select pts-input" id="movType" required>
             <option value="">— Select type —</option>
             <?php foreach ($movementTypes as $mt): ?>
+            <?php if (!$canManageParts && !in_array($mt, ['Stock Out', 'Return'], true)) continue; ?>
             <option value="<?= $mt ?>"><?= $mt ?></option>
             <?php endforeach; ?>
           </select>
@@ -634,9 +756,9 @@ $movementTypes = PARTS_MOVEMENT_TYPES;
 
         <div class="mb-3">
           <label class="form-label pts-label" for="movJobId">
-            Linked Job <span class="pts-unit-hint">(optional — links this to the maintenance job that used it)</span>
+            Linked Job <?php if ($canManageParts): ?><span class="pts-unit-hint">(optional — links this to the maintenance job that used it)</span><?php else: ?><span class="text-danger">*</span><?php endif; ?>
           </label>
-          <select class="form-select pts-input" id="movJobId">
+          <select class="form-select pts-input" id="movJobId" <?= $canManageParts ? '' : 'required' ?>>
             <option value="">— None —</option>
             <?php foreach ($recentJobs as $job): ?>
             <option value="<?= $job['record_id'] ?>">

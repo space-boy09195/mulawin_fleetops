@@ -24,12 +24,20 @@ require_once __DIR__ . '/../includes/purchasing.php';
 
 header('Content-Type: application/json');
 
-requirePermission('parts.manage');
+// parts.manage (Purchasing Officer; Admin) covers every action. Maintenance
+// staff (maintenance.manage without parts.manage) may only issue parts to a
+// maintenance job or return them from one (record_movement, Stock Out /
+// Return with a linked job, at the catalog unit cost); see below.
+requireAnyPermission(['parts.manage', 'maintenance.manage']);
 requirePostMethod();
 enforceCsrf();
 
 $pdo    = getDBConnection();
 $action = $_POST['action'] ?? '';
+$partsIssueOnly = !currentUserHasAnyPermission(['parts.manage']);
+if ($partsIssueOnly && $action !== 'record_movement') {
+    jsonFail('You do not have permission to perform this action.', 403);
+}
 
 // ── Add new part ──────────────────────────────────────────────────────────────
 if ($action === 'add_part') {
@@ -128,6 +136,63 @@ if ($action === 'add_part') {
     }
 }
 
+// ── Edit / deactivate a catalog part ──────────────────────────────────────────
+// Name, category, unit, reorder level, warranty period, supplier and the
+// active flag. The part number, stock and history are not changed; an
+// inactive part keeps every past movement, issue and purchase line and is
+// only left out of new movements and purchase orders.
+if ($action === 'edit_part') {
+    if (!currentUserHasAnyPermission(['parts.catalog.manage'])) {
+        jsonFail('You are not allowed to change catalog parts.', 403);
+    }
+    $partId       = requiredInt('part_id', 'Part', 1);
+    $name         = requiredString('part_name', 'Part name', 150);
+    $category     = requiredString('category', 'Category', 80);
+    $unit         = optionalString('unit', null, 30) ?? 'pcs';
+    $reorderLevel = requiredInt('reorder_level', 'Reorder level', 0, 999999999);
+    $supplier     = optionalString('supplier', null, 180);
+    $isActive     = ($_POST['is_active'] ?? '1') === '1' ? 1 : 0;
+    $warrantyDaysRaw = trim((string)($_POST['warranty_days'] ?? ''));
+    $warrantyDays = null;
+    if ($warrantyDaysRaw !== '') {
+        if (!preg_match('/^\d{1,5}$/', $warrantyDaysRaw) || (int)$warrantyDaysRaw < 1) {
+            jsonFail('Warranty period must be a whole number of days from 1 to 99,999.');
+        }
+        $warrantyDays = (int)$warrantyDaysRaw;
+    }
+
+    try {
+        $pdo->beginTransaction();
+        $old = $pdo->prepare(
+            'SELECT part_name, category, unit, reorder_level, warranty_period_days, supplier_id, is_active
+             FROM parts WHERE part_id = ? FOR UPDATE'
+        );
+        $old->execute([$partId]);
+        $oldData = $old->fetch(PDO::FETCH_ASSOC);
+        if (!$oldData) {
+            $pdo->rollBack();
+            jsonFail('Part not found.', 404);
+        }
+        $supplierId = supplierIdForName($pdo, $supplier);
+        $pdo->prepare(
+            'UPDATE parts SET part_name = ?, category = ?, unit = ?, reorder_level = ?,
+                    warranty_period_days = ?, supplier_id = ?, is_active = ?
+             WHERE part_id = ?'
+        )->execute([$name, $category, $unit, $reorderLevel, $warrantyDays, $supplierId, $isActive, $partId]);
+        auditLog('EDIT_PART', 'parts', $partId, $oldData, [
+            'part_name' => $name, 'category' => $category, 'unit' => $unit,
+            'reorder_level' => $reorderLevel, 'warranty_period_days' => $warrantyDays,
+            'supplier_id' => $supplierId, 'is_active' => $isActive,
+        ]);
+        $pdo->commit();
+        jsonOk([], $isActive ? 'Part updated.' : 'Part updated and deactivated.');
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('parts_handler/edit_part: ' . $e->getMessage());
+        jsonFail('A database error occurred. Please try again.', 500);
+    }
+}
+
 // ── Record movement ───────────────────────────────────────────────────────────
 if ($action === 'record_movement') {
 
@@ -142,6 +207,12 @@ if ($action === 'record_movement') {
     }
     if ($maintenanceId && !in_array($movType, ['Stock Out', 'Return'], true)) {
         jsonFail('Only a stock-out or a return can be linked to a maintenance job.');
+    }
+    if ($partsIssueOnly) {
+        if (!$maintenanceId || !in_array($movType, ['Stock Out', 'Return'], true)) {
+            jsonFail('Maintenance staff can only issue parts to, or return parts from, a linked maintenance job.', 403);
+        }
+        $unitCost = null; // the issue is valued at the catalog unit cost
     }
 
     try {
@@ -204,6 +275,30 @@ if ($action === 'record_movement') {
             $signedQty = $movType === 'Stock Out' ? -$quantity : $quantity;
             $newQty = $currentQty + $signedQty;
         }
+
+        // A return from a job cannot exceed what was issued to that job and
+        // takes its value off the job's parts cost (average issue cost).
+        $returnValue = 0.0;
+        if ($maintenanceId && $movType === 'Return') {
+            $issued = $pdo->prepare(
+                'SELECT COALESCE(SUM(quantity), 0) AS qty, COALESCE(SUM(total_cost), 0) AS cost
+                 FROM maintenance_parts WHERE maintenance_id = ? AND part_id = ?'
+            );
+            $issued->execute([$maintenanceId, $partId]);
+            $issuedRow = $issued->fetch(PDO::FETCH_ASSOC);
+            $returned = $pdo->prepare(
+                "SELECT COALESCE(SUM(quantity), 0) FROM inventory_transactions
+                 WHERE transaction_type = 'Return' AND reference_type = 'maintenance'
+                   AND reference_id = ? AND part_id = ?"
+            );
+            $returned->execute([$maintenanceId, $partId]);
+            $returnable = (float)$issuedRow['qty'] - (float)$returned->fetchColumn();
+            if ($quantity > $returnable) {
+                $pdo->rollBack();
+                jsonFail('The return exceeds the quantity issued to this job (returnable: ' . rtrim(rtrim(number_format(max(0, $returnable), 2, '.', ''), '0'), '.') . ').', 409);
+            }
+            $returnValue = round((float)$issuedRow['cost'] / (float)$issuedRow['qty'] * $quantity, 2);
+        }
         // The target has no reference-number column; it is kept in remarks.
         $remarks = trim(($reference !== null ? 'Ref: ' . $reference . '. ' : '') . ($notes ?? ''));
 
@@ -237,6 +332,13 @@ if ($action === 'record_movement') {
                  SET parts_cost = parts_cost + ?, total_cost = labor_cost + parts_cost + other_cost
                  WHERE maintenance_id = ?'
             )->execute([$lineTotal, $maintenanceId]);
+        }
+        if ($maintenanceId && $movType === 'Return' && $returnValue > 0) {
+            $pdo->prepare(
+                'UPDATE maintenance_records
+                 SET parts_cost = GREATEST(parts_cost - ?, 0), total_cost = labor_cost + parts_cost + other_cost
+                 WHERE maintenance_id = ?'
+            )->execute([$returnValue, $maintenanceId]);
         }
 
         auditLog('PARTS_MOVEMENT', 'inventory_transactions', $movId,

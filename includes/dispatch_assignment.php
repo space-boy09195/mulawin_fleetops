@@ -113,7 +113,7 @@ function reserveTruckForTrip(PDO $pdo, int $truckId, int $tripId, string $from, 
     )->execute([$truckId, $tripId, $from, $until]);
     $assignmentId = (int)$pdo->lastInsertId();
     $update = $pdo->prepare(
-        "UPDATE trucks SET status = 'Assigned', current_assignment_id = ?
+        "UPDATE trucks SET status = 'Assigned', availability_status = 'Unavailable', current_assignment_id = ?
          WHERE truck_id = ? AND status = 'Available'"
     );
     $update->execute([$assignmentId, $truckId]);
@@ -158,7 +158,7 @@ function releaseTruckForTrip(PDO $pdo, int $truckId, int $tripId, string $assign
         return null;
     }
     $pdo->prepare(
-        "UPDATE trucks SET status = 'Available', current_assignment_id = NULL WHERE truck_id = ?"
+        "UPDATE trucks SET status = 'Available', availability_status = 'Available', current_assignment_id = NULL WHERE truck_id = ?"
     )->execute([$truckId]);
     return (string)$row['status'];
 }

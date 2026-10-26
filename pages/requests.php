@@ -13,8 +13,23 @@ requirePermission('approvals.review');
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/requests.js';
 $pdo = getDBConnection();
 
+// Dispatch and route requests are listed only to roles that hold a step of
+// those workflows (Operations Head); Admin sees every section. Other
+// reviewers (for example Finance for fund requests) see only their own
+// approvals below.
+$stepWorkflowsStmt = $pdo->prepare(
+    'SELECT DISTINCT w.workflow_key
+     FROM approval_workflows w
+     JOIN approval_workflow_steps s ON s.workflow_id = w.workflow_id
+     WHERE s.approver_role_id = ?'
+);
+$stepWorkflowsStmt->execute([currentRoleId()]);
+$stepWorkflows = $stepWorkflowsStmt->fetchAll(PDO::FETCH_COLUMN);
+$showDispatchReview = isAdmin() || in_array('dispatch', $stepWorkflows, true);
+$showRouteReview = isAdmin() || in_array('route_request', $stepWorkflows, true);
+
 // Pending dispatch requests (target: trips + dispatch_requests, D2).
-$dispatchRequests = $pdo->query(
+$dispatchRequests = !$showDispatchReview ? [] : $pdo->query(
     tripSelectSql() . "
     WHERE dr.status = 'Pending'
     ORDER BY dr.submitted_at ASC"
@@ -27,7 +42,7 @@ unset($dispatchRequest);
 
 // Route requests: inactive routes with a Pending route_request approval.
 // requested_by = routes.created_by; request notes = the Submitted remarks.
-$routeRequests = $pdo->query("
+$routeRequests = !$showRouteReview ? [] : $pdo->query("
     SELECT r.route_id, r.route_name, r.origin, r.destination, r.distance AS distance_km,
            ah.remarks AS request_notes, r.created_by AS requested_by,
            COALESCE(e.full_name, u.username) AS requested_by_name
@@ -41,7 +56,7 @@ $routeRequests = $pdo->query("
     ORDER BY ar.submitted_at ASC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$recentDispatch = $pdo->query("
+$recentDispatch = !$showDispatchReview ? [] : $pdo->query("
     SELECT dr.status, dr.reviewed_at, dr.dispatch_request_id AS dispatch_id,
            tr.plate_number, r.route_name
     FROM dispatch_requests dr
@@ -53,7 +68,7 @@ $recentDispatch = $pdo->query("
     LIMIT 10
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$recentRoutes = $pdo->query("
+$recentRoutes = !$showRouteReview ? [] : $pdo->query("
     SELECT r.route_name, r.origin, r.destination, ar.status AS approval_status
     FROM approval_requests ar
     JOIN approval_workflows w ON w.workflow_id = ar.workflow_id AND w.workflow_key = 'route_request'
@@ -118,6 +133,7 @@ layoutHead('Requests', APP_BASE . '/assets/css/dispatch.css');
 
 <div id="requestsAlert" class="alert d-none" role="alert"></div>
 
+<?php if ($showDispatchReview): ?>
 <div class="card mb-4">
   <div class="card-header-custom">
     <h2 class="card-title-custom"><i class="bi bi-send me-2"></i>Dispatch Requests</h2>
@@ -168,7 +184,9 @@ layoutHead('Requests', APP_BASE . '/assets/css/dispatch.css');
     </table>
   </div>
 </div>
+<?php endif; ?>
 
+<?php if ($showRouteReview): ?>
 <div class="card mb-4">
   <div class="card-header-custom">
     <h2 class="card-title-custom"><i class="bi bi-signpost-2 me-2"></i>Route Requests</h2>
@@ -200,6 +218,7 @@ layoutHead('Requests', APP_BASE . '/assets/css/dispatch.css');
     </table>
   </div>
 </div>
+<?php endif; ?>
 
 <div class="card mb-4">
   <div class="card-header-custom">

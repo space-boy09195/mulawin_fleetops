@@ -17,9 +17,7 @@ if ($scopeResult['status'] === 'denied') {
     // A dispatcher without one valid assignment sees no instructions.
     $instructionWhere .= ' AND 1 = 0';
 } elseif ($scopeResult['status'] === 'scoped') {
-    $instructionWhere .= ' AND i.shift = ?';
-    $instructionParams[] = $scopeResult['shift'];
-    // Only the truck types this dispatcher may encode.
+    // Only the truck types this dispatcher may encode (Day and Night).
     $instructionWhere .= ' AND i.truck_type IN (' . implode(',', array_fill(0, count($scopeResult['truck_types']), '?')) . ')';
     array_push($instructionParams, ...$scopeResult['truck_types']);
 }

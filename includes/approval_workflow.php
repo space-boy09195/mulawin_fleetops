@@ -173,6 +173,39 @@ function approvalStepsForRequester(PDO $pdo, string $workflowKey, array $configu
 }
 
 /**
+ * Names the record behind an approval for the reviewer's notification, e.g.
+ * "Trip Allowance FR-20261027015113-105 for TRP-2026-0016 (₱1,000.00)", or
+ * null when the type has no extra details (the caller keeps "#id").
+ */
+function approvalEntityReference(PDO $pdo, string $entityType, int $entityId): ?string {
+    if ($entityType === 'fund_request') {
+        $stmt = $pdo->prepare(
+            "SELECT CONCAT(fr.request_type, ' ', fr.request_number,
+                           IF(t.trip_number IS NULL, '', CONCAT(' for ', t.trip_number)),
+                           ' (₱', FORMAT(fr.amount, 2), ')')
+             FROM fund_requests fr LEFT JOIN trips t ON t.trip_id = fr.trip_id
+             WHERE fr.fund_request_id = ?"
+        );
+    } elseif ($entityType === 'dispatch_request') {
+        $stmt = $pdo->prepare(
+            "SELECT CONCAT('Dispatch request #', dr.dispatch_request_id, ' for ', t.trip_number)
+             FROM dispatch_requests dr JOIN trips t ON t.trip_id = dr.trip_id
+             WHERE dr.dispatch_request_id = ?"
+        );
+    } elseif ($entityType === 'payment_voucher') {
+        $stmt = $pdo->prepare(
+            "SELECT CONCAT('Payment voucher ', voucher_number, ' for ', payee, ' (₱', FORMAT(amount, 2), ')')
+             FROM payment_vouchers WHERE voucher_id = ?"
+        );
+    } else {
+        return null;
+    }
+    $stmt->execute([$entityId]);
+    $reference = $stmt->fetchColumn();
+    return $reference === false || $reference === null ? null : (string)$reference;
+}
+
+/**
  * Create a Pending approval request for an entity from the workflow's step
  * template. $entityType must equal the workflow's configured entity_type.
  * $routing is set (by reference) when the first step was routed to Admin by
@@ -254,12 +287,14 @@ function createApprovalRequest(
 
     $firstRoleId = (int)$requestSteps[0]['approver_role_id'];
     $notifiedUserIds = [];
+    $reference = approvalEntityReference($pdo, $entityType, $entityId)
+        ?? $workflow['workflow_name'] . ' #' . $entityId;
     foreach (approvalReviewerUserIds($pdo, $firstRoleId) as $userId) {
         createNotification(
             $pdo,
             $userId,
             'Approval required',
-            $workflow['workflow_name'] . ' #' . $entityId . ' is awaiting review.'
+            $reference . ' is awaiting your review on Requests & Approvals.'
                 . ($routedFrom !== null ? ' Routed to Admin because the requester belongs to the approver role.' : ''),
             'approval',
             'approval_request',
@@ -405,13 +440,21 @@ function recordApprovalDecision(
         $comment,
     ]);
 
+    // This step is decided: the other reviewers' "Approval required"
+    // notices are no longer a task (kept as read history).
+    resolveNotifications($pdo, 'approval', $approvalId, ['Approval required']);
+
     if ($nextStep) {
+        $entity = $pdo->prepare('SELECT entity_type, entity_id FROM approval_requests WHERE approval_request_id = ?');
+        $entity->execute([$approvalId]);
+        $entityRow = $entity->fetch(PDO::FETCH_ASSOC);
+        $reference = $entityRow ? approvalEntityReference($pdo, (string)$entityRow['entity_type'], (int)$entityRow['entity_id']) : null;
         foreach (approvalReviewerUserIds($pdo, (int)$nextStep['approver_role_id']) as $userId) {
             createNotification(
                 $pdo,
                 $userId,
                 'Approval required',
-                'Approval #' . $approvalId . ' is awaiting your review.',
+                ($reference ?? 'Approval #' . $approvalId) . ' is awaiting your review on Requests & Approvals.',
                 'approval',
                 'approval_request',
                 $approvalId
@@ -444,5 +487,6 @@ function cancelApprovalRequest(PDO $pdo, int $approvalId, int $actorUserId, ?str
         "INSERT INTO approval_history (approval_request_id, action, acted_by, remarks)
          VALUES (?, 'Cancelled', ?, ?)"
     )->execute([$approvalId, $actorUserId, $remarks]);
+    resolveNotifications($pdo, 'approval', $approvalId, ['Approval required']);
     return true;
 }

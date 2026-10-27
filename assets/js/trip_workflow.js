@@ -1,7 +1,4 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const documentsStatus = document.getElementById('documentsStatus');
-  const documentsNotesGroup = document.getElementById('documentsNotesGroup');
-  const documentsNotes = document.getElementById('documentsNotes');
   const allowanceStatus = document.getElementById('allowanceStatus');
   const allowanceNotesGroup = document.getElementById('allowanceNotesGroup');
   const allowanceNotes = document.getElementById('allowanceNotes');
@@ -9,18 +6,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const fundRequestId = document.getElementById('fundRequestId');
 
   function syncPreparationFields() {
-    const noDocuments = documentsStatus?.value === 'Not Required';
     const noAllowance = allowanceStatus?.value === 'Not Required';
     const allowanceApproved = allowanceStatus?.value === 'Approved';
-    documentsNotesGroup?.classList.toggle('d-none', !noDocuments);
     allowanceNotesGroup?.classList.toggle('d-none', !noAllowance);
     fundRequestGroup?.classList.toggle('d-none', !allowanceApproved);
-    if (documentsNotes) documentsNotes.required = Boolean(noDocuments);
     if (allowanceNotes) allowanceNotes.required = Boolean(noAllowance);
     if (fundRequestId) fundRequestId.required = Boolean(allowanceApproved);
   }
 
-  documentsStatus?.addEventListener('change', syncPreparationFields);
   allowanceStatus?.addEventListener('change', syncPreparationFields);
   syncPreparationFields();
 
@@ -74,6 +67,54 @@ document.addEventListener('DOMContentLoaded', () => {
         if (button) button.disabled = false;
       }
     });
+  });
+
+  // Step 6 "Upload Attachment": the existing document upload handler links
+  // the file to this trip. Uploading does not record Step 6. Listening on
+  // document keeps this working after a soft page refresh.
+  document.addEventListener('submit', async (event) => {
+    const form = event.target;
+    if (form.id !== 'tripAttachmentForm') return;
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+
+    const alertBox = document.getElementById('tripAttachmentAlert');
+    const button = document.getElementById('tripAttachmentSubmit');
+    const tripId = form.querySelector('[name="trip_id"]')?.value || 'unknown';
+    const scope = `document-upload:trip-${tripId}`;
+    alertBox?.classList.add('d-none');
+    if (button) button.disabled = true;
+
+    try {
+      const body = new FormData(form);
+      body.append('action', 'upload');
+      body.append(window.CSRF_TOKEN_NAME, window.CSRF_TOKEN);
+      const response = await fetch(`${window.APP_BASE}/ajax/document_handler.php`, {
+        method: 'POST',
+        headers: window.fleetOpsIdempotencyHeaders(scope),
+        body,
+      });
+      const result = await response.json();
+      if (result.success || response.status === 409) window.fleetOpsCompleteIdempotency(scope);
+      if (result.success) {
+        bootstrap.Modal.getInstance(document.getElementById('tripAttachmentModal'))?.hide();
+        form.reset();
+        window.softReload();
+        return;
+      }
+      if (alertBox) {
+        alertBox.textContent = result.message || 'Upload failed.';
+        alertBox.classList.remove('d-none');
+      }
+    } catch (error) {
+      console.error(error);
+      if (alertBox) {
+        alertBox.textContent = 'Network error while uploading the attachment.';
+        alertBox.classList.remove('d-none');
+      }
+    } finally {
+      if (button) button.disabled = false;
+    }
   });
 
   const allowanceForm = document.getElementById('tripAllowanceRequestForm');

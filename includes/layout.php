@@ -18,34 +18,52 @@ function roleDashboardUrl(): string {
 }
 
 // ---- Navigation definition --------------------------------
+// Grouped by business module. An item with 'section' => null is a top-level
+// link shown under Home (Approvals serves several modules).
 function getNavItems(): array {
     return [
-        ['section' => 'Analytics', 'label' => 'Analytics', 'href' => '/pages/analytics.php', 'icon' => 'bi-graph-up-arrow', 'permissions' => ['reports.view', 'operations.reports.view', 'maintenance.reports.view', 'billing.view']],
-        ['section' => 'Reports', 'label' => 'Dispatcher Reports', 'href' => '/pages/dispatcher_reports.php', 'icon' => 'bi-bar-chart-line', 'permission' => 'dispatch.reports.view', 'also_roles' => ['operations_head']],
-        ['section' => 'Operations', 'label' => 'Fleet Status', 'href' => '/pages/fleet_status.php', 'icon' => 'bi-truck', 'permission' => 'fleet.view'],
-        ['section' => 'Operations', 'label' => 'Trip Monitoring', 'href' => '/pages/trip_monitor.php', 'icon' => 'bi-map', 'permission' => 'trips.view'],
-        ['section' => 'Operations', 'label' => 'Dispatch', 'href' => '/pages/dispatch.php', 'icon' => 'bi-send', 'permission' => 'trips.view'],
-        ['section' => 'Operations', 'label' => 'Dispatch Planning', 'href' => '/pages/dispatch_planning.php', 'icon' => 'bi-list-check', 'permission' => 'dispatch.instructions.manage', 'excluded_roles' => ['admin']],
-        ['section' => 'Operations', 'label' => 'Dispatcher Queue', 'href' => '/pages/dispatch_inbox.php', 'icon' => 'bi-inbox', 'permission' => 'dispatch.instructions.encode', 'excluded_roles' => ['admin']],
-        ['section' => 'Requests & Approvals', 'label' => 'Requests', 'href' => '/pages/requests.php', 'icon' => 'bi-inbox', 'permission' => 'approvals.review'],
-        ['section' => 'Maintenance', 'label' => 'Maintenance Records', 'href' => '/pages/maintenance.php', 'icon' => 'bi-tools', 'permission' => 'maintenance.view'],
-        ['section' => 'Reports', 'label' => 'Operations Maintenance Report', 'href' => '/pages/operations_maintenance_report.php', 'icon' => 'bi-wrench-adjustable', 'permission' => 'maintenance.reports.operations.view'],
-        ['section' => 'Inventory', 'label' => 'Parts Inventory', 'href' => '/pages/parts.php', 'icon' => 'bi-box-seam', 'permission' => 'parts.view'],
-        ['section' => 'Inventory', 'label' => 'Purchasing', 'href' => '/pages/purchasing.php', 'icon' => 'bi-cart-check', 'permission' => 'purchasing.view', 'excluded_roles' => ['admin']],
-        ['section' => 'Records Management', 'label' => 'Attendance', 'href' => '/pages/attendance.php', 'icon' => 'bi-calendar-check', 'permission' => 'hr.attendance.view', 'also_linked_employee' => true, 'excluded_roles' => ['operations_head', 'car_carrier_dispatcher', 'container_wing_van_dispatcher', 'maintenance', 'purchasing_officer', 'finance', 'billing_collection', 'audit', 'driver', 'helper']],
-        ['section' => 'Inventory', 'label' => 'Office Supplies', 'href' => '/pages/office_supplies.php', 'icon' => 'bi-clipboard2-check', 'permissions' => ['admin.supplies.view', 'admin.supplies.manage'], 'excluded_roles' => ['admin']],
-        ['section' => 'Finance', 'label' => 'Billing', 'href' => '/pages/billing.php', 'icon' => 'bi-receipt', 'permission' => 'billing.view'],
-        ['section' => 'Finance', 'label' => 'Payroll', 'href' => '/pages/payroll.php', 'icon' => 'bi-cash-stack', 'permission' => 'payroll.view'],
-        ['section' => 'Finance', 'label' => 'Trip Pay', 'href' => '/pages/trip_pay.php', 'icon' => 'bi-person-workspace', 'permission' => 'payroll.manage'],
-        ['section' => 'Records Management', 'label' => 'Clients', 'href' => '/pages/clients.php', 'icon' => 'bi-person-vcard', 'permission' => 'clients.view'],
-        ['section' => 'Finance', 'label' => 'Trip Costs', 'href' => '/pages/trip_costs.php', 'icon' => 'bi-fuel-pump', 'permission' => 'finance.view'],
-        ['section' => 'Finance', 'label' => 'Finance', 'href' => '/pages/finance.php', 'icon' => 'bi-wallet2', 'permission' => 'finance.funds.view', 'excluded_roles' => ['admin']],
-        ['section' => 'Operations', 'label' => 'Trip Problem Reports', 'href' => '/pages/incidents.php', 'icon' => 'bi-exclamation-triangle', 'permissions' => ['incidents.manage', 'legacy.role.3']],
-        ['section' => 'Records Management', 'label' => 'Documents', 'href' => '/pages/documents.php', 'icon' => 'bi-folder2-open', 'permission' => 'documents.view'],
-        ['section' => 'System Administration', 'label' => 'Audit History', 'href' => '/pages/audit_history.php', 'icon' => 'bi-journal-text', 'permission' => 'audit.view'],
-        ['section' => 'System Administration', 'label' => 'User Management', 'href' => '/pages/users.php', 'icon' => 'bi-people', 'permission' => 'users.manage'],
-        ['section' => 'System Administration', 'label' => 'Recycle Bin', 'href' => '/pages/recycle_bin.php', 'icon' => 'bi-trash3', 'admin_only' => true],
-        ['section' => 'System Administration', 'label' => 'Backup', 'href' => '/pages/backup.php', 'icon' => 'bi-hdd-network', 'admin_only' => true],
+        ['section' => null, 'label' => 'Approvals', 'href' => '/pages/requests.php', 'icon' => 'bi-inbox', 'permission' => 'approvals.review'],
+
+        // 1. Fleet Management
+        ['section' => 'Fleet Management', 'label' => 'Fleet Status', 'href' => '/pages/fleet_status.php', 'icon' => 'bi-truck', 'permission' => 'fleet.view'],
+
+        // 2. Trip & Dispatch
+        ['section' => 'Trip & Dispatch', 'label' => 'Dispatch Planning', 'href' => '/pages/dispatch_planning.php', 'icon' => 'bi-list-check', 'permission' => 'dispatch.instructions.manage', 'excluded_roles' => ['admin']],
+        ['section' => 'Trip & Dispatch', 'label' => 'Dispatcher Queue', 'href' => '/pages/dispatch_inbox.php', 'icon' => 'bi-inbox', 'permission' => 'dispatch.instructions.encode', 'excluded_roles' => ['admin']],
+        ['section' => 'Trip & Dispatch', 'label' => 'Dispatch', 'href' => '/pages/dispatch.php', 'icon' => 'bi-send', 'permission' => 'trips.view'],
+        ['section' => 'Trip & Dispatch', 'label' => 'Trip Monitoring', 'href' => '/pages/trip_monitor.php', 'icon' => 'bi-map', 'permission' => 'trips.view'],
+        ['section' => 'Trip & Dispatch', 'label' => 'Trip Problem Reports', 'href' => '/pages/incidents.php', 'icon' => 'bi-exclamation-triangle', 'permissions' => ['incidents.manage', 'legacy.role.3']],
+
+        // 3. Maintenance & Inspection
+        ['section' => 'Maintenance & Inspection', 'label' => 'Maintenance', 'href' => '/pages/maintenance.php', 'icon' => 'bi-tools', 'permission' => 'maintenance.view'],
+        ['section' => 'Maintenance & Inspection', 'label' => 'Maintenance History', 'href' => '/pages/maintenance_records.php', 'icon' => 'bi-journal-text', 'permission' => 'maintenance.view'],
+        ['section' => 'Maintenance & Inspection', 'label' => 'Parts Inventory', 'href' => '/pages/parts.php', 'icon' => 'bi-box-seam', 'permission' => 'parts.view'],
+        ['section' => 'Maintenance & Inspection', 'label' => 'Purchasing', 'href' => '/pages/purchasing.php', 'icon' => 'bi-cart-check', 'permission' => 'purchasing.view', 'excluded_roles' => ['admin']],
+
+        // 4. Financial & Billing
+        ['section' => 'Financial & Billing', 'label' => 'Billing', 'href' => '/pages/billing.php', 'icon' => 'bi-receipt', 'permission' => 'billing.view'],
+        ['section' => 'Financial & Billing', 'label' => 'Trip Costs', 'href' => '/pages/trip_costs.php', 'icon' => 'bi-fuel-pump', 'permission' => 'finance.view'],
+        ['section' => 'Financial & Billing', 'label' => 'Finance', 'href' => '/pages/finance.php', 'icon' => 'bi-wallet2', 'permission' => 'finance.funds.view', 'excluded_roles' => ['admin']],
+        ['section' => 'Financial & Billing', 'label' => 'Trip Pay', 'href' => '/pages/trip_pay.php', 'icon' => 'bi-person-workspace', 'permission' => 'payroll.manage'],
+        ['section' => 'Financial & Billing', 'label' => 'Payroll', 'href' => '/pages/payroll.php', 'icon' => 'bi-cash-stack', 'permission' => 'payroll.view'],
+
+        // 5. Employee & Records
+        ['section' => 'Employee & Records', 'label' => 'Attendance', 'href' => '/pages/attendance.php', 'icon' => 'bi-calendar-check', 'permission' => 'hr.attendance.view', 'also_linked_employee' => true, 'excluded_roles' => ['operations_head', 'car_carrier_dispatcher', 'container_wing_van_dispatcher', 'maintenance', 'purchasing_officer', 'finance', 'billing_collection', 'audit', 'driver', 'helper']],
+        ['section' => 'Employee & Records', 'label' => 'Clients', 'href' => '/pages/clients.php', 'icon' => 'bi-person-vcard', 'permission' => 'clients.view'],
+        ['section' => 'Employee & Records', 'label' => 'Documents', 'href' => '/pages/documents.php', 'icon' => 'bi-folder2-open', 'permission' => 'documents.view'],
+        ['section' => 'Employee & Records', 'label' => 'Office Supplies', 'href' => '/pages/office_supplies.php', 'icon' => 'bi-clipboard2-check', 'permissions' => ['admin.supplies.view', 'admin.supplies.manage'], 'excluded_roles' => ['admin']],
+
+        // 6. Reports & Administration
+        // Each analytics link uses the same permission check as its page.
+        ['section' => 'Reports & Administration', 'label' => 'Fleet Overview', 'href' => '/pages/analytics_fleet.php', 'icon' => 'bi-graph-up-arrow', 'permissions' => ['operations.reports.view', 'reports.view']],
+        ['section' => 'Reports & Administration', 'label' => 'Billing & Collections Analytics', 'href' => '/pages/analytics_expenses.php', 'icon' => 'bi-cash-coin', 'permission' => 'billing.view'],
+        ['section' => 'Reports & Administration', 'label' => 'Maintenance Analytics', 'href' => '/pages/analytics_maintenance.php', 'icon' => 'bi-wrench', 'permission' => 'maintenance.reports.view'],
+        ['section' => 'Reports & Administration', 'label' => 'Dispatcher Reports', 'href' => '/pages/dispatcher_reports.php', 'icon' => 'bi-bar-chart-line', 'permission' => 'dispatch.reports.view', 'also_roles' => ['operations_head']],
+        ['section' => 'Reports & Administration', 'label' => 'Operations Maintenance Report', 'href' => '/pages/operations_maintenance_report.php', 'icon' => 'bi-wrench-adjustable', 'permission' => 'maintenance.reports.operations.view'],
+        ['section' => 'Reports & Administration', 'label' => 'Audit History', 'href' => '/pages/audit_history.php', 'icon' => 'bi-journal-text', 'permission' => 'audit.view'],
+        ['section' => 'Reports & Administration', 'label' => 'User Management', 'href' => '/pages/users.php', 'icon' => 'bi-people', 'permission' => 'users.manage'],
+        ['section' => 'Reports & Administration', 'label' => 'Recycle Bin', 'href' => '/pages/recycle_bin.php', 'icon' => 'bi-trash3', 'admin_only' => true],
+        ['section' => 'Reports & Administration', 'label' => 'Backup', 'href' => '/pages/backup.php', 'icon' => 'bi-hdd-network', 'admin_only' => true],
     ];
 }
 
@@ -96,16 +114,14 @@ function buildSidebarNav(): string {
     $navItems    = getNavItems();
     $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '';
     $sections = [
-        'Analytics' => ['icon' => 'bi-graph-up-arrow', 'items' => []],
-        'Operations' => ['icon' => 'bi-truck', 'items' => []],
-        'Maintenance' => ['icon' => 'bi-tools', 'items' => []],
-        'Requests & Approvals' => ['icon' => 'bi-inbox', 'items' => []],
-        'Finance' => ['icon' => 'bi-wallet2', 'items' => []],
-        'Inventory' => ['icon' => 'bi-box-seam', 'items' => []],
-        'Reports' => ['icon' => 'bi-bar-chart-line', 'items' => []],
-        'Records Management' => ['icon' => 'bi-folder2-open', 'items' => []],
-        'System Administration' => ['icon' => 'bi-gear', 'items' => []],
+        'Fleet Management' => ['icon' => 'bi-truck', 'items' => []],
+        'Trip & Dispatch' => ['icon' => 'bi-send', 'items' => []],
+        'Maintenance & Inspection' => ['icon' => 'bi-tools', 'items' => []],
+        'Financial & Billing' => ['icon' => 'bi-wallet2', 'items' => []],
+        'Employee & Records' => ['icon' => 'bi-folder2-open', 'items' => []],
+        'Reports & Administration' => ['icon' => 'bi-gear', 'items' => []],
     ];
+    $topLevelHtml = '';
 
     foreach ($navItems as $item) {
         if (!navItemVisible($item)) {
@@ -119,6 +135,15 @@ function buildSidebarNav(): string {
         $icon     = htmlspecialchars($item['icon']);
         $hrefSafe = htmlspecialchars($href);
 
+        // Top-level link: same look as the Home link above the sections.
+        if ($section === null) {
+            $topLevelHtml .= '<a href="' . $hrefSafe . '" class="sidebar-home-nav' . $active . '" title="' . $label . '">'
+                . '<i class="bi ' . $icon . ' nav-icon"></i>'
+                . '<span class="nav-label">' . $label . '</span>'
+                . '</a>';
+            continue;
+        }
+
         $sections[$section]['items'][] = '<div class="nav-item">'
             . '<a href="' . $hrefSafe . '" class="nav-link' . $active . '" title="' . $label . '">'
             . '<i class="bi ' . $icon . ' nav-icon"></i>'
@@ -126,7 +151,7 @@ function buildSidebarNav(): string {
             . '</a></div>';
     }
 
-    $html = '';
+    $html = $topLevelHtml;
     foreach ($sections as $name => $section) {
         if (!$section['items']) {
             continue;

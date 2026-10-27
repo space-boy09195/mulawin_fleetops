@@ -19,10 +19,16 @@ define('CSRF_TOKEN_NAME', env('CSRF_TOKEN_NAME', 'csrf_token'));
 define('APP_TIMEZONE', env('APP_TIMEZONE', 'Asia/Manila'));
 define('COMPANY_EMAIL_DOMAIN', strtolower(ltrim((string) env('COMPANY_EMAIL_DOMAIN', 'rpm.com'), '@')));
 define('DOCUMENT_STORAGE_PATH', env('DOCUMENT_STORAGE_PATH', dirname(__DIR__) . '/uploads'));
-// Minimum time required for checklist and vehicle inspection submissions
-// (objective 1.10: fifteen minutes). Enforced on the server by
+// Minimum time required for vehicle inspection submissions (objective
+// 1.10: fifteen minutes). Enforced on the server by
 // includes/inspections.php; a template may only raise it.
 define('MAINTENANCE_FORM_MIN_DURATION_SECONDS', 900);
+// The two Pre-Departure Inspection sections each have their own minimum of
+// five minutes (owner decision 2026-10-26): the 8-item pre-trip checklist
+// and the trip departure inspection. Return and general inspections keep
+// the minimum above.
+define('PRE_TRIP_CHECKLIST_MIN_DURATION_SECONDS', 300);
+define('DEPARTURE_INSPECTION_MIN_DURATION_SECONDS', 300);
 date_default_timezone_set(APP_TIMEZONE);
 
 // ---- Legacy role numbers -------------------------------------

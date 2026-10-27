@@ -20,6 +20,7 @@ require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 require_once __DIR__ . '/../includes/approval_workflow.php';
 require_once __DIR__ . '/../includes/notifications.php';
+require_once __DIR__ . '/../includes/workflow_notifications.php';
 require_once __DIR__ . '/../includes/purchasing.php';
 
 header('Content-Type: application/json');
@@ -124,6 +125,10 @@ try {
                 if ($update->rowCount() !== 1) {
                     throw new DomainException('The fund request is no longer pending.');
                 }
+                if ($workflowStatus === 'Approved') {
+                    // Next: Finance records the disbursement.
+                    notifyFundRequestAwaitingDisbursement($pdo, $entityId);
+                }
                 break;
             case 'payment_voucher':
                 $update = $pdo->prepare(
@@ -135,6 +140,10 @@ try {
                 $update->execute([$workflowStatus, $workflowStatus, currentUserId(), $workflowStatus, $entityId]);
                 if ($update->rowCount() !== 1) {
                     throw new DomainException('The payment voucher is no longer pending.');
+                }
+                if ($workflowStatus === 'Approved') {
+                    // Next: Finance records the disbursement.
+                    notifyVoucherAwaitingDisbursement($pdo, $entityId);
                 }
                 break;
             case 'payroll':
@@ -151,15 +160,21 @@ try {
                 }
                 break;
         }
-        createNotification(
-            $pdo,
-            (int)$row['requested_by'],
-            $label . ' ' . strtolower($workflowStatus),
-            $label . ' #' . $entityId . ' was ' . strtolower($workflowStatus) . '.',
-            'approval',
-            $notifyEntity ?? 'approval_request',
-            $notifyEntity !== null ? $entityId : $approvalId
-        );
+        if ($row['workflow_key'] === 'fund_request') {
+            // Names the request and trip, and links a dispatcher to the
+            // trip (they cannot open the Finance page).
+            notifyFundRequestDecision($pdo, $entityId, $workflowStatus);
+        } else {
+            createNotification(
+                $pdo,
+                (int)$row['requested_by'],
+                $label . ' ' . strtolower($workflowStatus),
+                $label . ' #' . $entityId . ' was ' . strtolower($workflowStatus) . '.',
+                'approval',
+                $notifyEntity ?? 'approval_request',
+                $notifyEntity !== null ? $entityId : $approvalId
+            );
+        }
     }
 
     auditLog('APPROVAL_DECISION', 'approval_requests', $approvalId, ['status' => 'Pending'], [

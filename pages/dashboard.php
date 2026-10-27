@@ -7,6 +7,7 @@ require_once __DIR__ . '/../includes/employee_profile.php';
 require_once __DIR__ . '/../includes/dashboard_metrics.php';
 require_once __DIR__ . '/../includes/trip_queries.php';
 require_once __DIR__ . '/../includes/trip_completion.php';
+require_once __DIR__ . '/../includes/home_tasks.php';
 
 requireLogin();
 
@@ -77,6 +78,7 @@ if ($canTrips) {
         );
         $stmt->execute($tripScopeParams);
         return array_map(static fn(array $trip): array => [
+            'trip_id' => (int)$trip['trip_id'],
             'title' => 'Past ETA',
             'detail' => $trip['trip_number'] . ' · ' . ($trip['plate_number'] ?? 'No truck'),
             'url' => in_array($roleKey, ['driver', 'helper'], true)
@@ -103,7 +105,7 @@ if ($canMaintenance) {
         return array_map(static fn(array $item): array => [
             'title' => 'Maintenance due',
             'detail' => $item['plate_number'] . ' · ' . $item['label'] . ' · ' . $item['next_due_date'],
-            'url' => APP_BASE . '/pages/maintenance.php',
+            'url' => APP_BASE . '/pages/maintenance_records.php',
             'tone' => 'warning',
         ], dashboardMaintenanceDue($pdo, 7, 5));
     });
@@ -176,6 +178,131 @@ if ($canDispatchQueue) {
     });
 }
 
+// ── Work waiting for this user (includes/home_tasks.php) ─────────────────────
+// Built from the current workflow data on every load, so finished or
+// cancelled work drops out. Admin acts on others' work only as an
+// override, so Admin gets no task items (approvals stay in the alert above).
+$homeTasks = [];
+$isAdminViewer = isAdmin();
+$canInspectTrips = !$isAdminViewer && $roleKey !== 'operations_head'
+    && currentUserHasAnyPermission(['maintenance.manage']);
+$canClearTrips = !$isAdminViewer && currentUserHasAnyPermission(['dispatch.clear']);
+$canOwnTripSteps = !$isAdminViewer && currentUserHasAnyPermission(['trips.assign', 'trips.update']);
+$loadTasks = static function (string $source, callable $load) use (&$alertsUnavailable, &$homeTasks): void {
+    try {
+        $homeTasks = array_merge($homeTasks, $load());
+    } catch (PDOException $e) {
+        error_log('Home task query failed (' . $source . '): ' . $e->getMessage());
+        $alertsUnavailable = true;
+    }
+};
+
+// Trips whose next workflow step belongs to this user: their own trips
+// (dispatcher), trips waiting for clearance (Operations Head), and trips
+// waiting for an inspection (Maintenance). tripHomeTask() keeps only the
+// steps this user can do now.
+$taskConditions = [];
+$taskParams = [];
+if ($canOwnTripSteps) {
+    $taskConditions[] = 'dr.submitted_by = ?';
+    $taskParams[] = $userId;
+}
+if ($canClearTrips) {
+    $taskConditions[] = "t.status = 'Ready for Dispatch'";
+}
+if ($canInspectTrips) {
+    $taskConditions[] = "t.status IN ('Assigned', 'Delivered')";
+}
+if ($taskConditions) {
+    $loadTasks('trip tasks', static function () use ($pdo, $taskConditions, $taskParams, $userId, $canClearTrips, $canInspectTrips): array {
+        $stmt = $pdo->prepare(
+            tripSelectSql() . "
+             WHERE t.status IN ('Approved', 'Assigned', 'Ready for Dispatch', 'Dispatched', 'In Progress', 'Delivered', 'Returned')
+               AND dr.dispatch_request_id IS NOT NULL
+               AND (" . implode(' OR ', $taskConditions) . ")
+             ORDER BY t.scheduled_departure ASC
+             LIMIT 100"
+        );
+        $stmt->execute($taskParams);
+        $facts = [
+            'is_admin'    => false,
+            'can_assign'  => currentUserHasAnyPermission(['trips.assign']),
+            'can_update'  => currentUserHasAnyPermission(['trips.update']),
+            'can_clear'   => $canClearTrips,
+            'can_inspect' => $canInspectTrips,
+        ];
+        $tasks = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $trip) {
+            $task = tripHomeTask(
+                $trip,
+                tripWorkflowCurrentStep($pdo, (int)$trip['trip_id']),
+                $facts + ['is_owner' => (int)$trip['requested_by'] === $userId],
+                time()
+            );
+            if ($task !== null) {
+                $tasks[] = $task;
+            }
+        }
+        return $tasks;
+    });
+}
+
+// Open dispatch instructions for this dispatcher's truck types (the same
+// rule as the Dispatcher Queue).
+$instructionScope = dispatcherScopeResult();
+if (!$isAdminViewer && $instructionScope['status'] === 'scoped'
+    && currentUserHasAnyPermission(['dispatch.instructions.encode'])) {
+    $loadTasks('dispatch instructions', static function () use ($pdo, $instructionScope): array {
+        $types = $instructionScope['truck_types'];
+        $stmt = $pdo->prepare(
+            "SELECT booking_id, booking_reference, truck_type, shift, scheduled_departure
+             FROM client_bookings
+             WHERE status = 'Pending' AND scheduled_departure IS NOT NULL
+               AND truck_type IN (" . implode(',', array_fill(0, count($types), '?')) . ")
+             ORDER BY scheduled_departure ASC
+             LIMIT 20"
+        );
+        $stmt->execute($types);
+        return array_map(static fn(array $row): array => dispatchInstructionHomeTask($row, time()), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    });
+}
+
+// Approved fund requests waiting for Finance to record the disbursement
+// (the same rule as the Finance page's "Record disbursement" list).
+if (!$isAdminViewer && currentUserHasAnyPermission(['finance.disbursements.manage'])) {
+    $loadTasks('disbursements', static function () use ($pdo): array {
+        $rows = $pdo->query(
+            "SELECT * FROM (
+               SELECT fr.request_number, fr.request_type,
+                      fr.amount - COALESCE((SELECT SUM(d.amount) FROM disbursements d
+                                            WHERE d.reference_type = 'fund_request' AND d.reference_id = fr.fund_request_id), 0) AS remaining,
+                      t.trip_number, t.status AS trip_status, t.scheduled_departure
+               FROM fund_requests fr
+               LEFT JOIN trips t ON t.trip_id = fr.trip_id
+               WHERE fr.status IN ('Approved', 'Processing')
+             ) eligible
+             WHERE remaining > 0
+             ORDER BY scheduled_departure IS NULL, scheduled_departure ASC
+             LIMIT 20"
+        )->fetchAll(PDO::FETCH_ASSOC);
+        return array_map(static fn(array $row): array => fundDisbursementHomeTask($row, time()), $rows);
+    });
+}
+
+// Tasks come first (urgent ones on top). A trip with a task is not listed
+// again as a plain "Past ETA" alert.
+$homeTasks = sortHomeTasks($homeTasks);
+$taskTripIds = array_filter(array_column($homeTasks, 'trip_id'));
+$alerts = array_values(array_filter($alerts, static fn(array $alert): bool =>
+    !isset($alert['trip_id']) || !in_array($alert['trip_id'], $taskTripIds, true)));
+$alerts = array_merge(array_map(static fn(array $task): array => [
+    'title'  => $task['title'],
+    'detail' => $task['detail'],
+    'url'    => APP_BASE . $task['url'],
+    'tone'   => $task['urgent'] ? 'danger' : 'info',
+    'urgent' => $task['urgent'],
+], $homeTasks), $alerts);
+
 $activeTrips = null;
 if ($canViewTripList) {
     $crewStatuses = array_merge(['Approved'], TRIP_ACTIVE_STATUSES);
@@ -229,7 +356,7 @@ if ($canFleet) {
     $addSummaryCard('fleet', 'Available trucks', (string)($fleetCounts['Available'] ?? 0), 'Fleet records marked available', APP_BASE . '/pages/fleet_status.php', 'bi-truck');
 }
 if ($canMaintenance) {
-    $addSummaryCard('maintenance', 'Open maintenance', (string)dashboardOpenMaintenanceCount($pdo), 'Reported, scheduled, in-progress, or waiting', APP_BASE . '/pages/maintenance.php', 'bi-tools');
+    $addSummaryCard('maintenance', 'Open maintenance', (string)dashboardOpenMaintenanceCount($pdo), 'Reported, scheduled, in-progress, or waiting', APP_BASE . '/pages/maintenance_records.php', 'bi-tools');
 }
 if ($canParts) {
     $addSummaryCard('stock', 'Low-stock parts', (string)dashboardLowStockCount($pdo), 'At or below recorded reorder level', APP_BASE . '/pages/parts.php', 'bi-box-seam');
@@ -408,12 +535,13 @@ layoutHead('Home', APP_BASE . '/assets/css/dashboard.css');
         <p class="fleet-dash-empty"><?= $alertsUnavailable ? 'No additional alerts are available.' : 'No pending alerts for your access.' ?></p>
       <?php else: ?>
         <ul class="fleet-dash-list">
-          <?php foreach (array_slice($alerts, 0, 8) as $alert): ?>
+          <?php foreach (array_slice($alerts, 0, 12) as $alert): ?>
             <li>
               <span class="fleet-dash-list-icon"><i class="bi bi-exclamation-circle" aria-hidden="true"></i></span>
               <span class="fleet-dash-list-copy">
-                <strong><?= htmlspecialchars($alert['title']) ?></strong>
+                <strong><?= htmlspecialchars($alert['title']) ?><?php if (!empty($alert['urgent'])): ?> <span class="badge text-bg-danger">Urgent</span><?php endif; ?></strong>
                 <span><?= htmlspecialchars($alert['detail']) ?></span>
+                <?php if (!empty($alert['urgent'])): ?><span class="text-danger"><?= htmlspecialchars($alert['urgent']) ?></span><?php endif; ?>
               </span>
               <a class="fleet-dash-work-link" href="<?= htmlspecialchars($alert['url'], ENT_QUOTES) ?>">Open</a>
             </li>

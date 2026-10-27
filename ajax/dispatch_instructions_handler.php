@@ -18,6 +18,7 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 require_once __DIR__ . '/../includes/notifications.php';
+require_once __DIR__ . '/../includes/workflow_notifications.php';
 
 header('Content-Type: application/json');
 requirePermission('dispatch.instructions.manage');
@@ -201,14 +202,13 @@ if ($action === 'create_batch' || $action === 'create') {
             $message = ucfirst(strtolower($validatedEntries[0]['shift'])) . ' shift dispatch instruction '
                 . sprintf('INS-%06d', $bookingIds[0]) . ' is ready to encode.';
         }
-        notifyUsersWithPermission(
+        // Only the dispatchers who encode these truck types are notified.
+        notifyDispatchersForTruckTypes(
             $pdo,
-            'dispatch.instructions.encode',
+            array_values(array_unique(array_column($validatedEntries, 'truck_type'))),
             $action === 'create_batch' ? 'Dispatch list ready' : 'Dispatch instruction ready',
             $message,
-            'dispatch_instruction',
-            'dispatch_request',
-            null
+            $action === 'create_batch' ? null : $bookingIds[0]
         );
         $pdo->commit();
     } catch (Throwable $e) {
@@ -245,6 +245,10 @@ if ($action === 'cancel') {
             $pdo->rollBack();
             jsonFail('Only an unencoded instruction can be cancelled.', 409);
         }
+        resolveDispatchInstructionNotices($pdo, $instructionId);
+        $truckTypeQuery = $pdo->prepare('SELECT truck_type FROM client_bookings WHERE booking_id = ?');
+        $truckTypeQuery->execute([$instructionId]);
+        resolveDispatchListNotices($pdo, (string)$truckTypeQuery->fetchColumn());
         auditLog('CANCEL_DISPATCH_INSTRUCTION', 'client_bookings', $instructionId, ['status' => 'Pending'], ['status' => 'Cancelled']);
         $pdo->commit();
         jsonOk([], 'Dispatch instruction cancelled.');

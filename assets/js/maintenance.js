@@ -442,10 +442,14 @@
     });
   });
 
+  // Present only on the Pre-Departure Inspection view (one trip, two sections).
+  const preDepartureRoot = document.getElementById('preDepartureInspection');
+
   // ══════════════════════════════════════════════════════════════════════════
   // CHECKLIST FORM
   // ══════════════════════════════════════════════════════════════════════════
-  const checklistModal    = document.getElementById('checklistModal');
+  // The checklist form is a section of the Pre-Departure Inspection view.
+  const checklistModal    = document.getElementById('checklistModal') || document.getElementById('checklistSection');
   const clDispatchId      = document.getElementById('clDispatchId');
   const clNotes           = document.getElementById('clNotes');
   const submitChecklistBtn = document.getElementById('submitChecklistBtn');
@@ -525,6 +529,12 @@
         setBusy(submitChecklistBtn, clBtnSpinner, false);
         checklistTimer.setBusy(false);
         if (res.success) {
+          // Pre-Departure Inspection view: no reload, so the departure
+          // section keeps its running timer.
+          if (preDepartureRoot) {
+            finishPreDepartureSection('checklist', res.result === 'Passed', res.message);
+            return;
+          }
           bootstrap.Modal.getInstance(checklistModal)?.hide();
           window.softReload();
         } else {
@@ -583,7 +593,9 @@
   const inspectionTruck = document.getElementById('inspectionTruck');
   const inspectionStage = document.getElementById('inspectionStage');
   const inspectionTrip = document.getElementById('inspectionTrip');
-  const inspectionModal = document.getElementById('inspectionModal');
+  // The modal (general and return inspections) or the Departure Inspection
+  // section of the Pre-Departure Inspection view.
+  const inspectionModal = document.getElementById('inspectionModal') || document.getElementById('inspectionSection');
   const submitInspectionBtn = document.getElementById('submitInspectionBtn');
   const inspectionTimer = createMinimumTimer(
     inspectionModal,
@@ -859,16 +871,86 @@
     }).forEach(([key, value]) => formData.append(key, value));
     photos.forEach(file => formData.append('inspection_photos[]', file));
     fetch(AJAX_URL, { method: 'POST', body: formData }).then(r => r.json()).then(res => {
-      if (res.success) window.softReload();
+      // A saved departure inspection has passed: the server refuses one with
+      // any part that is not Good.
+      if (res.success && preDepartureRoot) finishPreDepartureSection('departure', true, res.message);
+      else if (res.success) window.softReload();
       else showAlert(inspectionAlert, res.message || 'Could not save inspection.');
     }).catch(() => showAlert(inspectionAlert, 'Network error. Please try again.'))
       .finally(() => inspectionTimer.setBusy(false));
   });
 
-  if (location.hash === '#checklistModal' && checklistModal) {
-    bootstrap.Modal.getOrCreateInstance(checklistModal).show();
-  } else if (location.hash === '#inspectionModal' && inspectionModal) {
+  // Links ending in #inspectionModal open the inspection modal (return
+  // inspection). The Pre-Departure Inspection sections are not modals.
+  if (location.hash === '#inspectionModal' && inspectionModal?.classList.contains('modal')) {
     bootstrap.Modal.getOrCreateInstance(inspectionModal).show();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PRE-DEPARTURE INSPECTION: Pre-Trip Checklist + Departure Inspection
+  // ══════════════════════════════════════════════════════════════════════════
+  // Each section keeps its own form, handler, record and server timer
+  // (form type 'checklist' for the dispatch, 'inspection_departure' for the
+  // trip). Switching only shows or hides a section: a timer starts the first
+  // time its section is opened and is never restarted by switching.
+  const openedPreDepartureSections = new Set();
+
+  function showPreDepartureSection(name) {
+    preDepartureRoot.querySelectorAll('[data-pre-departure-section]').forEach(section => {
+      section.classList.toggle('d-none', section.dataset.preDepartureSection !== name);
+    });
+    preDepartureRoot.querySelectorAll('[data-pre-departure-switch]').forEach(button => {
+      const active = button.dataset.preDepartureSwitch === name;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    if (openedPreDepartureSections.has(name)) return;
+    openedPreDepartureSections.add(name);
+    if (name === 'checklist' && submitChecklistBtn && clDispatchId?.value) {
+      updateResultBanner();
+      checklistTimer.start('checklist', clDispatchId.value);
+    } else if (name === 'departure' && submitInspectionBtn && inspectionTrip?.value) {
+      syncInspectionTripOptions();
+      beginInspectionTimer();
+    }
+  }
+
+  // After a successful submit on this view. A passed section is complete
+  // (its timer token was used by the server); a failed checklist is recorded
+  // and needs a new attempt with a new timer.
+  function finishPreDepartureSection(name, passed, message) {
+    const timer = name === 'checklist' ? checklistTimer : inspectionTimer;
+    const alertBox = name === 'checklist' ? checklistFormAlert : inspectionAlert;
+    const badge = preDepartureRoot.querySelector(`[data-section-badge="${name}"]`);
+    if (!passed) {
+      if (badge) {
+        badge.textContent = 'Failed · submit again';
+        badge.className = 'badge text-bg-danger ms-1';
+      }
+      showAlert(alertBox, `${message || 'The checklist was saved as Failed.'} Correct the items and submit again. A new 5-minute minimum has started.`, 'warning');
+      timer.start('checklist', clDispatchId.value);
+      return;
+    }
+    timer.reset();
+    const status = document.getElementById(name === 'checklist' ? 'checklistTimerStatus' : 'inspectionTimerStatus');
+    if (status) status.textContent = 'Submitted.';
+    if (badge) {
+      badge.textContent = 'Completed';
+      badge.className = 'badge text-bg-success ms-1';
+    }
+    showAlert(alertBox, `${message || 'Saved.'} This section is complete.`, 'success');
+    const badges = [...preDepartureRoot.querySelectorAll('[data-section-badge]')];
+    if (badges.every(item => item.textContent.trim() === 'Completed')) {
+      // Nothing is running any more: reload to show the trip's new status.
+      window.softReload();
+    }
+  }
+
+  if (preDepartureRoot) {
+    preDepartureRoot.querySelectorAll('[data-pre-departure-switch]').forEach(button => {
+      button.addEventListener('click', () => showPreDepartureSection(button.dataset.preDepartureSwitch));
+    });
+    showPreDepartureSection(preDepartureRoot.dataset.initialSection || 'checklist');
   }
 
   renderInspection();

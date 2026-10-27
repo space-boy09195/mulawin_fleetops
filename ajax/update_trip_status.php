@@ -10,7 +10,9 @@
 //
 // Target transitions (see includes/trip_workflow.php for the step map):
 //   Dispatched           -> In Progress   departure (needs clearance + passed
-//                                         departure checks); truck On Trip
+//                                         departure checks + any Trip
+//                                         Allowance fully disbursed); truck
+//                                         On Trip
 //   In Progress          -> Delivered     needs a progress update and the
 //                                         delivery/return details (step 11)
 //   Delivered / Returned -> Completed     needs the complete arrival
@@ -33,6 +35,7 @@ require_once __DIR__ . '/../includes/trip_workflow.php';
 require_once __DIR__ . '/../includes/trip_queries.php';
 require_once __DIR__ . '/../includes/dispatch_assignment.php';
 require_once __DIR__ . '/../includes/dispatcher_scope.php';
+require_once __DIR__ . '/../includes/workflow_notifications.php';
 
 header('Content-Type: application/json');
 
@@ -142,6 +145,12 @@ try {
         if (!tripDepartureChecksPassed($pdo, $tripId)) {
             $pdo->rollBack();
             jsonFail('A complete departure vehicle inspection with every required item in good condition is required before the truck can leave.', 409);
+        }
+        // A required trip allowance must be fully disbursed by Finance.
+        $allowanceBlocker = tripAllowanceDepartureBlocker($pdo, $tripId);
+        if ($allowanceBlocker !== null) {
+            $pdo->rollBack();
+            jsonFail($allowanceBlocker, 409);
         }
     }
 
@@ -273,6 +282,18 @@ try {
             'Trip cancelled: ' . $notes, $oldStatus, $status);
     } else {
         recordWorkflowEvent($pdo, 'trip', $tripId, 'status-change', $oldStatus, $status, $notes, currentUserId());
+    }
+    if ($status === 'Delivered') {
+        // Next: Maintenance's return inspection (step 12).
+        notifyTripHandoff($pdo, $tripId, 'return_inspection');
+    } elseif ($status === 'In Progress') {
+        // The departure is recorded: "Cleared for departure" is done.
+        resolveTripHandoffs($pdo, $tripId, ['cleared']);
+    } elseif ($status === 'Completed') {
+        resolveTripHandoffs($pdo, $tripId, ['returned']);
+    } elseif ($status === 'Cancelled') {
+        // A cancelled trip leaves no task for anyone.
+        resolveTripHandoffs($pdo, $tripId, array_keys(TRIP_HANDOFF_NOTICES));
     }
 
     auditLog('UPDATE', 'trips', $tripId, ['status' => $oldStatus], ['status' => $status]);

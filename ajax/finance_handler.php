@@ -27,6 +27,7 @@ require_once __DIR__ . '/../includes/dispatcher_scope.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/purchasing.php';
+require_once __DIR__ . '/../includes/workflow_notifications.php';
 
 header('Content-Type: application/json');
 requirePostMethod();
@@ -251,9 +252,13 @@ if ($action === 'create_disbursement') {
             $pdo->prepare(
                 'UPDATE fund_requests SET status = ?, processed_at = NOW(), processed_by = ? WHERE fund_request_id = ?'
             )->execute([$newStatus, currentUserId(), $requestId]);
+            // The requester is told what was recorded; a fully disbursed Trip
+            // Allowance no longer blocks departure, so its dispatcher is told.
+            notifyFundRequestDisbursementRecorded($pdo, $requestId, $amount, $newStatus, currentUserId());
         } else {
             if ($totalPaid >= (float)$voucherRow['amount']) {
                 $pdo->prepare("UPDATE payment_vouchers SET status = 'Paid' WHERE voucher_id = ?")->execute([$voucherId]);
+                resolveNotifications($pdo, 'payment_voucher', $voucherId, ['Voucher disbursement needed']);
             }
             // Payable status from everything disbursed against its vouchers.
             $pdo->prepare(

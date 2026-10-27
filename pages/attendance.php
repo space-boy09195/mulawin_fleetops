@@ -3,6 +3,7 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/reporting.php';
+require_once __DIR__ . '/../includes/attendance.php';
 
 requireLogin();
 
@@ -72,9 +73,13 @@ $employees = $canViewAll
         'position' => '',
     ]] : []);
 $attendance = $pdo->prepare(
-    'SELECT ea.employee_id, ea.status, ea.time_in, ea.time_out, ea.remarks AS notes, ea.overtime_reason
+    // recorded_by and updated_at: who last saved the record and when.
+    "SELECT ea.employee_id, ea.status, ea.time_in, ea.time_out, ea.remarks AS notes, ea.overtime_reason,
+            ea.updated_at, COALESCE(NULLIF(TRIM(re.full_name), ''), ru.username) AS recorded_by_name
      FROM attendance_records ea
-     WHERE ea.attendance_date = ?' . (!$canViewAll ? ' AND ea.employee_id = ?' : '')
+     LEFT JOIN users ru ON ru.user_id = ea.recorded_by
+     LEFT JOIN employees re ON re.employee_id = ru.employee_id
+     WHERE ea.attendance_date = ?" . (!$canViewAll ? ' AND ea.employee_id = ?' : '')
 );
 $attendance->execute($canViewAll
     ? [$date]
@@ -83,6 +88,14 @@ $attendanceByEmployee = [];
 foreach ($attendance->fetchAll(PDO::FETCH_ASSOC) as $row) {
     $attendanceByEmployee[(int)$row['employee_id']] = $row;
 }
+// Totals for the date, from saved records only: an employee without a saved
+// record is "Not recorded" (never counted as Present).
+$recordedCount = count(array_filter($employees, static fn(array $employee): bool =>
+    isset($attendanceByEmployee[(int)$employee['employee_id']])));
+$notRecordedCount = count($employees) - $recordedCount;
+// The handler refuses past dates (requiredDate(..., true)), so their rows
+// are shown but cannot be saved.
+$canSaveDate = $canManage && !isPassedDate($date);
 $reportRange = reportDateRange([
     'from' => $_GET['attendance_from'] ?? date('Y-m-01'),
     'to' => $_GET['attendance_to'] ?? date('Y-m-d'),
@@ -142,26 +155,51 @@ layoutHead('Attendance');
   Link its existing employee record before using personal timekeeping.
 </div>
 <?php endif; ?>
-<div class="card"><div class="card-header-custom"><h2 class="card-title-custom"><?= $canViewAll ? 'Attendance for ' : 'My attendance for ' ?><?= htmlspecialchars($date) ?></h2></div><div class="table-responsive">
-<table class="table align-middle mb-0"><thead><tr><th>Employee</th><th>Position</th><th>Status</th><th>Time in</th><th>Time out</th><th>Notes</th><?php if ($canManage): ?><th>Action</th><?php endif; ?></tr></thead><tbody>
-<?php foreach ($employees as $employee): $row = $attendanceByEmployee[(int)$employee['employee_id']] ?? ['status' => 'Present', 'time_in' => '', 'time_out' => '', 'notes' => '']; ?>
-<tr data-employee="<?= (int)$employee['employee_id'] ?>">
+<div class="card"><div class="card-header-custom d-flex justify-content-between align-items-center flex-wrap gap-2"><h2 class="card-title-custom mb-0"><?= $canViewAll ? 'Attendance for ' : 'My attendance for ' ?><?= htmlspecialchars($date) ?></h2>
+<?php if ($canViewAll): ?>
+<div class="d-flex align-items-center flex-wrap gap-2">
+  <span class="small" id="attendanceTotals"><strong><?= $recordedCount ?></strong> recorded / <strong><?= $notRecordedCount ?></strong> not recorded</span>
+  <div class="btn-group btn-group-sm" role="group" aria-label="Show rows">
+    <button type="button" class="btn btn-outline-secondary active" data-attendance-filter="all">All</button>
+    <button type="button" class="btn btn-outline-secondary" data-attendance-filter="missing">Not recorded</button>
+    <button type="button" class="btn btn-outline-secondary" data-attendance-filter="recorded">Recorded</button>
+  </div>
+</div>
+<?php endif; ?>
+</div>
+<?php if ($canManage): ?>
+<div class="card-body-custom border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
+  <?php if ($canSaveDate): ?>
+  <span class="small text-muted">Choose a status for each employee who needs a record, then save all changed rows at once. Rows you did not change are not sent.</span>
+  <button type="button" class="btn btn-primary" id="saveAttendanceRows" disabled>Save changed rows (<span id="attendanceChangedCount">0</span>) for <?= htmlspecialchars(date('M j', strtotime($date))) ?></button>
+  <?php else: ?>
+  <span class="small text-muted">Attendance for a past date cannot be saved (existing rule). Records for this date are shown for review only.</span>
+  <?php endif; ?>
+</div>
+<?php endif; ?>
+<div class="table-responsive">
+<table class="table align-middle mb-0"><thead><tr><th>Employee</th><th>Position</th><th>Status</th><th>Time in</th><th>Time out</th><th>Notes</th><?php if ($canViewAll): ?><th>Last saved</th><?php endif; ?></tr></thead><tbody>
+<?php foreach ($employees as $employee):
+    $row = $attendanceByEmployee[(int)$employee['employee_id']] ?? null;
+    $savedStatus = $row !== null ? (string)$row['status'] : '';
+    $savedNotes = $row !== null ? (string)($row['notes'] ?? '') : '';
+?>
+<tr data-employee="<?= (int)$employee['employee_id'] ?>" data-recorded="<?= $row !== null ? '1' : '0' ?>"
+    data-original-status="<?= htmlspecialchars($savedStatus) ?>" data-original-notes="<?= htmlspecialchars($savedNotes) ?>">
 <td><?= htmlspecialchars($employee['full_name']) ?><br><span class="text-muted small"><?= htmlspecialchars($employee['employee_code']) ?></span></td>
 <td><?= htmlspecialchars($employee['position']) ?></td>
 <?php if ($canManage): ?>
-<?php
-// A stored status outside the editable list (e.g. Late or Half Day) is shown
-// as a disabled, selected option so the row never defaults to Present. Saving
-// it unchanged is rejected by the handler, so it cannot be overwritten silently.
-$editableStatuses = ['Present', 'Absent', 'Leave', 'On Duty'];
-$currentStatus = (string)$row['status'];
-?>
-<td><select class="form-select form-select-sm attendance-status"><?php if (!in_array($currentStatus, $editableStatuses, true)): ?><option value="<?= htmlspecialchars($currentStatus) ?>" selected disabled><?= htmlspecialchars($currentStatus !== '' ? $currentStatus : '(no status)') ?></option><?php endif; ?><?php foreach ($editableStatuses as $statusOption): ?><option <?= $currentStatus === $statusOption ? 'selected' : '' ?>><?= htmlspecialchars($statusOption) ?></option><?php endforeach; ?></select></td>
+<td><select class="form-select form-select-sm attendance-status" data-refresh-options aria-label="Attendance status for <?= htmlspecialchars($employee['full_name']) ?>"<?= $canSaveDate ? '' : ' disabled' ?>>
+<?php if ($row === null): ?><option value="" selected>Not recorded</option><?php endif; ?>
+<?php foreach (ATTENDANCE_STATUSES as $statusOption): ?><option value="<?= htmlspecialchars($statusOption) ?>"<?= $savedStatus === $statusOption ? ' selected' : '' ?>><?= htmlspecialchars($statusOption) ?></option><?php endforeach; ?>
+</select></td>
 <td><?= htmlspecialchars($attendanceHm($row['time_in'] ?? null) ?: '—') ?></td>
 <td><?= htmlspecialchars($attendanceHm($row['time_out'] ?? null) ?: '—') ?></td>
-<td><input class="form-control form-control-sm attendance-notes" maxlength="500" value="<?= htmlspecialchars((string)($row['notes'] ?? '')) ?>"></td>
-<td><button type="button" class="btn btn-sm btn-primary save-attendance">Save</button></td>
-<?php else: ?><td><?= htmlspecialchars($row['status']) ?></td><td><?= htmlspecialchars($attendanceHm($row['time_in'] ?? null) ?: '—') ?></td><td><?= htmlspecialchars($attendanceHm($row['time_out'] ?? null) ?: '—') ?></td><td><?= htmlspecialchars($row['notes'] ?? '') ?></td><?php endif; ?>
+<td><input class="form-control form-control-sm attendance-notes" maxlength="500" value="<?= htmlspecialchars($savedNotes) ?>" aria-label="Notes for <?= htmlspecialchars($employee['full_name']) ?>"<?= $canSaveDate ? '' : ' disabled' ?>></td>
+<?php else: ?><td><?= $row !== null ? htmlspecialchars($savedStatus) : '<span class="badge text-bg-secondary">Not recorded</span>' ?></td><td><?= htmlspecialchars($attendanceHm($row['time_in'] ?? null) ?: '—') ?></td><td><?= htmlspecialchars($attendanceHm($row['time_out'] ?? null) ?: '—') ?></td><td><?= htmlspecialchars($savedNotes) ?></td><?php endif; ?>
+<?php if ($canViewAll): ?>
+<td class="small"><?php if ($row !== null): ?><?= htmlspecialchars((string)($row['recorded_by_name'] ?? 'Unknown user')) ?><br><span class="text-muted"><?= htmlspecialchars(date('M j, g:i A', strtotime((string)$row['updated_at']))) ?></span><?php else: ?><span class="badge text-bg-secondary">Not recorded</span><?php endif; ?></td>
+<?php endif; ?>
 </tr>
 <?php endforeach; ?>
 <?php if (!$employees): ?><tr><td colspan="7" class="text-center text-muted py-4">No active employees found.</td></tr><?php endif; ?></tbody></table></div></div>
@@ -188,31 +226,92 @@ $currentStatus = (string)$row['status'];
   </div>
 </div>
 <?php endif; ?>
-<?php if ($canManage): ?><script>
-const sendAttendance = async (data) => {
-  const feedback = document.getElementById('attendanceFeedback');
-  try {
-    const response = await fetch('<?= APP_BASE ?>/ajax/attendance_handler.php', {
-      method: 'POST',
-      body: data,
-      headers: { Accept: 'application/json' }
+<?php if ($canViewAll): ?><script>
+// Show filter: All / Not recorded / Recorded. It only hides rows on screen;
+// the date, statuses and notes the user typed are untouched.
+(() => {
+  let attendanceFilter = 'all';
+  const applyAttendanceFilter = () => {
+    document.querySelectorAll('tr[data-recorded]').forEach(row => {
+      const recorded = row.dataset.recorded === '1';
+      row.classList.toggle('d-none', (attendanceFilter === 'missing' && recorded) || (attendanceFilter === 'recorded' && !recorded));
     });
-    const result = await response.json();
-    if (!response.ok || !result.success) {
-      throw new Error(result.message || 'Attendance could not be updated.');
+    document.querySelectorAll('[data-attendance-filter]').forEach(button =>
+      button.classList.toggle('active', button.dataset.attendanceFilter === attendanceFilter));
+  };
+  document.addEventListener('click', event => {
+    const button = event.target.closest?.('[data-attendance-filter]');
+    if (!button) return;
+    attendanceFilter = button.dataset.attendanceFilter;
+    applyAttendanceFilter();
+  });
+  // A soft refresh after saving redraws the rows: keep the chosen filter.
+  document.addEventListener('fleetops:refreshed', applyAttendanceFilter);
+})();
+</script><?php endif; ?>
+<?php if ($canSaveDate): ?><script>
+// Batch save: only rows whose status or notes differ from the saved record
+// are sent, with what the page showed (expected_status / expected_notes) so
+// the server refuses a row someone else changed meanwhile. The server saves
+// all rows or none. window.sendAction (assets/js/layout.js) keeps the button
+// busy and shows success only when the server confirms it.
+(() => {
+  const saveButton = document.getElementById('saveAttendanceRows');
+  const feedback = document.getElementById('attendanceFeedback');
+  let saving = false;
+  const isChanged = row => row.querySelector('.attendance-status').value !== row.dataset.originalStatus
+    || row.querySelector('.attendance-notes').value.trim() !== row.dataset.originalNotes.trim();
+  const changedRows = () => Array.from(document.querySelectorAll('tr[data-recorded]')).filter(isChanged);
+  const updateChanged = () => {
+    document.querySelectorAll('tr[data-recorded]').forEach(row => row.classList.toggle('table-warning', isChanged(row)));
+    const count = changedRows().length;
+    // The counter is inside the button, which shows "Saving…" during a save.
+    const counter = document.getElementById('attendanceChangedCount');
+    if (counter) counter.textContent = count;
+    saveButton.disabled = count === 0 || saving;
+  };
+  document.addEventListener('change', event => { if (event.target.closest?.('tr[data-recorded]')) updateChanged(); });
+  document.addEventListener('input', event => { if (event.target.closest?.('tr[data-recorded]')) updateChanged(); });
+  document.addEventListener('fleetops:refreshed', updateChanged);
+
+  saveButton.addEventListener('click', async () => {
+    const rows = changedRows();
+    if (!rows.length) return;
+    // A new record needs an explicit status; never assume one.
+    const missingStatus = rows.filter(row => row.querySelector('.attendance-status').value === '')
+      .map(row => row.querySelector('td').firstChild.textContent.trim());
+    if (missingStatus.length) {
+      feedback.textContent = 'Nothing was saved. Choose a status for: ' + missingStatus.join(', ') + '.';
+      feedback.className = 'alert alert-danger';
+      return;
     }
-    feedback.textContent = result.message || 'Attendance updated.';
-    feedback.className = 'alert alert-success';
-    setTimeout(() => window.softReload(), 500);
-  } catch (error) {
-    feedback.textContent = error.message || 'Attendance could not be updated. Please try again.';
-    feedback.className = 'alert alert-danger';
-  }
-};
-document.querySelectorAll('.save-attendance').forEach(button => button.addEventListener('click', async () => {
-  const row = button.closest('tr');
-  const data = new URLSearchParams({action:'save', employee_id:row.dataset.employee, attendance_date:'<?= htmlspecialchars($date, ENT_QUOTES) ?>', status:row.querySelector('.attendance-status').value, notes:row.querySelector('.attendance-notes').value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN});
-  sendAttendance(data);
-}));
+    const payload = rows.map(row => ({
+      employee_id: Number(row.dataset.employee),
+      status: row.querySelector('.attendance-status').value,
+      notes: row.querySelector('.attendance-notes').value,
+      expected_status: row.dataset.originalStatus,
+      expected_notes: row.dataset.originalNotes
+    }));
+    saving = true;
+    await window.sendAction('<?= APP_BASE ?>/ajax/attendance_handler.php', new URLSearchParams({
+      action: 'save_batch',
+      attendance_date: '<?= htmlspecialchars($date, ENT_QUOTES) ?>',
+      rows: JSON.stringify(payload),
+      [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN
+    }), { feedback, button: saveButton, label: 'save the attendance' });
+    saving = false;
+    updateChanged();
+  });
+
+  // Leaving the page (another date, another page) with unsaved rows asks
+  // first; not while a save is running, as it may reload the page itself.
+  window.addEventListener('beforeunload', event => {
+    if (!saving && changedRows().length) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
+  updateChanged();
+})();
 </script><?php endif; ?>
 <?php layoutFoot(); ?>

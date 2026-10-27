@@ -23,6 +23,7 @@ require_once __DIR__ . '/../includes/dispatch_assignment.php';
 require_once __DIR__ . '/../includes/dispatcher_scope.php';
 require_once __DIR__ . '/../includes/trip_workflow.php';
 require_once __DIR__ . '/../includes/trip_queries.php';
+require_once __DIR__ . '/../includes/workflow_notifications.php';
 
 header('Content-Type: application/json');
 
@@ -282,6 +283,9 @@ try {
         if ($encoded->rowCount() !== 1) {
             throw new DomainException('This dispatch instruction was already encoded.');
         }
+        // Encoded: the other dispatchers' "ready to encode" notices are done.
+        resolveDispatchInstructionNotices($pdo, (int)$booking['booking_id']);
+        resolveDispatchListNotices($pdo, (string)$booking['truck_type']);
         auditLog('ENCODE_DISPATCH_INSTRUCTION', 'client_bookings', (int)$booking['booking_id'], ['status' => 'Pending'], [
             'status'  => 'Confirmed',
             'trip_id' => $tripId,

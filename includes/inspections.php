@@ -159,11 +159,17 @@ function inspectionTemplateForForm(PDO $pdo, string $formType): ?array {
     return $row ?: null;
 }
 
-function minimumInspectionSeconds(?array $template): int {
-    return max(
-        (int)MAINTENANCE_FORM_MIN_DURATION_SECONDS,
-        $template ? (int)$template['minimum_duration_seconds'] : 0
-    );
+// Each form has its own minimum: the pre-trip checklist and the departure
+// inspection five minutes each; return and general inspections (and any
+// unknown form) MAINTENANCE_FORM_MIN_DURATION_SECONDS. A template may only
+// raise it.
+function minimumInspectionSeconds(?array $template, string $formType = ''): int {
+    $floor = match ($formType) {
+        'checklist'            => (int)PRE_TRIP_CHECKLIST_MIN_DURATION_SECONDS,
+        'inspection_departure' => (int)DEPARTURE_INSPECTION_MIN_DURATION_SECONDS,
+        default                => (int)MAINTENANCE_FORM_MIN_DURATION_SECONDS,
+    };
+    return max($floor, $template ? (int)$template['minimum_duration_seconds'] : 0);
 }
 
 /**

@@ -19,6 +19,7 @@ require_once __DIR__ . '/../includes/truck_status_history.php';
 require_once __DIR__ . '/../includes/trip_workflow.php';
 require_once __DIR__ . '/../includes/inspections.php';
 require_once __DIR__ . '/../includes/document_upload.php';
+require_once __DIR__ . '/../includes/workflow_notifications.php';
 
 header('Content-Type: application/json');
 
@@ -522,7 +523,7 @@ if ($action === 'start_form_timer') {
 
     try {
         $token = startInspectionFormTimer($formType, $targetId);
-        $minimum = minimumInspectionSeconds($formType === 'inspection_general' ? null : inspectionTemplateForForm($pdo, $formType));
+        $minimum = minimumInspectionSeconds($formType === 'inspection_general' ? null : inspectionTemplateForForm($pdo, $formType), $formType);
         jsonOk(
             ['timer_token' => $token, 'minimum_seconds' => $minimum],
             'Minimum completion time started.'
@@ -830,7 +831,7 @@ if ($action === 'save_inspection') {
                 jsonFail('Truck not found.', 404);
             }
         }
-        $timerStartedAt = consumeInspectionFormTimer($timerToken, $formType, $timerTarget, minimumInspectionSeconds($template));
+        $timerStartedAt = consumeInspectionFormTimer($timerToken, $formType, $timerTarget, minimumInspectionSeconds($template, $formType));
 
         if ($stage === 'General') {
             // General inspection: a completed 'Inspection' maintenance record
@@ -889,7 +890,10 @@ if ($action === 'save_inspection') {
                 $photoInsert->execute([$inspectionId, $stage === 'Departure' ? 'Departure' : 'Arrival', $documentId]);
             }
             if ($stage === 'Departure') {
-                recordPreDepartureReadyIfComplete($pdo, $tripId, currentUserId());
+                if (recordPreDepartureReadyIfComplete($pdo, $tripId, currentUserId())) {
+                    resolveTripHandoffs($pdo, $tripId, ['departure_checks']);
+                    notifyTripHandoff($pdo, $tripId, 'clearance');
+                }
             } elseif (tripArrivalInspectionComplete($pdo, $tripId)) {
                 // Step 12; the truck is back: Delivered -> Returned.
                 recordTripWorkflowEvent(
@@ -903,6 +907,8 @@ if ($action === 'save_inspection') {
                     'Returned'
                 );
                 transitionTripStatus($pdo, $tripId, ['Delivered'], 'Returned', ['return_time = COALESCE(return_time, NOW())']);
+                resolveTripHandoffs($pdo, $tripId, ['return_inspection']);
+                notifyTripHandoff($pdo, $tripId, 'returned');
             }
             $auditEntity = 'vehicle_inspections';
         }
@@ -986,7 +992,7 @@ if ($action === 'submit_checklist') {
                 jsonFail('A passed checklist has already been submitted for this dispatch.', 409);
             }
         }
-        $timerStartedAt = consumeInspectionFormTimer($timerToken, 'checklist', $dispatchId, minimumInspectionSeconds($template));
+        $timerStartedAt = consumeInspectionFormTimer($timerToken, 'checklist', $dispatchId, minimumInspectionSeconds($template, 'checklist'));
 
         // A failed checklist is kept and may be repeated after corrective work.
         $newId = saveTripInspection(
@@ -1001,7 +1007,10 @@ if ($action === 'submit_checklist') {
             $timerStartedAt,
             currentUserId()
         );
-        recordPreDepartureReadyIfComplete($pdo, $tripId, currentUserId());
+        if (recordPreDepartureReadyIfComplete($pdo, $tripId, currentUserId())) {
+            resolveTripHandoffs($pdo, $tripId, ['departure_checks']);
+            notifyTripHandoff($pdo, $tripId, 'clearance');
+        }
 
         auditLog('SUBMIT_CHECKLIST', 'vehicle_inspections', $newId, null, [
             'dispatch_id' => $dispatchId,

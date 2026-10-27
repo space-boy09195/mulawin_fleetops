@@ -56,14 +56,11 @@ layoutHead('Recruitment');
 <?php if (!$candidates): ?><tr><td colspan="<?= $canManage ? 7 : 6 ?>" class="text-center text-muted py-4">No candidates recorded.</td></tr><?php endif; ?>
 </tbody></table></div></div>
 <script>
-const recruitmentRequest = async data => {
-  const response = await fetch('<?= APP_BASE ?>/ajax/recruitment_handler.php', {method:'POST', body:data});
-  const result = await response.json();
-  const feedback = document.getElementById('recruitmentFeedback');
-  feedback.textContent = result.message || 'Request completed.';
-  feedback.className = `alert alert-${result.success ? 'success' : 'danger'}`;
-  if (result.success) setTimeout(() => window.softReload(), 500);
-};
+// window.sendAction (assets/js/layout.js): busy button, server-confirmed
+// result, readable errors, entries kept on failure.
+const recruitmentRequest = (data, options) => window.sendAction('<?= APP_BASE ?>/ajax/recruitment_handler.php', data, {
+  feedback: document.getElementById('recruitmentFeedback'), ...options
+});
 document.getElementById('candidateForm')?.addEventListener('submit', event => {
   event.preventDefault();
   recruitmentRequest(new URLSearchParams({
@@ -76,11 +73,12 @@ document.getElementById('candidateForm')?.addEventListener('submit', event => {
     source:document.getElementById('candidateSource').value,
     notes:document.getElementById('candidateNotes').value,
     [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN
-  }));
+  }), {label: 'add the candidate', form: event.target, button: event.submitter || event.target.querySelector('button')});
 });
 document.querySelectorAll('.save-candidate-status').forEach(button => button.addEventListener('click', () => {
   const row = button.closest('tr');
-  recruitmentRequest(new URLSearchParams({action:'update_status', candidate_number:row.dataset.candidate, status:row.querySelector('.candidate-status').value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN}));
+  recruitmentRequest(new URLSearchParams({action:'update_status', candidate_number:row.dataset.candidate, status:row.querySelector('.candidate-status').value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN}),
+    {label: 'save the candidate status', button});
 }));
 </script>
 <?php layoutFoot(); ?>

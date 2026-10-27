@@ -192,7 +192,7 @@ if ($action === 'create') {
         jsonFail('Could not record payroll payment.', 500);
     }
 
-    jsonOk(['payroll_id' => $newId]);
+    jsonOk(['payroll_id' => $newId], 'Payroll payment recorded.');
 }
 
 // ── Delete (soft) a payroll record — Admin only ──────────────────────────────

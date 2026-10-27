@@ -31,6 +31,22 @@ const NOTIFICATION_ENTITY_LINKS = [
     'payment_voucher'   => '/pages/finance.php',
     'purchase_request'  => '/pages/purchasing.php',
     'route'             => '/pages/requests.php',
+    // Workflow handoffs (includes/workflow_notifications.php). With an
+    // entity_id they open the record itself (NOTIFICATION_RECORD_LINKS);
+    // these pages are the fallback when no single record is linked.
+    'trip_workflow'          => '/pages/trip_monitor.php',
+    'trip_pre_departure'     => '/pages/maintenance.php?view=pre_departure',
+    'trip_return_inspection' => '/pages/maintenance.php?view=return',
+    'dispatch_instruction'   => '/pages/dispatch_inbox.php',
+];
+
+// entity_type => link to the one record; %d is the entity_id. Each page
+// checks access itself, as for the links above.
+const NOTIFICATION_RECORD_LINKS = [
+    'trip_workflow'          => '/pages/trip_workflow.php?trip_id=%d',
+    'trip_pre_departure'     => '/pages/maintenance.php?view=pre_departure&trip_id=%d',
+    'trip_return_inspection' => '/pages/maintenance.php?view=return&trip_id=%d&inspection_stage=Return#inspectionModal',
+    'dispatch_instruction'   => '/pages/dispatch.php?instruction_id=%d',
 ];
 
 function notificationEntityType(?string $entityType): ?string {
@@ -103,5 +119,47 @@ function notificationLinkFor(?string $entityType, $entityId): ?string {
     if ($entityType === null || !isset(NOTIFICATION_ENTITY_LINKS[$entityType])) {
         return null;
     }
+    if (isset(NOTIFICATION_RECORD_LINKS[$entityType]) && (int)$entityId > 0) {
+        return APP_BASE . sprintf(NOTIFICATION_RECORD_LINKS[$entityType], (int)$entityId);
+    }
     return APP_BASE . NOTIFICATION_ENTITY_LINKS[$entityType];
+}
+
+/**
+ * A task's notifications stop being actionable once the task is done,
+ * rejected or cancelled: every recipient's unread copy (same type, record
+ * and title) is marked read. Nothing is deleted, so the bell still lists it
+ * as history. Call inside the transaction that finished the task. Returns
+ * the number marked read.
+ */
+function resolveNotifications(PDO $pdo, string $type, int $entityId, array $titles): int {
+    if (!$titles) {
+        return 0;
+    }
+    $stmt = $pdo->prepare(
+        'UPDATE notifications SET is_read = 1, read_at = NOW()
+         WHERE notification_type = ? AND entity_id = ? AND is_read = 0
+           AND title IN (' . implode(',', array_fill(0, count($titles), '?')) . ')'
+    );
+    $stmt->execute(array_merge([$type, $entityId], array_values($titles)));
+    return $stmt->rowCount();
+}
+
+/**
+ * Like resolveNotifications() for notices that point at no single record
+ * (entity_id NULL, e.g. a batch notice): the unread copies with this type
+ * and title held by the users of one role are marked read. Nothing is
+ * deleted. Returns the number marked read.
+ */
+function resolveUnlinkedNotificationsForRole(PDO $pdo, string $type, string $title, string $roleKey): int {
+    $stmt = $pdo->prepare(
+        'UPDATE notifications n
+         JOIN users u ON u.user_id = n.user_id
+         JOIN roles r ON r.role_id = u.role_id
+         SET n.is_read = 1, n.read_at = NOW()
+         WHERE n.notification_type = ? AND n.entity_id IS NULL AND n.title = ?
+           AND n.is_read = 0 AND r.system_key = ?'
+    );
+    $stmt->execute([$type, $title, $roleKey]);
+    return $stmt->rowCount();
 }

@@ -33,6 +33,27 @@ $canFleet = $isHead || ($canOperations && currentUserHasAnyPermission(['fleet.vi
 $canMaintenance = $isHead || currentUserHasAnyPermission(['maintenance.reports.view']);
 $canFinancials = $isHead || currentUserHasAnyPermission(['billing.view']);
 
+// Dedicated analytics pages (analytics_fleet.php, analytics_expenses.php,
+// analytics_maintenance.php) define ANALYTICS_SECTION and include this file:
+// only that section is built and shown, for Admin too. Without it this page
+// shows every section the viewer may see, as before.
+$analyticsSectionTitles = [
+    'operations'  => 'Fleet Overview',
+    'accounting'  => 'Billing & Collections Analytics',
+    'maintenance' => 'Maintenance Analytics',
+];
+$onlySection = defined('ANALYTICS_SECTION') ? (string)ANALYTICS_SECTION : null;
+if ($onlySection !== null && !isset($analyticsSectionTitles[$onlySection])) {
+    http_response_code(500);
+    exit('Unknown analytics section.');
+}
+if ($onlySection !== null) {
+    $canOperations = $canOperations && $onlySection === 'operations';
+    $canMaintenance = $canMaintenance && $onlySection === 'maintenance';
+    $canFinancials = $canFinancials && $onlySection === 'accounting';
+}
+$analyticsTitle = $onlySection !== null ? $analyticsSectionTitles[$onlySection] : 'Analytics';
+
 $periods = [
     '1m' => ['label' => 'Last 1 month', 'months' => 1],
     '3m' => ['label' => 'Last 3 months', 'months' => 3],
@@ -450,12 +471,27 @@ if ($canFinancials) {
     $billedCount = (int)($billingStats['record_count'] ?? 0);
     $collectedTotal = (float)($collectionStats['total_amount'] ?? 0);
     $collectedCount = (int)($collectionStats['record_count'] ?? 0);
-    $overdueBillings = $countOf($billingStatusRows, 'status', 'Overdue', 'record_count');
+
+    // Overdue (provisional rule, not yet confirmed by the client): an open
+    // billing (Issued, Partially Paid or Overdue, as in Home receivables)
+    // whose due date has passed and that still has a balance. The stored
+    // 'Overdue' status is not used: no code sets it. Same period basis as
+    // the other KPIs: billing date.
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM billings b
+        WHERE b.status IN ('Issued', 'Partially Paid', 'Overdue')
+          AND b.due_date IS NOT NULL AND b.due_date < CURDATE()
+          AND b.total_amount > " . billingCollectedSql('b') . "
+          AND b.billing_date >= :rangeStart AND b.billing_date < :rangeEnd
+    ");
+    $stmt->execute($rangeParams);
+    $overdueBillings = (int)$stmt->fetchColumn();
 
     $kpis = [
         ['label' => 'Recorded billings', 'value' => $billedCount ? $peso($billedTotal) : '—', 'sub' => $billedCount ? number_format($billedCount) . ' billings by billing date' : 'No eligible billing in this period', 'tone' => 'primary', 'hero' => true],
         ['label' => 'Recorded collections', 'value' => $collectedCount ? $peso($collectedTotal) : '—', 'sub' => $collectedCount ? number_format($collectedCount) . ' payments by payment date' : 'No payment recorded in this period', 'tone' => 'good'],
-        ['label' => 'Billings marked Overdue', 'value' => number_format($overdueBillings), 'sub' => 'Stored status; no aging is computed', 'tone' => $overdueBillings > 0 ? 'danger' : 'good'],
+        ['label' => 'Overdue billings', 'value' => number_format($overdueBillings), 'sub' => 'Past due date with a balance (provisional rule)', 'tone' => $overdueBillings > 0 ? 'danger' : 'good'],
         ['label' => 'Billing records', 'value' => number_format($billedCount), 'sub' => 'Issued, Partially Paid, Paid, Overdue', 'tone' => ''],
         ['label' => 'Payments recorded', 'value' => number_format($collectedCount), 'sub' => 'Each payment counted once', 'tone' => ''],
     ];
@@ -538,7 +574,7 @@ if ($canFinancials) {
             ['title' => 'Collections by payment method', 'headers' => ['Method', 'Payments', 'Amount'],
              'rows' => array_map(static fn($r) => [(string)$r['payment_method'], (int)$r['record_count'], $peso($r['amount'])], $paymentMethodRows)],
         ],
-        'unavailable' => 'Outstanding and overdue receivables, collection rate, expense categories and margin are not shown: payment allocation, client payment terms, waybill submission dates and approved definitions are missing or unconfirmed.',
+        'unavailable' => 'Outstanding and overdue receivable amounts, collection rate, expense categories and margin are not shown: payment allocation, client payment terms, waybill submission dates and approved definitions are missing or unconfirmed.',
     ];
 }
 
@@ -596,8 +632,8 @@ if ($canMaintenance) {
         ['label' => 'Completed maintenance cost', 'value' => $withCost ? $peso($maintTotal) : '—', 'sub' => 'Completed records only, ' . $periodLabel, 'tone' => 'primary', 'hero' => true],
         ['label' => 'Maintenance records', 'value' => number_format($maintRecords), 'sub' => 'Excludes cancelled', 'tone' => ''],
         ['label' => 'Trucks with records', 'value' => number_format(count($maintenanceRows)), 'sub' => 'Distinct plates in the period', 'tone' => ''],
-        ['label' => 'Waiting for parts', 'value' => number_format($waitingParts), 'sub' => 'Records at this status now', 'tone' => $waitingParts > 0 ? 'warn' : 'good'],
-        ['label' => 'In progress', 'value' => number_format($inProgress), 'sub' => 'Records at this status now', 'tone' => ''],
+        ['label' => 'Waiting for parts', 'value' => number_format($waitingParts), 'sub' => 'Records at this status, dated in this period', 'tone' => $waitingParts > 0 ? 'warn' : 'good'],
+        ['label' => 'In progress', 'value' => number_format($inProgress), 'sub' => 'Records at this status, dated in this period', 'tone' => ''],
     ];
 
     $mt = $buckets($maintTrend);
@@ -685,7 +721,7 @@ foreach ($charts as $id => $chart) {
 
 $GLOBALS['page_needs_chart'] = true;
 $GLOBALS['page_js'] = APP_BASE . '/assets/js/analytics.js';
-layoutHead('Analytics', APP_BASE . '/assets/css/analytics.css');
+layoutHead($analyticsTitle, APP_BASE . '/assets/css/analytics.css');
 ?>
 <?php
 function anHasData(array $chart): bool {
@@ -757,7 +793,7 @@ function anTable(array $table): void { ?>
 <div class="an-page">
   <header class="an-header">
     <div>
-      <h1 class="an-title">Analytics</h1>
+      <h1 class="an-title"><?= htmlspecialchars($analyticsTitle) ?></h1>
       <p class="an-subtitle">Recorded business data · <?= htmlspecialchars($periodLabel) ?> · grouped <?= htmlspecialchars(strtolower($granularities[$granularity])) ?></p>
     </div>
     <form method="get" class="an-filters">

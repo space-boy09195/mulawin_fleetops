@@ -3,7 +3,13 @@
 require_once __DIR__ . '/session.php';
 require_once __DIR__ . '/../config/database.php';
 
-// Dispatcher scope: the shift and truck types a dispatcher may encode.
+// Dispatcher scope: the truck types a dispatcher may encode.
+//
+// Business rule (2026-10-26): eligibility depends on the assigned truck
+// type only. A dispatcher may handle Day and Night trips of their truck
+// types. The assignment's shift is still returned by dispatcherScopeResult()
+// for information (Dispatcher Reports uses it), but no access check or
+// work list filters by it.
 //
 // dispatcherScopeResult() has three explicit outcomes:
 //   ['status' => 'none']    not a dispatcher (Admin, Operations Head, or a
@@ -173,27 +179,29 @@ function dispatcherAssignmentScope(PDO $pdo, array $role, ?string $scheduledDate
     ];
 }
 
-// Compatibility view for page filters: [] when no scope applies, the scope
-// otherwise. A denied dispatcher gets a scope that matches no shift and no
-// truck type, so filters built from it return nothing.
+// Compatibility view for page filters: [] when no scope applies, the truck
+// types otherwise. It has no 'shift' key, so pages that add a shift filter
+// only when 'shift' is set no longer filter by shift. A denied dispatcher
+// gets a scope that matches no truck type (and 'denied'), so filters built
+// from it return nothing.
 function dispatcherScope(): array
 {
     $result = dispatcherScopeResult();
     if ($result['status'] === 'scoped') {
-        return ['shift' => $result['shift'], 'truck_types' => $result['truck_types']];
+        return ['truck_types' => $result['truck_types']];
     }
     if ($result['status'] === 'denied') {
-        return ['shift' => '', 'truck_types' => [''], 'denied' => true];
+        return ['truck_types' => [''], 'denied' => true];
     }
     return [];
 }
 
 // Read filter for listings: " AND ..." limiting rows to the signed-in
-// dispatcher's truck types and shift (the same rule as dispatcherScope()),
-// or '' when no scope applies (Admin, Operations Head, other roles). A
-// denied dispatcher gets a condition that matches nothing. $truckTypeExpr
-// and $shiftExpr are fixed column references from the calling query; the
-// values are added to $params as named placeholders.
+// dispatcher's truck types (Day and Night alike), or '' when no scope
+// applies (Admin, Operations Head, other roles). A denied dispatcher gets a
+// condition that matches nothing. $truckTypeExpr is a fixed column
+// reference from the calling query; the values are added to $params as
+// named placeholders. $shiftExpr is still checked but no longer used.
 function dispatcherScopeReadSql(string $truckTypeExpr, string $shiftExpr, array &$params): string
 {
     foreach ([$truckTypeExpr, $shiftExpr] as $expr) {
@@ -205,17 +213,21 @@ function dispatcherScopeReadSql(string $truckTypeExpr, string $shiftExpr, array 
     if (!$scope) {
         return '';
     }
+    if (!empty($scope['denied'])) {
+        return ' AND 1 = 0';
+    }
     $typeKeys = [];
     foreach (array_values($scope['truck_types']) as $index => $truckType) {
         $key = ':dscopeType' . $index;
         $typeKeys[] = $key;
         $params[$key] = $truckType;
     }
-    $params[':dscopeShift'] = (string)$scope['shift'];
-    return " AND {$truckTypeExpr} IN (" . implode(', ', $typeKeys) . ") AND {$shiftExpr} = :dscopeShift";
+    return " AND {$truckTypeExpr} IN (" . implode(', ', $typeKeys) . ")";
 }
 
 // The 403 message for an action outside the scope, or null when allowed.
+// $shift is not checked: a dispatcher may handle Day and Night trips of
+// their truck types. The parameter stays so callers need no change.
 function dispatcherScopeViolation(string $shift, string $truckType, ?string $scheduledDate = null): ?string
 {
     $result = dispatcherScopeResult($scheduledDate);
@@ -224,9 +236,6 @@ function dispatcherScopeViolation(string $shift, string $truckType, ?string $sch
     }
     if ($result['status'] !== 'scoped') {
         return 'This dispatcher account does not have one active dispatcher assignment for this date. Ask an administrator to check the assignment.';
-    }
-    if ($shift !== $result['shift']) {
-        return 'This dispatcher account is assigned to the ' . $result['shift'] . ' shift.';
     }
     if (!in_array($truckType, $result['truck_types'], true)) {
         return 'This dispatcher account cannot encode the selected truck category.';

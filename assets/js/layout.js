@@ -418,8 +418,30 @@ async function deleteAnnouncement(id) {
     });
   }
 
+  // A page's result box (<div id="..." class="alert d-none" role="alert">)
+  // is empty in the server markup and filled by the page script. Keep the
+  // message the script showed, so a success message does not vanish when
+  // the page refreshes right after the action.
+  function isEmptyFeedbackBox(newEl) {
+    return newEl.matches('[role="alert"][id].d-none') && newEl.textContent.trim() === '';
+  }
+
+  // <select data-refresh-options>: the server's option list changes after
+  // an action (e.g. a request that is fully disbursed drops out), so copy the
+  // new options and keep the chosen value when it is still offered. Other
+  // selects keep their options, because some are filled by page scripts.
+  function syncSelectOptions(oldEl, newEl) {
+    if (!oldEl.hasAttribute('data-refresh-options') || oldEl.innerHTML === newEl.innerHTML) return;
+    const chosen = oldEl.value;
+    oldEl.innerHTML = newEl.innerHTML;
+    const stillOffered = Array.from(oldEl.options).some((option) => option.value === chosen && !option.disabled);
+    oldEl.value = stillOffered ? chosen : (oldEl.options[0]?.value ?? '');
+  }
+
   function morphElement(oldEl, newEl) {
+    if (isEmptyFeedbackBox(newEl)) return;
     syncAttributes(oldEl, newEl);
+    if (oldEl.tagName === 'SELECT') syncSelectOptions(oldEl, newEl);
     if (/^(INPUT|TEXTAREA|SELECT|CANVAS)$/.test(oldEl.tagName)) return;
     morphChildren(oldEl, newEl);
   }
@@ -505,8 +527,131 @@ async function deleteAnnouncement(id) {
   }
 
   // Drop-in for window.location.reload() after a successful action.
+  // Returns true when the page was updated in place, false when it falls back
+  // to a full reload.
   window.softReload = async function () {
-    if (!(await softRefresh(window.location.href))) window.location.reload();
+    const updated = await softRefresh(window.location.href);
+    if (!updated) window.location.reload();
+    return updated;
+  };
+
+  // A success message must survive the full-reload fallback above (it is
+  // used when the refreshed page has new buttons or links, e.g. a new table
+  // row). sendAction() saves the message for this page just before the
+  // refresh; after a full reload it is shown again in the same result box.
+  // Browser storage may be unavailable: then the message is simply lost, as
+  // before.
+  const PENDING_MESSAGE_KEY = 'fleetops:actionMessage';
+  function rememberActionMessage(boxId, message) {
+    try {
+      sessionStorage.setItem(PENDING_MESSAGE_KEY, JSON.stringify({
+        page: window.location.pathname + window.location.search, boxId, message
+      }));
+    } catch (error) { /* storage unavailable */ }
+  }
+  function forgetActionMessage() {
+    try { sessionStorage.removeItem(PENDING_MESSAGE_KEY); } catch (error) { /* storage unavailable */ }
+  }
+  (function showMessageAfterReload() {
+    let saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem(PENDING_MESSAGE_KEY) || 'null'); } catch (error) { saved = null; }
+    forgetActionMessage();
+    if (!saved || saved.page !== window.location.pathname + window.location.search) return;
+    const box = saved.boxId ? document.getElementById(saved.boxId) : null;
+    if (!box) return;
+    box.textContent = saved.message;
+    box.className = 'alert alert-success';
+  })();
+
+  // ============================================================
+  // sendAction(): one form action (save, approve, disburse, ...) posted to
+  // an ajax/ handler, with the same feedback on every page:
+  //   - the button is disabled and shows "Saving…" until the server answers,
+  //     so a second click cannot send the action twice;
+  //   - success is shown only when the server answers success: true;
+  //   - a server error, an expired session, a page that is not JSON or a
+  //     lost connection shows an error and gives the button back, and the
+  //     entered values stay in the form so the user can retry.
+  // options: { feedback: result box element, button: submit button,
+  //            form: form to clear after success, label: action name used
+  //            in the error message, e.g. 'record the disbursement' }
+  // Returns the server result, or null when no usable answer arrived.
+  // ============================================================
+  window.sendAction = async function (url, body, options = {}) {
+    const { feedback, button, form } = options;
+    const label = options.label || 'complete this action';
+    if (button && button.disabled) return null;
+
+    const show = (ok, message) => {
+      if (!feedback) {
+        if (!ok) alert(message);
+        return;
+      }
+      feedback.textContent = message;
+      feedback.className = 'alert alert-' + (ok ? 'success' : 'danger');
+      feedback.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    };
+
+    const buttonHtml = button ? button.innerHTML : '';
+    if (button) {
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.innerHTML = '<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Saving…';
+    }
+    const giveButtonBack = () => {
+      if (!button) return;
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+      button.innerHTML = buttonHtml;
+    };
+
+    let response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        body,
+        credentials: 'same-origin',
+        headers: { 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' }
+      });
+    } catch (error) {
+      giveButtonBack();
+      show(false, 'Could not reach the server, so FleetOps could not ' + label
+        + '. Your entries are kept. Check your connection, then try again.');
+      return null;
+    }
+
+    let result = null;
+    try {
+      result = await response.json();
+    } catch (error) {
+      result = null;
+    }
+    if (!result || typeof result.success !== 'boolean') {
+      // The server answered, but not with a result we can read. The action
+      // may or may not have been saved, so the user checks before retrying.
+      giveButtonBack();
+      show(false, 'The server did not confirm whether it could ' + label + ' (error ' + response.status
+        + '). Check the records on this page before trying again, so nothing is entered twice.');
+      return null;
+    }
+    if (!result.success) {
+      giveButtonBack();
+      show(false, result.message || ('Could not ' + label + '.'));
+      return result;
+    }
+
+    const message = result.message || 'Saved.';
+    show(true, message);
+    if (form) form.reset();
+    if (feedback && feedback.id) rememberActionMessage(feedback.id, message);
+    // Updated in place: the message is already on screen, so drop the saved
+    // copy. After a full reload the saved copy is shown instead.
+    if (await window.softReload()) forgetActionMessage();
+    // The refresh gives an on-page button the server's state (it may now be
+    // disabled because nothing is left to process). A button the refresh
+    // does not touch, e.g. inside a modal, is still busy: give it back.
+    if (button && button.getAttribute('aria-busy') === 'true') giveButtonBack();
+    return result;
   };
 
   // Filter forms: <form data-soft-filter> with controls using data-soft-submit.

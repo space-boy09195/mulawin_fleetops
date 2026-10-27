@@ -34,7 +34,7 @@ layoutHead('Purchasing');
   <div class="card-header-custom"><h2 class="card-title-custom">Add or edit supplier</h2></div>
   <div class="card-body-custom">
     <form id="supplierForm" class="row g-3">
-      <div class="col-md-6"><label class="form-label" for="supplierPick">Supplier record</label><select id="supplierPick" class="form-select"><option value="">New supplier</option><?php foreach ($allSuppliers as $supplier): ?><option value="<?= (int)$supplier['supplier_id'] ?>" data-name="<?= htmlspecialchars($supplier['supplier_name'], ENT_QUOTES) ?>" data-contact="<?= htmlspecialchars((string)$supplier['contact_person'], ENT_QUOTES) ?>" data-phone="<?= htmlspecialchars((string)$supplier['contact_number'], ENT_QUOTES) ?>" data-email="<?= htmlspecialchars((string)$supplier['email'], ENT_QUOTES) ?>" data-status="<?= htmlspecialchars($supplier['status'], ENT_QUOTES) ?>"><?= htmlspecialchars($supplier['supplier_name']) ?><?= $supplier['status'] === 'Inactive' ? ' (Inactive)' : '' ?></option><?php endforeach; ?></select></div>
+      <div class="col-md-6"><label class="form-label" for="supplierPick">Supplier record</label><select id="supplierPick" class="form-select" data-refresh-options><option value="">New supplier</option><?php foreach ($allSuppliers as $supplier): ?><option value="<?= (int)$supplier['supplier_id'] ?>" data-name="<?= htmlspecialchars($supplier['supplier_name'], ENT_QUOTES) ?>" data-contact="<?= htmlspecialchars((string)$supplier['contact_person'], ENT_QUOTES) ?>" data-phone="<?= htmlspecialchars((string)$supplier['contact_number'], ENT_QUOTES) ?>" data-email="<?= htmlspecialchars((string)$supplier['email'], ENT_QUOTES) ?>" data-status="<?= htmlspecialchars($supplier['status'], ENT_QUOTES) ?>"><?= htmlspecialchars($supplier['supplier_name']) ?><?= $supplier['status'] === 'Inactive' ? ' (Inactive)' : '' ?></option><?php endforeach; ?></select></div>
       <div class="col-md-3"><label class="form-label" for="supplierStatus">Status</label><select id="supplierStatus" class="form-select"><option value="Active">Active</option><option value="Inactive">Inactive</option></select></div>
       <div class="col-md-4"><label class="form-label" for="supplierName">Supplier name</label><input id="supplierName" class="form-control" maxlength="180" required></div>
       <div class="col-md-3"><label class="form-label" for="supplierContact">Contact person</label><input id="supplierContact" class="form-control" maxlength="150"></div>
@@ -48,7 +48,7 @@ layoutHead('Purchasing');
   <div class="card-header-custom"><h2 class="card-title-custom">Create purchase order</h2></div>
   <div class="card-body-custom">
     <form id="purchaseOrderForm" class="row g-3">
-      <div class="col-md-4"><label class="form-label">Supplier</label><select id="purchaseSupplier" class="form-select" required><option value="">Select supplier</option><?php foreach ($suppliers as $supplier): ?><option value="<?= (int)$supplier['supplier_id'] ?>"><?= htmlspecialchars($supplier['supplier_name']) ?></option><?php endforeach; ?></select></div>
+      <div class="col-md-4"><label class="form-label">Supplier</label><select id="purchaseSupplier" class="form-select" data-refresh-options required><option value="">Select supplier</option><?php foreach ($suppliers as $supplier): ?><option value="<?= (int)$supplier['supplier_id'] ?>"><?= htmlspecialchars($supplier['supplier_name']) ?></option><?php endforeach; ?></select></div>
       <div class="col-md-4"><label class="form-label">Expected delivery</label><input id="purchaseExpected" class="form-control" type="date"></div>
       <div class="col-md-4"><label class="form-label">Notes</label><input id="purchaseNotes" class="form-control" maxlength="1000"></div>
       <div class="col-12"><label class="form-label">Part</label><select id="purchasePart" class="form-select"><option value="">Select part</option><?php foreach ($parts as $part): ?><option value="<?= (int)$part['part_id'] ?>"><?= htmlspecialchars(($part['part_number'] ? $part['part_number'] . ' — ' : '') . $part['part_name']) ?></option><?php endforeach; ?></select></div>
@@ -108,10 +108,12 @@ layoutHead('Purchasing');
       email: document.getElementById('supplierEmail').value,
       [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN
     });
-    const response = await fetch('<?= APP_BASE ?>/ajax/purchasing_handler.php', {method: 'POST', body});
-    const result = await response.json();
-    show(result.message || 'Request completed.', result.success);
-    if (result.success) setTimeout(() => window.softReload(), 500);
+    // window.sendAction (assets/js/layout.js): busy button, server-confirmed
+    // result, readable errors, entries kept on failure.
+    window.sendAction('<?= APP_BASE ?>/ajax/purchasing_handler.php', body, {
+      feedback, label: 'save the supplier', form: event.target,
+      button: event.submitter || event.target.querySelector('[type="submit"]')
+    });
   });
   document.getElementById('addPurchaseItem').addEventListener('click', () => {
     const part = document.getElementById('purchasePart');

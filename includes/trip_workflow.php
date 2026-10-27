@@ -196,6 +196,52 @@ function tripArrivalInspectionComplete(PDO $pdo, int $tripId): bool {
     return tripInspectionMissingItems($pdo, $tripId, 'Arrival') === 0;
 }
 
+// Trip Allowance statuses that block departure. A required allowance must be
+// fully disbursed: Finance's create_disbursement sets 'Disbursed' only when
+// the recorded payments reach the approved amount ('Processing' is a partial
+// payment). 'Settled' also blocks: no code sets it (liquidation is not
+// implemented), so a settled request cannot be verified as fully paid.
+// Rejected, Cancelled and Draft requests are not active and do not block.
+const TRIP_ALLOWANCE_DEPARTURE_BLOCKING_STATUSES = ['Pending Approval', 'Approved', 'Processing', 'Settled'];
+
+/**
+ * The 409 message when one of the trip's Trip Allowance requests blocks
+ * departure, or null. $requests: rows with request_number and status.
+ */
+function tripAllowanceDepartureMessage(array $requests): ?string {
+    foreach ($requests as $request) {
+        $status = (string)$request['status'];
+        if (!in_array($status, TRIP_ALLOWANCE_DEPARTURE_BLOCKING_STATUSES, true)) {
+            continue;
+        }
+        $message = 'A required trip allowance must be fully disbursed by Finance before departure. Trip Allowance request '
+            . $request['request_number'] . ' is ' . $status . '.';
+        if ($status === 'Settled') {
+            $message .= ' A settled request cannot be verified as fully paid yet; ask an Admin to check it.';
+        }
+        return $message;
+    }
+    return null;
+}
+
+/**
+ * Departure check for the trip's Trip Allowance requests. Call inside the
+ * departure transaction after lockTripForWorkflow(): the locking read keeps
+ * these requests (and new requests for this trip) from changing until the
+ * transaction ends.
+ */
+function tripAllowanceDepartureBlocker(PDO $pdo, int $tripId): ?string {
+    $stmt = $pdo->prepare(
+        "SELECT request_number, status
+         FROM fund_requests
+         WHERE trip_id = ? AND request_type = 'Trip Allowance'
+         ORDER BY fund_request_id
+         FOR UPDATE"
+    );
+    $stmt->execute([$tripId]);
+    return tripAllowanceDepartureMessage($stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
 /**
  * After a departure inspection is saved: when the departure packet is
  * prepared (step 6) and every departure check passed, record step 7 and
@@ -298,4 +344,165 @@ function tripDeliveryFormValues(?array $delivery, ?array $return): ?array {
     }
     $values['return_notes'] = implode("\n", $returnLines);
     return $values;
+}
+
+/**
+ * Recorded-events text for a step-6 event (decoded JSON details). New
+ * events store attachment_count; older events stored a document packet
+ * status (documents_status / documents_notes) and are shown as recorded.
+ */
+function tripPreparationEventText(array $details): string {
+    if (array_key_exists('attachment_count', $details)) {
+        $text = 'Attachments: ' . (int)$details['attachment_count'];
+    } else {
+        $text = 'Documents: ' . ($details['documents_status'] ?? '—')
+            . (!empty($details['documents_notes']) ? ' — ' . $details['documents_notes'] : '');
+    }
+    return $text . '. Allowance: ' . ($details['allowance_status'] ?? '—')
+        . (!empty($details['allowance_notes']) ? ' — ' . $details['allowance_notes'] : '')
+        . '.';
+}
+
+/**
+ * "What should I do next?" guide for the Trip Workflow page. Read-only: it
+ * only describes the next action of the existing workflow (the same status
+ * and step conditions the step cards and handlers use) and never changes
+ * anything.
+ *
+ * $facts:
+ *   departure, arrival      tripInspectionSummary() results
+ *   pending_allowance       request_number of a Trip Allowance request still
+ *                           'Pending Approval', or null
+ *   allowance_departure     tripAllowanceDepartureMessage() for the trip's
+ *                           Trip Allowance requests, or null
+ *   is_owner                the viewer submitted this trip
+ *   is_admin                the viewer is Admin
+ *   can_review              approvals.review
+ *   can_assign              trips.assign
+ *   can_update              trips.update
+ *   can_clear               dispatch.clear
+ *   can_inspect             maintenance.manage and the Maintenance entry
+ *                           buttons are shown to this role
+ *
+ * Returns ['role', 'where', 'can_act' ('yes' | 'override' | 'no'),
+ *          'blockers' (list of strings), 'links' (list of page keys),
+ *          'note' (string or null), 'task' (short name of the next action,
+ *          or null when there is none)].
+ */
+function tripNextAction(string $status, int $currentStep, array $facts): array {
+    $dispatcher = 'Dispatcher who submitted this trip';
+    // A step of the submitting dispatcher: Admin may act only as an override.
+    $ownerCanAct = static function (bool $permission) use ($facts): string {
+        if (!$permission) {
+            return 'no';
+        }
+        if (!empty($facts['is_owner'])) {
+            return 'yes';
+        }
+        return !empty($facts['is_admin']) ? 'override' : 'no';
+    };
+    $next = [
+        'role'     => null,
+        'where'    => '',
+        'can_act'  => 'no',
+        'blockers' => [],
+        'links'    => [],
+        'note'     => null,
+        'task'     => null,
+    ];
+
+    if ($status === 'Pending Approval' && $currentStep === 4) {
+        $next['role'] = 'Operations Head';
+        $next['task'] = 'Approve or reject the truck and crew';
+        $next['where'] = 'Approvals page → Dispatch Requests card → approve or reject this trip.';
+        $next['can_act'] = empty($facts['can_review']) ? 'no' : (!empty($facts['is_admin']) ? 'override' : 'yes');
+        $next['links'] = ['approvals'];
+    } elseif ($status === 'Approved' && $currentStep === 4) {
+        $next['role'] = $dispatcher;
+        $next['task'] = 'Confirm truck and driver (Step 5)';
+        $next['where'] = 'Step 5 card on this page → “Confirm truck and driver”.';
+        $next['can_act'] = $ownerCanAct(!empty($facts['can_assign']));
+    } elseif ($status === 'Assigned' && $currentStep === 5) {
+        $next['role'] = $dispatcher;
+        $next['task'] = 'Record departure preparation (Step 6)';
+        $next['where'] = 'Step 6 card on this page → “Record departure preparation”.';
+        $next['can_act'] = $ownerCanAct(!empty($facts['can_assign']));
+        if (!empty($facts['pending_allowance'])) {
+            $next['blockers'][] = 'Trip Allowance request ' . $facts['pending_allowance']
+                . ' is awaiting approval. Step 6 can be recorded after it is approved or rejected.';
+        }
+    } elseif ($status === 'Assigned' && $currentStep === 6) {
+        $next['role'] = 'Maintenance';
+        $next['task'] = 'Complete the pre-trip checklist and departure inspection (Step 7)';
+        $next['where'] = 'Maintenance → Pre-Departure Inspection → complete both sections, “Pre-Trip Checklist” and “Departure Inspection”. Step 7 is recorded automatically when both pass.';
+        $next['can_act'] = empty($facts['can_inspect']) ? 'no' : 'yes';
+        $next['links'] = ['pre_departure'];
+        $departure = $facts['departure'] ?? ['required' => 0, 'covered' => 0, 'flagged' => 0];
+        if ((int)$departure['required'] === 0) {
+            $next['blockers'][] = 'No active departure inspection template is configured.';
+        } elseif ((int)$departure['covered'] < (int)$departure['required']) {
+            $next['blockers'][] = 'Departure checks: ' . (int)$departure['covered'] . ' of '
+                . (int)$departure['required'] . ' required items passed.';
+        }
+        if ((int)($departure['flagged'] ?? 0) > 0) {
+            $next['blockers'][] = (int)$departure['flagged'] . ' flagged departure finding(s).';
+        }
+    } elseif ($status === 'Ready for Dispatch' && $currentStep === 7) {
+        $next['role'] = 'Operations Head';
+        $next['task'] = 'Provide dispatch clearance (Step 8)';
+        $next['where'] = 'Step 8 card on this page → “Provide dispatch clearance”.';
+        $next['can_act'] = empty($facts['can_clear']) ? 'no' : 'yes';
+    } elseif ($status === 'Dispatched' && $currentStep === 8) {
+        $next['role'] = $dispatcher;
+        $next['task'] = 'Record the departure (Step 9)';
+        $next['where'] = 'Trip Monitoring → pencil (Update status) → New Status “In Progress” → “Save Update”. This records the departure.';
+        $next['can_act'] = $ownerCanAct(!empty($facts['can_update']));
+        $next['links'] = ['trip_monitor'];
+        if (!empty($facts['allowance_departure'])) {
+            $next['blockers'][] = $facts['allowance_departure'];
+        }
+    } elseif ($status === 'In Progress' && $currentStep === 9) {
+        $next['role'] = $dispatcher;
+        $next['task'] = 'Record a progress update (Step 10)';
+        $next['where'] = 'Step 10 card on this page → “Record progress update”.';
+        $next['can_act'] = $ownerCanAct(!empty($facts['can_update']));
+    } elseif ($status === 'In Progress' && $currentStep === 10) {
+        $next['role'] = $dispatcher;
+        $next['task'] = 'Save delivery and return details (Step 11)';
+        $next['where'] = 'Step 11 card on this page → “Save delivery and return details”. More progress updates are optional.';
+        $next['can_act'] = $ownerCanAct(!empty($facts['can_update']));
+    } elseif ($status === 'In Progress' && $currentStep === 11) {
+        $next['role'] = $dispatcher;
+        $next['task'] = 'Mark the trip Delivered';
+        $next['where'] = 'Trip Monitoring → pencil (Update status) → New Status “Delivered” → “Save Update”.';
+        $next['can_act'] = $ownerCanAct(!empty($facts['can_update']));
+        $next['links'] = ['trip_monitor'];
+    } elseif ($status === 'Delivered' && $currentStep === 11) {
+        $next['role'] = 'Maintenance';
+        $next['task'] = 'Complete the return inspection (Step 12)';
+        $next['where'] = 'Maintenance → Return Inspection → “Start Return Inspection”. The trip becomes Returned automatically.';
+        $next['can_act'] = empty($facts['can_inspect']) ? 'no' : 'yes';
+        $next['links'] = ['return_inspection'];
+        $arrival = $facts['arrival'] ?? ['required' => 0, 'covered' => 0];
+        if ((int)$arrival['required'] === 0) {
+            $next['blockers'][] = 'No active arrival inspection template is configured.';
+        } elseif ((int)$arrival['covered'] < (int)$arrival['required']) {
+            $next['blockers'][] = 'Arrival inspection: ' . (int)$arrival['covered'] . ' of '
+                . (int)$arrival['required'] . ' required items recorded.';
+        }
+    } elseif ($status === 'Returned' && $currentStep === 12) {
+        $next['role'] = $dispatcher;
+        $next['task'] = 'Submit the completed trip (Step 13)';
+        $next['where'] = 'Trip Monitoring → pencil (Update status) → New Status “Completed” → “Save Update”.';
+        $next['can_act'] = $ownerCanAct(!empty($facts['can_update']));
+        $next['links'] = ['trip_monitor'];
+    } elseif ($status === 'Completed') {
+        $next['note'] = 'The trip workflow is complete. Billing & Collection creates the client billing (Billing → “Create Billing”), and Payroll records the crew’s Trip Pay (Trip Pay page).';
+        $next['links'] = ['billing', 'trip_pay'];
+    } elseif ($status === 'Cancelled') {
+        $next['note'] = 'This trip was cancelled. There is no further workflow action.';
+    } else {
+        $next['note'] = 'The trip status (' . $status . ') and its recorded steps do not match a known workflow stage. Ask an Admin to check this trip.';
+    }
+    return $next;
 }

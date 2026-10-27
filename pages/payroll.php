@@ -180,11 +180,20 @@ document.getElementById('payrollForm')?.addEventListener('submit', async event =
     notes: document.getElementById('payrollNotes').value,
     [window.CSRF_TOKEN_NAME]: window.CSRF_TOKEN
   });
-  const response = await fetch('<?= APP_BASE ?>/ajax/payroll_handler.php', {method: 'POST', body: data});
-  const result = await response.json();
-  feedback.textContent = result.message || (result.success ? 'Payroll recorded.' : 'Could not record payroll.');
-  feedback.className = `alert alert-${result.success ? 'success' : 'danger'}`;
-  if (result.success) setTimeout(() => window.softReload(), 700);
+  // window.sendAction (assets/js/layout.js): busy button, so a double click
+  // cannot record the payment twice; server-confirmed result; readable
+  // errors; entries kept on failure.
+  const result = await window.sendAction('<?= APP_BASE ?>/ajax/payroll_handler.php', data, {
+    feedback, label: 'record the payroll payment', form: event.target,
+    button: event.submitter || event.target.querySelector('[type="submit"]')
+  });
+  if (result && result.success) {
+    // The deduction rows are built by this script: start again with one
+    // empty row and recalculated totals.
+    deductionContainer.replaceChildren();
+    addPayrollDeduction();
+    updateNetPay();
+  }
 });
 </script>
 <?php endif; ?>

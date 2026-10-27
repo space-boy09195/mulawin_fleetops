@@ -4,7 +4,7 @@
 // Trip workflow steps 5-11 on the target schema (step map in
 // includes/trip_workflow.php):
 //   confirm_assignment   Approved -> Assigned; truck assignment 'Assigned'
-//   prepare_departure    documents + allowance recorded (step 6); may move
+//   prepare_departure    attachment count + allowance recorded (step 6); may move
 //                        to Ready for Dispatch when departure checks passed
 //   departure_clearance  Ready for Dispatch -> Dispatched; dispatch_clearances
 //   record_progress      trip_updates 'In Transit' (step 10)
@@ -25,6 +25,7 @@ require_once __DIR__ . '/../includes/trip_queries.php';
 require_once __DIR__ . '/../includes/dispatch_assignment.php';
 require_once __DIR__ . '/../includes/dispatcher_scope.php';
 require_once __DIR__ . '/../includes/truck_status_history.php';
+require_once __DIR__ . '/../includes/workflow_notifications.php';
 
 header('Content-Type: application/json');
 
@@ -267,23 +268,19 @@ try {
             throw new DomainException('Confirm the approved truck and driver assignment before preparing departure.');
         }
 
-        $documentsStatus = requiredEnum('documents_status', ['Prepared', 'Not Required'], 'Document packet status');
-        $documentsNotes = optionalString('documents_notes', null, 2000);
-        if ($documentsStatus === 'Prepared') {
-            $documentCount = $pdo->prepare(
-                "SELECT COUNT(*)
-                 FROM document_links dl
-                 JOIN documents d ON d.document_id = dl.document_id
-                 WHERE dl.entity_type = 'trip' AND dl.entity_id = ?
-                   AND COALESCE(d.visibility_scope, 'all') IN ('all', 'operations')"
-            );
-            $documentCount->execute([$tripId]);
-            if ((int)$documentCount->fetchColumn() < 1) {
-                throw new InvalidArgumentException('Upload at least one trip document before marking the packet prepared.');
-            }
-        } elseif ($documentsNotes === null || trim($documentsNotes) === '') {
-            throw new InvalidArgumentException('State why no additional trip documents are required.');
-        }
+        // Interim policy: no pre-departure document is mandatory, so trip
+        // attachments are optional. Step 6 only records how many are linked
+        // (the same documents the Step 6 card lists); it does not claim that
+        // any document requirement was met.
+        $attachmentCountQuery = $pdo->prepare(
+            "SELECT COUNT(*)
+             FROM document_links dl
+             JOIN documents d ON d.document_id = dl.document_id
+             WHERE dl.entity_type = 'trip' AND dl.entity_id = ?
+               AND COALESCE(d.visibility_scope, 'all') IN ('all', 'operations')"
+        );
+        $attachmentCountQuery->execute([$tripId]);
+        $attachmentCount = (int)$attachmentCountQuery->fetchColumn();
 
         // Driver Allowance stays a fund request (Trip Allowance), separate
         // from Trip Pay (trip_pay_records).
@@ -323,11 +320,10 @@ try {
             throw new InvalidArgumentException('State why a trip allowance is not required.');
         }
 
-        // The packet details are kept on the step-6 event as JSON so the
+        // The step details are kept on the step-6 event as JSON so the
         // workflow page can show them (no trip_workflow_state table).
         $packet = json_encode([
-            'documents_status'          => $documentsStatus,
-            'documents_notes'           => $documentsNotes,
+            'attachment_count'          => $attachmentCount,
             'allowance_status'          => $allowanceStatus,
             'allowance_fund_request_id' => $fundRequestId,
             'allowance_notes'           => $allowanceNotes,
@@ -340,11 +336,14 @@ try {
             currentUserId(),
             $packet
         );
-        recordPreDepartureReadyIfComplete($pdo, $tripId, currentUserId());
-        $message = 'Trip documents and allowance requirements recorded.';
+        // Next: Operations Head clearance when every departure check has
+        // already passed, otherwise Maintenance's departure checks.
+        $readyForDispatch = recordPreDepartureReadyIfComplete($pdo, $tripId, currentUserId());
+        notifyTripHandoff($pdo, $tripId, $readyForDispatch ? 'clearance' : 'departure_checks');
+        $message = 'Departure preparation recorded.';
         $auditAction = 'PREPARE_TRIP_DEPARTURE';
         $auditDetails = [
-            'documents_status' => $documentsStatus,
+            'attachment_count' => $attachmentCount,
             'allowance_status' => $allowanceStatus,
             'fund_request_id'  => $fundRequestId,
         ];
@@ -377,6 +376,8 @@ try {
             'Ready for Dispatch',
             'Dispatched'
         );
+        resolveTripHandoffs($pdo, $tripId, ['clearance']);
+        notifyTripHandoff($pdo, $tripId, 'cleared');
         $message = 'Dispatch clearance recorded.';
         $auditAction = 'CLEAR_TRIP_FOR_DISPATCH';
         $auditDetails = ['dispatch_id' => (int)$trip['dispatch_id']];

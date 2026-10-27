@@ -117,7 +117,7 @@ layoutHead('Finance');
 <div class="card mb-4"><div class="card-header-custom"><h2 class="card-title-custom">Request funds</h2></div><div class="card-body-custom">
 <form id="fundRequestForm" class="row g-3">
 <div class="col-md-3"><label class="form-label">Request type</label><select id="fundType" class="form-select" required><option>Trip Allowance</option><option>Cash Advance</option><option>Operating Fund</option><option>Other</option></select></div>
-<div class="col-md-3"><label class="form-label" for="fundTrip">Trip (required for Trip Allowance)</label><select id="fundTrip" class="form-select">
+<div class="col-md-3"><label class="form-label" for="fundTrip">Trip (required for Trip Allowance)</label><select id="fundTrip" class="form-select" data-refresh-options>
 <option value=""><?= $fundTripOptions ? 'No trip' : 'No trips available' ?></option>
 <?php foreach ($fundTripOptions as $tripOption): ?><option value="<?= (int)$tripOption['trip_id'] ?>"><?= htmlspecialchars($tripOption['trip_number'] . ' · ' . $tripOption['client_name'] . ' · ' . $tripOption['status']) ?></option><?php endforeach; ?>
 </select><div class="form-text">The 200 most recent trips that are not cancelled.</div></div>
@@ -139,7 +139,7 @@ layoutHead('Finance');
 </form></div></div>
 <div class="card mb-4"><div class="card-header-custom"><h2 class="card-title-custom">Prepare payment voucher</h2></div><div class="card-body-custom">
 <form id="voucherForm" class="row g-3">
-<div class="col-md-4"><label class="form-label" for="voucherPayable">Accounts payable</label><select id="voucherPayable" class="form-select" required<?= $voucherPayableOptions ? '' : ' disabled' ?>>
+<div class="col-md-4"><label class="form-label" for="voucherPayable">Accounts payable</label><select id="voucherPayable" class="form-select" data-refresh-options required<?= $voucherPayableOptions ? '' : ' disabled' ?>>
 <option value=""><?= $voucherPayableOptions ? 'Select an open payable' : 'No open payables with an unvouchered balance' ?></option>
 <?php foreach ($voucherPayableOptions as $payableOption): ?><option value="<?= (int)$payableOption['payable_id'] ?>"><?= htmlspecialchars($payableOption['payable_number'] . ' · ' . $payableOption['supplier_name'] . ' · ₱' . number_format((float)$payableOption['remaining'], 2) . ' unvouchered · ' . $payableOption['status']) ?></option><?php endforeach; ?>
 </select></div>
@@ -151,11 +151,11 @@ layoutHead('Finance');
 <?php if ($canManageDisbursements): ?>
 <div class="card mb-4"><div class="card-header-custom"><h2 class="card-title-custom">Record disbursement</h2></div><div class="card-body-custom">
 <form id="disbursementForm" class="row g-3">
-<div class="col-md-6"><label class="form-label" for="disbRequest">Approved fund request</label><select id="disbRequest" class="form-select"<?= $disbursableFundOptions ? '' : ' disabled' ?>>
+<div class="col-md-6"><label class="form-label" for="disbRequest">Approved fund request</label><select id="disbRequest" class="form-select" data-refresh-options<?= $disbursableFundOptions ? '' : ' disabled' ?>>
 <option value=""><?= $disbursableFundOptions ? 'None' : 'No approved fund requests awaiting disbursement' ?></option>
 <?php foreach ($disbursableFundOptions as $fundOption): ?><option value="<?= (int)$fundOption['fund_request_id'] ?>"><?= htmlspecialchars($fundOption['request_number'] . ' · ' . $fundOption['request_type'] . ' · ₱' . number_format((float)$fundOption['remaining'], 2) . ' remaining · ' . $fundOption['status']) ?></option><?php endforeach; ?>
 </select></div>
-<div class="col-md-6"><label class="form-label" for="disbVoucher">Approved payment voucher</label><select id="disbVoucher" class="form-select"<?= $disbursableVoucherOptions ? '' : ' disabled' ?>>
+<div class="col-md-6"><label class="form-label" for="disbVoucher">Approved payment voucher</label><select id="disbVoucher" class="form-select" data-refresh-options<?= $disbursableVoucherOptions ? '' : ' disabled' ?>>
 <option value=""><?= $disbursableVoucherOptions ? 'None' : 'No approved payment vouchers awaiting disbursement' ?></option>
 <?php foreach ($disbursableVoucherOptions as $voucherOption): ?><option value="<?= (int)$voucherOption['voucher_id'] ?>"><?= htmlspecialchars($voucherOption['voucher_number'] . ' · ' . $voucherOption['payee'] . ' · ₱' . number_format((float)$voucherOption['remaining'], 2) . ' remaining') ?></option><?php endforeach; ?>
 </select></div>
@@ -182,11 +182,18 @@ layoutHead('Finance');
 <script>
 (() => {
   const feedback = document.getElementById('financeFeedback');
-  const send = async (data) => { const response = await fetch('<?= APP_BASE ?>/ajax/finance_handler.php', {method: 'POST', body: data}); const result = await response.json(); feedback.textContent = result.message || 'Request completed.'; feedback.className = `alert alert-${result.success ? 'success' : 'danger'}`; if (result.success) setTimeout(() => window.softReload(), 700); };
-  document.getElementById('fundRequestForm')?.addEventListener('submit', event => { event.preventDefault(); send(new URLSearchParams({action:'create_fund_request', request_type:fundType.value, trip_id:fundTrip.value, amount:fundAmount.value, purpose:fundPurpose.value, notes:fundNotes.value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN})); });
-  document.getElementById('disbursementForm')?.addEventListener('submit', event => { event.preventDefault(); send(new URLSearchParams({action:'create_disbursement', fund_request_id:disbRequest.value, payment_voucher_id:disbVoucher.value, payee_name:disbPayee.value, amount:disbAmount.value, payment_mode:disbMode.value, disbursed_at:disbDate.value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN})); });
-  document.getElementById('payableForm')?.addEventListener('submit', event => { event.preventDefault(); send(new URLSearchParams({action:'create_payable', supplier_name:apSupplier.value, invoice_number:apInvoice.value, description:apDescription.value, amount:apAmount.value, due_date:apDueDate.value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN})); });
-  document.getElementById('voucherForm')?.addEventListener('submit', event => { event.preventDefault(); send(new URLSearchParams({action:'create_voucher', payable_id:voucherPayable.value, amount:voucherAmount.value, notes:voucherNotes.value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN})); });
+  // window.sendAction (assets/js/layout.js): busy button, server-confirmed
+  // success, readable errors, entries kept on failure, form cleared on success.
+  const send = (event, label, data) => {
+    event.preventDefault();
+    window.sendAction('<?= APP_BASE ?>/ajax/finance_handler.php', data, {
+      feedback, label, form: event.target, button: event.target.querySelector('button')
+    });
+  };
+  document.getElementById('fundRequestForm')?.addEventListener('submit', event => send(event, 'submit the fund request', new URLSearchParams({action:'create_fund_request', request_type:fundType.value, trip_id:fundTrip.value, amount:fundAmount.value, purpose:fundPurpose.value, notes:fundNotes.value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN})));
+  document.getElementById('disbursementForm')?.addEventListener('submit', event => send(event, 'record the disbursement', new URLSearchParams({action:'create_disbursement', fund_request_id:disbRequest.value, payment_voucher_id:disbVoucher.value, payee_name:disbPayee.value, amount:disbAmount.value, payment_mode:disbMode.value, disbursed_at:disbDate.value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN})));
+  document.getElementById('payableForm')?.addEventListener('submit', event => send(event, 'save the payable', new URLSearchParams({action:'create_payable', supplier_name:apSupplier.value, invoice_number:apInvoice.value, description:apDescription.value, amount:apAmount.value, due_date:apDueDate.value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN})));
+  document.getElementById('voucherForm')?.addEventListener('submit', event => send(event, 'submit the payment voucher', new URLSearchParams({action:'create_voucher', payable_id:voucherPayable.value, amount:voucherAmount.value, notes:voucherNotes.value, [window.CSRF_TOKEN_NAME]:window.CSRF_TOKEN})));
 })();
 </script>
 <?php layoutFoot(); ?>

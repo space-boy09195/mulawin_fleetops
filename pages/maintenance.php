@@ -19,10 +19,22 @@ if (!in_array($requestedInspectionStage, ['Departure', 'Return'], true)) {
     $requestedInspectionStage = null;
 }
 
+// This file serves two pages: the Maintenance work page (Work to Address,
+// Pre-Departure Inspection, Return Inspection) and, when included by
+// pages/maintenance_records.php, Maintenance Records & History. Both share
+// the data below, so nothing is copied between them.
+$isRecordsPage = defined('MAINTENANCE_RECORDS_PAGE');
+if (!$isRecordsPage && (($_GET['view'] ?? '') === 'records' || isset($_GET['period']))) {
+    // Records & History moved to its own page; older links still work.
+    $recordsQuery = isset($_GET['period']) ? '?period=' . rawurlencode((string)$_GET['period']) : '';
+    header('Location: ' . APP_BASE . '/pages/maintenance_records.php' . $recordsQuery);
+    exit;
+}
+
 $pageBase = rtrim(str_replace('\\', '/', dirname(dirname($_SERVER['SCRIPT_NAME'] ?? ''))), '/');
 $GLOBALS['page_js'] = $pageBase . '/assets/js/maintenance.js';
 
-layoutHead('Maintenance', $pageBase . '/assets/css/maintenance.css');
+layoutHead($isRecordsPage ? 'Maintenance Records & History' : 'Maintenance', $pageBase . '/assets/css/maintenance.css');
 
 $pdo = getDBConnection();
 
@@ -411,46 +423,6 @@ foreach ($inspectionImageSets as $bodyType => $views) {
     }
 }
 
-// Approved dispatches whose trip is ready for the pre-trip checklist (step 6,
-// status Assigned) and has no passed checklist yet. dispatch_id is the
-// dispatch_request_id the checklist form posts.
-$pendingDispatchRows = $pdo->query("
-    SELECT
-        dr.dispatch_request_id AS dispatch_id,
-        t.truck_id,
-        t.trip_id,
-        tr.plate_number,
-        tr.brand,
-        tr.model,
-        COALESCE(e.full_name, CONCAT('Employee #', e.employee_id)) AS driver_name,
-        COALESCE(r.origin, t.origin) AS origin,
-        COALESCE(r.destination, t.destination) AS destination,
-        t.scheduled_departure AS scheduled_at
-    FROM dispatch_requests dr
-    JOIN trips t      ON t.trip_id = dr.trip_id
-    JOIN trucks tr    ON t.truck_id = tr.truck_id
-    LEFT JOIN employees e ON t.driver_id = e.employee_id
-    LEFT JOIN routes r ON t.route_id = r.route_id
-    WHERE dr.status = 'Approved' AND t.status = 'Assigned'
-    ORDER BY t.scheduled_departure ASC
-    LIMIT 300
-")->fetchAll(PDO::FETCH_ASSOC);
-$pendingDispatches = [];
-foreach ($pendingDispatchRows as $pendingDispatch) {
-    if (tripWorkflowCurrentStep($pdo, (int)$pendingDispatch['trip_id']) < 6) {
-        continue;
-    }
-    $passed = false;
-    if ($checklistTemplateId > 0) {
-        foreach (tripTemplateInspectionResults($pdo, (int)$pendingDispatch['trip_id'], $checklistTemplateId) as $row) {
-            $passed = $passed || $row['overall_result'] === 'Passed';
-        }
-    }
-    if (!$passed) {
-        $pendingDispatches[] = $pendingDispatch;
-    }
-}
-
 // Open incidents (for linking to a maintenance record)
 $openIncidents = $pdo->query("
     SELECT
@@ -478,16 +450,126 @@ $checklistItems = [
     'waybill_ok'     => 'Waybill',
     'fuel_po_ok'     => 'Fuel PO',
 ];
+
+// ── Page views ────────────────────────────────────────────────────────────────
+// The work page has one view per task: work waiting for Maintenance, the
+// Pre-Departure Inspection of one trip (pre-trip checklist + departure
+// inspection), and trips waiting for the return inspection. The records
+// page always shows the 'records' view.
+const MAINTENANCE_VIEWS = [
+    'overview'      => ['Work to Address', 'bi-clipboard-check'],
+    'pre_departure' => ['Pre-Departure Inspection', 'bi-truck-front'],
+    'return'        => ['Return Inspection', 'bi-arrow-return-left'],
+];
+$view = $isRecordsPage ? 'records' : (string)($_GET['view'] ?? '');
+if (!$isRecordsPage && !isset(MAINTENANCE_VIEWS[$view])) {
+    // Older links: inspection_stage=Departure opened the departure inspection,
+    // Arrival/Return the return inspection.
+    $view = match (true) {
+        $requestedInspectionStage === 'Departure' => 'pre_departure',
+        $requestedInspectionStage === 'Return'    => 'return',
+        default                                   => 'overview',
+    };
+}
+$canEnterInspections = !$hideMaintenanceEntryButtons && currentUserHasAnyPermission(['maintenance.manage']);
+// Trips waiting for departure checks (Assigned, step 6 done) and for the
+// return inspection (Delivered, step 11 done), from $inspectionTrips.
+$departureQueue = array_values(array_filter($inspectionTrips, static fn(array $trip): bool => $trip['status'] === 'Loading'));
+$returnQueue = array_values(array_filter($inspectionTrips, static fn(array $trip): bool => $trip['status'] === 'Unloading'));
+
+// Pre-Departure Inspection of one trip: its two sections keep their own
+// records, results and timers; nothing here changes a record.
+$preDeparture = null;
+if ($view === 'pre_departure' && $requestedTripId) {
+    $tripQuery = $pdo->prepare(
+        "SELECT t.trip_id, t.trip_number, t.status, t.truck_id, t.scheduled_departure,
+                COALESCE(r.origin, t.origin) AS origin, COALESCE(r.destination, t.destination) AS destination,
+                tr.plate_number, tr.truck_type, dr.dispatch_request_id AS dispatch_id, dr.status AS dispatch_status,
+                COALESCE(e.full_name, CONCAT('Employee #', e.employee_id)) AS driver_name
+         FROM trips t
+         JOIN trucks tr ON tr.truck_id = t.truck_id
+         LEFT JOIN routes r ON r.route_id = t.route_id
+         LEFT JOIN employees e ON e.employee_id = t.driver_id
+         LEFT JOIN dispatch_requests dr ON dr.trip_id = t.trip_id
+         WHERE t.trip_id = ?"
+    );
+    $tripQuery->execute([$requestedTripId]);
+    $preDepartureTrip = $tripQuery->fetch(PDO::FETCH_ASSOC) ?: null;
+    if ($preDepartureTrip) {
+        $tripStep = tripWorkflowCurrentStep($pdo, (int)$preDepartureTrip['trip_id']);
+        $departureTemplate = inspectionTemplateForForm($pdo, 'inspection_departure');
+        $sectionStatus = static function (array $results): array {
+            $passed = false;
+            $failed = 0;
+            foreach ($results as $row) {
+                $passed = $passed || $row['overall_result'] === 'Passed';
+                $failed += $row['overall_result'] === 'Passed' ? 0 : 1;
+            }
+            return ['passed' => $passed, 'failed' => $failed];
+        };
+        $truckForTrip = null;
+        foreach ($trucks as $truckRow) {
+            if ((int)$truckRow['truck_id'] === (int)$preDepartureTrip['truck_id']) {
+                $truckForTrip = $truckRow;
+            }
+        }
+        $preDeparture = [
+            'trip'      => $preDepartureTrip,
+            'truck'     => $truckForTrip,
+            'step'      => $tripStep,
+            // Same rule as the handlers: an approved dispatch, status
+            // Assigned and the departure packet (step 6) recorded.
+            'ready'     => $preDepartureTrip['status'] === 'Assigned' && $tripStep >= 6
+                && $preDepartureTrip['dispatch_status'] === 'Approved' && $truckForTrip !== null,
+            'checklist' => $sectionStatus($checklistTemplateId > 0
+                ? tripTemplateInspectionResults($pdo, (int)$preDepartureTrip['trip_id'], $checklistTemplateId) : []),
+            'departure' => $sectionStatus($departureTemplate
+                ? tripTemplateInspectionResults($pdo, (int)$preDepartureTrip['trip_id'], (int)$departureTemplate['template_id']) : []),
+            'summary'   => tripInspectionSummary($pdo, (int)$preDepartureTrip['trip_id'], 'Departure'),
+        ];
+    }
+}
+$sectionBadge = static function (array $status): array {
+    if ($status['passed']) {
+        return ['Completed', 'text-bg-success'];
+    }
+    return $status['failed'] > 0
+        ? ['Failed · submit again', 'text-bg-danger']
+        : ['Not submitted', 'text-bg-secondary'];
+};
 ?>
 
 <div class="mnt-page">
 
   <!-- Header -->
   <div class="mnt-header d-flex align-items-center justify-content-between mb-4">
+    <?php if ($isRecordsPage): ?>
+    <div>
+      <h1 class="mnt-title mb-0">Maintenance Records &amp; History</h1>
+      <p class="mnt-subtitle mb-0">PM schedules, work orders, maintenance records, checklists and inspection history</p>
+      <a class="small" href="<?= APP_BASE ?>/pages/maintenance.php"><i class="bi bi-arrow-left me-1"></i>Back to Maintenance work</a>
+    </div>
+    <?php else: ?>
     <div>
       <h1 class="mnt-title mb-0">Maintenance</h1>
-      <p class="mnt-subtitle mb-0">Checklists, records, and truck status</p>
+      <p class="mnt-subtitle mb-0"><?= htmlspecialchars(MAINTENANCE_VIEWS[$view][0]) ?></p>
+      <nav class="nav nav-pills mt-2 gap-1" aria-label="Maintenance tasks">
+        <?php foreach (MAINTENANCE_VIEWS as $viewKey => [$viewLabel, $viewIcon]): ?>
+        <a class="nav-link py-1 px-2 small<?= $viewKey === $view ? ' active' : '' ?>"
+           <?= $viewKey === $view ? 'aria-current="page"' : '' ?>
+           href="<?= APP_BASE ?>/pages/maintenance.php?view=<?= $viewKey ?>">
+          <i class="bi <?= $viewIcon ?> me-1"></i><?= htmlspecialchars($viewLabel) ?>
+          <?php if ($viewKey === 'pre_departure' && $departureQueue): ?><span class="badge text-bg-secondary ms-1"><?= count($departureQueue) ?></span><?php endif; ?>
+          <?php if ($viewKey === 'return' && $returnQueue): ?><span class="badge text-bg-secondary ms-1"><?= count($returnQueue) ?></span><?php endif; ?>
+        </a>
+        <?php endforeach; ?>
+      </nav>
     </div>
+    <a class="btn btn-sm btn-outline-secondary align-self-start" href="<?= APP_BASE ?>/pages/maintenance_records.php">
+      <i class="bi bi-journal-text me-1"></i>Records &amp; History
+    </a>
+    <?php endif; ?>
+    <?php if ($isRecordsPage): ?>
     <div class="d-flex gap-2 align-items-center flex-wrap">
       <form method="get" class="d-flex">
         <select name="period" class="form-select mnt-input" style="min-width:160px;font-size:.85rem;" data-soft-submit>
@@ -497,11 +579,8 @@ $checklistItems = [
         </select>
       </form>
       <?php if (!$hideMaintenanceEntryButtons): ?>
-      <button class="btn btn-mnt-secondary" data-bs-toggle="modal" data-bs-target="#checklistModal">
-        <i class="bi bi-clipboard-check me-1"></i> New Checklist
-      </button>
       <button class="btn btn-mnt-primary" data-bs-toggle="modal" data-bs-target="#inspectionModal">
-        <i class="bi bi-bounding-box-circles me-1"></i> Inspect Vehicle
+        <i class="bi bi-bounding-box-circles me-1"></i> General Vehicle Inspection
       </button>
       <button class="btn btn-mnt-primary" data-bs-toggle="modal" data-bs-target="#recordModal">
         <i class="bi bi-wrench me-1"></i> Log Record
@@ -516,8 +595,12 @@ $checklistItems = [
       </button>
       <?php endif; ?>
     </div>
+    <?php endif; ?>
 
-    <!-- Interactive vehicle inspection -->
+    <?php if ($isRecordsPage || $view === 'return'): ?>
+    <!-- Interactive vehicle inspection: the general inspection on the records
+         page, the return inspection on the Return Inspection view. The
+         departure inspection is on the Pre-Departure Inspection view. -->
     <div class="modal fade" id="inspectionModal" data-min-duration-seconds="<?= MAINTENANCE_FORM_MIN_DURATION_SECONDS ?>" tabindex="-1" aria-labelledby="inspectionModalLabel" aria-hidden="true">
       <div class="modal-dialog modal-xl modal-dialog-centered">
         <div class="modal-content mnt-modal-content">
@@ -546,9 +629,11 @@ $checklistItems = [
                 </select>
                 <label class="form-label mnt-label mt-3" for="inspectionStage">Inspection Stage</label>
                 <select id="inspectionStage" class="form-select mnt-input">
-                  <option value="General" <?= !$requestedTripId ? 'selected' : '' ?>>General Vehicle Inspection</option>
-                  <option value="Departure" <?= $requestedInspectionStage === 'Departure' || (!$requestedInspectionStage && array_filter($inspectionTrips, static fn($item) => (int)$item['trip_id'] === $requestedTripId && $item['status'] === 'Loading')) ? 'selected' : '' ?>>Trip Departure Inspection</option>
-                  <option value="Return" <?= $requestedInspectionStage === 'Return' || (!$requestedInspectionStage && array_filter($inspectionTrips, static fn($item) => (int)$item['trip_id'] === $requestedTripId && $item['status'] === 'Unloading')) ? 'selected' : '' ?>>Trip Return Inspection</option>
+                  <?php if ($isRecordsPage): ?>
+                  <option value="General" selected>General Vehicle Inspection</option>
+                  <?php else: ?>
+                  <option value="Return" selected>Trip Return Inspection</option>
+                  <?php endif; ?>
                 </select>
                 <label class="form-label mnt-label mt-3" for="inspectionTrip">Trip</label>
                 <select id="inspectionTrip" class="form-select mnt-input" disabled>
@@ -613,6 +698,7 @@ $checklistItems = [
         </div>
       </div>
     </div>
+    <?php endif; ?>
   </div>
 
   <div class="modal fade" id="workOrderModal" tabindex="-1" aria-labelledby="workOrderModalLabel" aria-hidden="true">
@@ -742,6 +828,267 @@ $checklistItems = [
     </div>
   </div>
 
+  <?php if ($view === 'overview'): ?>
+  <!-- ── Work to Address: inspections waiting for Maintenance ─────────────── -->
+  <div class="row g-4 mb-4">
+    <?php foreach ([
+        ['Pre-departure checks waiting', $departureQueue, 'pre_departure', 'Open Pre-Departure Inspection', 'Trips appear here after the dispatcher records Step 6.'],
+        ['Return inspections waiting', $returnQueue, 'return', 'Open Return Inspection', 'Trips appear here after the dispatcher marks them Delivered.'],
+    ] as [$queueTitle, $queueTrips, $queueView, $queueAction, $queueHint]): ?>
+    <div class="col-lg-6">
+      <div class="mnt-table-wrap h-100">
+        <h2 class="h6 px-3 pt-3"><?= htmlspecialchars($queueTitle) ?> <span class="badge text-bg-secondary"><?= count($queueTrips) ?></span></h2>
+        <?php if (!$queueTrips): ?>
+        <p class="small text-muted px-3 pb-3 mb-0">Nothing is waiting. <?= htmlspecialchars($queueHint) ?></p>
+        <?php else: ?>
+        <table class="table mnt-table mb-0">
+          <thead><tr><th>Trip</th><th>Truck</th><th class="text-end">Action</th></tr></thead>
+          <tbody>
+          <?php foreach ($queueTrips as $queueTrip): ?>
+            <tr>
+              <td><?= htmlspecialchars($queueTrip['trip_number']) ?></td>
+              <td><?= htmlspecialchars($queueTrip['plate_number']) ?></td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-outline-primary"
+                   href="<?= APP_BASE ?>/pages/maintenance.php?view=<?= $queueView ?>&amp;trip_id=<?= (int)$queueTrip['trip_id'] ?><?= $queueView === 'return' ? '&amp;inspection_stage=Return#inspectionModal' : '' ?>"><?= htmlspecialchars($queueAction) ?></a>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+        <?php endif; ?>
+      </div>
+    </div>
+    <?php endforeach; ?>
+  </div>
+  <p class="small text-muted">Maintenance records, schedules, work orders and inspection history are under <a href="<?= APP_BASE ?>/pages/maintenance_records.php">Records &amp; History</a>.</p>
+
+  <?php elseif ($view === 'pre_departure' && !$requestedTripId): ?>
+  <!-- ── Pre-Departure Inspection: choose a trip ──────────────────────────── -->
+  <div class="mnt-table-wrap mb-4">
+    <?php if (!$departureQueue): ?>
+    <div class="mnt-empty">
+      <i class="bi bi-truck-front mnt-empty-icon"></i>
+      <p>No trip is waiting for pre-departure checks. Trips appear here after the dispatcher records Step 6.</p>
+    </div>
+    <?php else: ?>
+    <table class="table mnt-table mb-0">
+      <thead><tr><th>Trip</th><th>Truck</th><th class="text-end">Action</th></tr></thead>
+      <tbody>
+      <?php foreach ($departureQueue as $queueTrip): ?>
+        <tr>
+          <td><?= htmlspecialchars($queueTrip['trip_number']) ?></td>
+          <td><?= htmlspecialchars($queueTrip['plate_number']) ?></td>
+          <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="<?= APP_BASE ?>/pages/maintenance.php?view=pre_departure&amp;trip_id=<?= (int)$queueTrip['trip_id'] ?>">Open Pre-Departure Inspection</a></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+    <?php endif; ?>
+  </div>
+
+  <?php elseif ($view === 'pre_departure' && !$preDeparture): ?>
+  <div class="alert alert-warning">Trip not found. <a href="<?= APP_BASE ?>/pages/maintenance.php?view=pre_departure">Choose a trip</a>.</div>
+
+  <?php elseif ($view === 'pre_departure'): ?>
+  <?php
+    $pdTrip = $preDeparture['trip'];
+    $pdTruck = $preDeparture['truck'];
+    $checklistBadge = $sectionBadge($preDeparture['checklist']);
+    $departureBadge = $sectionBadge($preDeparture['departure']);
+    $showChecklistForm = $canEnterInspections && $preDeparture['ready'] && !$preDeparture['checklist']['passed'];
+    $showDepartureForm = $canEnterInspections && $preDeparture['ready'] && !$preDeparture['departure']['passed'];
+  ?>
+  <!-- ── Pre-Departure Inspection of one trip ─────────────────────────────── -->
+  <div id="preDepartureInspection"
+       data-initial-section="<?= $preDeparture['checklist']['passed'] && !$preDeparture['departure']['passed'] ? 'departure' : 'checklist' ?>">
+    <div class="mnt-table-wrap p-3 mb-3">
+      <div class="d-flex justify-content-between flex-wrap gap-2">
+        <div>
+          <strong><?= htmlspecialchars($pdTrip['trip_number']) ?></strong>
+          · <?= htmlspecialchars($pdTrip['plate_number']) ?> (<?= htmlspecialchars($pdTrip['truck_type']) ?>)
+          · <?= htmlspecialchars($pdTrip['status']) ?>
+          <div class="small text-muted">
+            Driver: <?= htmlspecialchars($pdTrip['driver_name'] ?? '—') ?>
+            · <?= htmlspecialchars($pdTrip['origin'] . ' → ' . $pdTrip['destination']) ?>
+            · Departs <?= $pdTrip['scheduled_departure'] ? date('M j, Y g:i A', strtotime($pdTrip['scheduled_departure'])) : '—' ?>
+          </div>
+          <div class="small mt-1">
+            Departure checks: <strong><?= (int)$preDeparture['summary']['covered'] ?>/<?= (int)$preDeparture['summary']['required'] ?> required items passed</strong>.
+            Both sections must pass before the trip is Ready for Dispatch.
+          </div>
+        </div>
+        <div class="d-flex gap-2 align-items-start">
+          <a class="btn btn-sm btn-outline-secondary" href="<?= APP_BASE ?>/pages/maintenance.php?view=overview"><i class="bi bi-arrow-left me-1"></i>Work to Address</a>
+          <?php if (currentUserHasAnyPermission(['trips.view'])): ?>
+          <a class="btn btn-sm btn-outline-secondary" href="<?= APP_BASE ?>/pages/trip_workflow.php?trip_id=<?= (int)$pdTrip['trip_id'] ?>">Trip Workflow</a>
+          <?php endif; ?>
+        </div>
+      </div>
+      <?php if (!$preDeparture['ready']): ?>
+      <div class="alert alert-info mt-3 mb-0">
+        This trip is not waiting for departure checks (status <?= htmlspecialchars($pdTrip['status']) ?>, step <?= (int)$preDeparture['step'] ?>).
+        Checks open after the dispatcher records Step 6 while the trip is Assigned.
+      </div>
+      <?php elseif (!$canEnterInspections): ?>
+      <div class="alert alert-info mt-3 mb-0">Maintenance personnel complete these checks. You can view their status here.</div>
+      <?php endif; ?>
+    </div>
+
+    <div class="btn-group btn-group-sm mb-3" role="group" aria-label="Pre-Departure Inspection sections">
+      <button type="button" class="btn btn-outline-primary" data-pre-departure-switch="checklist" aria-pressed="false">
+        Pre-Trip Checklist <span class="badge <?= $checklistBadge[1] ?> ms-1" data-section-badge="checklist"><?= htmlspecialchars($checklistBadge[0]) ?></span>
+      </button>
+      <button type="button" class="btn btn-outline-primary" data-pre-departure-switch="departure" aria-pressed="false">
+        Departure Inspection <span class="badge <?= $departureBadge[1] ?> ms-1" data-section-badge="departure"><?= htmlspecialchars($departureBadge[0]) ?></span>
+      </button>
+    </div>
+
+    <!-- Section 1: Pre-Trip Checklist (submit_checklist; its own 5-minute timer) -->
+    <section class="mnt-table-wrap p-3 mb-4" id="checklistSection" data-pre-departure-section="checklist"
+             data-min-duration-seconds="<?= PRE_TRIP_CHECKLIST_MIN_DURATION_SECONDS ?>" aria-labelledby="checklistSectionTitle">
+      <h2 class="h6" id="checklistSectionTitle"><i class="bi bi-clipboard-check me-1"></i>Pre-Trip Checklist</h2>
+      <?php if ($preDeparture['checklist']['passed']): ?>
+      <div class="alert alert-success mb-0">Completed: a passed Pre-Trip Checklist is recorded for this trip.</div>
+      <?php elseif (!$showChecklistForm): ?>
+      <p class="small text-muted mb-0"><?= $preDeparture['checklist']['failed'] > 0 ? 'A failed checklist is recorded; it must be submitted again and pass.' : 'No checklist has been submitted yet.' ?></p>
+      <?php else: ?>
+      <?php if ($preDeparture['checklist']['failed'] > 0): ?>
+      <div class="alert alert-warning py-2">A failed checklist is recorded for this trip. Correct the items and submit it again.</div>
+      <?php endif; ?>
+      <div id="checklistFormAlert" class="alert d-none" role="alert"></div>
+      <div id="checklistTimerStatus" class="small text-muted mb-3" role="status" aria-live="polite">The 5-minute minimum starts when this section is opened.</div>
+      <!-- The checklist is tied to this trip's approved dispatch. -->
+      <select class="d-none" id="clDispatchId" aria-hidden="true" tabindex="-1">
+        <option value="<?= (int)$pdTrip['dispatch_id'] ?>" selected><?= htmlspecialchars($pdTrip['trip_number']) ?></option>
+      </select>
+      <p class="mnt-label mb-2">Checklist Items</p>
+      <div class="mnt-checklist-grid mb-3">
+        <?php foreach ($checklistItems as $field => $label): ?>
+        <label class="mnt-check-toggle">
+          <input type="checkbox" class="mnt-check-cb" id="cl_<?= $field ?>" name="<?= $field ?>">
+          <span class="mnt-check-toggle-inner">
+            <i class="bi bi-check-lg"></i>
+          </span>
+          <span class="mnt-check-toggle-label"><?= $label ?></span>
+        </label>
+        <?php endforeach; ?>
+      </div>
+      <div id="clResultBanner" class="mnt-result-banner d-none"></div>
+      <div class="mt-3">
+        <label class="form-label mnt-label" for="clNotes">Notes (optional)</label>
+        <textarea class="form-control mnt-input" id="clNotes" rows="2" placeholder="Any issues found or remarks…"></textarea>
+      </div>
+      <div class="mt-3 text-end">
+        <button type="button" class="btn btn-mnt-secondary" id="submitChecklistBtn" disabled>
+          <span id="clBtnText">Submit Checklist</span>
+          <span id="clBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
+        </button>
+      </div>
+      <?php endif; ?>
+    </section>
+
+    <!-- Section 2: Departure Inspection (save_inspection, stage Departure; its own 5-minute timer) -->
+    <section class="mnt-table-wrap p-3 mb-4 d-none" id="inspectionSection" data-pre-departure-section="departure"
+             data-min-duration-seconds="<?= DEPARTURE_INSPECTION_MIN_DURATION_SECONDS ?>" aria-labelledby="departureSectionTitle">
+      <h2 class="h6" id="departureSectionTitle"><i class="bi bi-bounding-box-circles me-1"></i>Departure Inspection</h2>
+      <?php if ($preDeparture['departure']['passed']): ?>
+      <div class="alert alert-success mb-0">Completed: a passed departure inspection is recorded for this trip.</div>
+      <?php elseif (!$showDepartureForm): ?>
+      <p class="small text-muted mb-0">No departure inspection has been submitted yet.</p>
+      <?php else: ?>
+      <div id="inspectionFormAlert" class="alert d-none" role="alert"></div>
+      <div id="inspectionTimerStatus" class="small text-muted mb-3" role="status" aria-live="polite">The 5-minute minimum starts when this section is opened.</div>
+      <!-- Fixed to this trip and its truck (same fields as the inspection form). -->
+      <select class="d-none" id="inspectionTruck" aria-hidden="true" tabindex="-1">
+        <option value="<?= (int)$pdTruck['truck_id'] ?>" selected
+                data-body="<?= htmlspecialchars($pdTruck['body_type']) ?>"
+                data-image-front="<?= htmlspecialchars($pdTruck['image_front_path'] ? APP_BASE . '/' . ltrim($pdTruck['image_front_path'], '/') : '', ENT_QUOTES) ?>"
+                data-image-side="<?= htmlspecialchars($pdTruck['image_side_path'] ? APP_BASE . '/' . ltrim($pdTruck['image_side_path'], '/') : '', ENT_QUOTES) ?>"
+                data-image-rear="<?= htmlspecialchars($pdTruck['image_rear_path'] ? APP_BASE . '/' . ltrim($pdTruck['image_rear_path'], '/') : '', ENT_QUOTES) ?>"
+                data-image-top="<?= htmlspecialchars($pdTruck['image_top_path'] ? APP_BASE . '/' . ltrim($pdTruck['image_top_path'], '/') : '', ENT_QUOTES) ?>"><?= htmlspecialchars($pdTruck['plate_number']) ?></option>
+      </select>
+      <select class="d-none" id="inspectionStage" aria-hidden="true" tabindex="-1">
+        <option value="Departure" selected>Trip Departure Inspection</option>
+      </select>
+      <select class="d-none" id="inspectionTrip" aria-hidden="true" tabindex="-1">
+        <option value="">—</option>
+        <option value="<?= (int)$pdTrip['trip_id'] ?>" selected data-truck-id="<?= (int)$pdTruck['truck_id'] ?>" data-trip-status="Loading"><?= htmlspecialchars($pdTrip['trip_number']) ?></option>
+      </select>
+      <div class="row g-3">
+        <div class="col-lg-4">
+          <label class="form-label mnt-label" for="inspectionDate">Inspection date</label>
+          <input type="date" id="inspectionDate" class="form-control mnt-input" value="<?= date('Y-m-d') ?>" min="<?= date('Y-m-d') ?>">
+          <label class="form-label mnt-label mt-3" for="inspectionNotes">Overall notes</label>
+          <textarea id="inspectionNotes" class="form-control mnt-input" rows="4" placeholder="Optional findings or recommendations"></textarea>
+          <label class="form-label mnt-label mt-3" for="inspectionPhotos">Inspection photos (JPG, PNG, or WebP; up to 8, max 10 MB each)</label>
+          <input type="file" id="inspectionPhotos" class="form-control mnt-input" accept="image/jpeg,image/png,image/webp" multiple>
+          <div class="small text-muted mt-3"><i class="bi bi-info-circle me-1"></i>Select a vehicle view, then choose the condition and add notes for each listed part. Every listed part must be Good for the departure inspection to pass.</div>
+          <div class="mt-3">
+            <label class="form-label mnt-label" for="customInspectionPart">Part not listed?</label>
+            <div class="input-group">
+              <input type="text" id="customInspectionPart" class="form-control mnt-input" maxlength="100" placeholder="Type the part name">
+              <button type="button" class="btn btn-outline-primary" id="addInspectionPartBtn">
+                <i class="bi bi-plus-lg me-1"></i>Add Part
+              </button>
+            </div>
+            <div class="form-text">Add a custom part to the currently selected view.</div>
+          </div>
+        </div>
+        <div class="col-lg-8">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div class="btn-group" role="group" aria-label="Vehicle view">
+              <button type="button" class="btn btn-sm btn-outline-primary inspection-view active" data-view="Front" aria-pressed="true"><i class="bi bi-truck-front me-1"></i>Front View</button>
+              <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Side" aria-pressed="false"><i class="bi bi-truck me-1"></i>Side View</button>
+              <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Rear" aria-pressed="false"><i class="bi bi-truck-rear me-1"></i>Rear View</button>
+              <button type="button" class="btn btn-sm btn-outline-primary inspection-view" data-view="Top" aria-pressed="false"><i class="bi bi-bounding-box me-1"></i>Top View</button>
+            </div>
+            <span class="small text-muted" id="inspectionBodyLabel">Closed Van</span>
+          </div>
+          <div class="inspection-diagram" id="inspectionDiagram" data-view="Front"
+               data-image-map="<?= htmlspecialchars(json_encode($inspectionImages), ENT_QUOTES, 'UTF-8') ?>"></div>
+          <div id="inspectionParts" class="inspection-parts mt-3"></div>
+        </div>
+      </div>
+      <div class="mt-3 text-end">
+        <button type="button" class="btn btn-mnt-primary" id="submitInspectionBtn" disabled>Save Departure Inspection</button>
+      </div>
+      <?php endif; ?>
+    </section>
+  </div>
+
+  <?php elseif ($view === 'return'): ?>
+  <!-- ── Return Inspection: trips back from delivery ──────────────────────── -->
+  <div class="mnt-table-wrap mb-4">
+    <?php if (!$returnQueue): ?>
+    <div class="mnt-empty">
+      <i class="bi bi-arrow-return-left mnt-empty-icon"></i>
+      <p>No trip is waiting for a return inspection. Trips appear here after the dispatcher marks them Delivered.</p>
+    </div>
+    <?php else: ?>
+    <table class="table mnt-table mb-0">
+      <thead><tr><th>Trip</th><th>Truck</th><th class="text-end">Action</th></tr></thead>
+      <tbody>
+      <?php foreach ($returnQueue as $queueTrip): ?>
+        <tr>
+          <td><?= htmlspecialchars($queueTrip['trip_number']) ?></td>
+          <td><?= htmlspecialchars($queueTrip['plate_number']) ?></td>
+          <td class="text-end">
+            <?php if ($canEnterInspections): ?>
+            <a class="btn btn-sm btn-outline-primary" href="<?= APP_BASE ?>/pages/maintenance.php?view=return&amp;trip_id=<?= (int)$queueTrip['trip_id'] ?>&amp;inspection_stage=Return#inspectionModal">Start Return Inspection</a>
+            <?php else: ?>
+            <span class="small text-muted">Maintenance completes this inspection.</span>
+            <?php endif; ?>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+    <?php endif; ?>
+  </div>
+  <?php endif; ?>
+
+  <?php if ($isRecordsPage): ?>
   <!-- Tabs -->
   <ul class="nav mnt-tabs mb-4" id="mntTabs" role="tablist">
     <li class="nav-item" role="presentation">
@@ -1177,6 +1524,7 @@ $checklistItems = [
     </div>
 
   </div><!-- /tab-content -->
+  <?php endif; ?>
 </div>
 
 <!-- ══ Log Maintenance Record Modal ═══════════════════════════════════════ -->
@@ -1273,76 +1621,6 @@ $checklistItems = [
         <button type="button" class="btn btn-mnt-primary" id="submitRecordBtn">
           <span id="recBtnText">Save Record</span>
           <span id="recBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ══ Pre-Trip Checklist Modal ═══════════════════════════════════════════ -->
-<div class="modal fade" id="checklistModal" data-min-duration-seconds="<?= MAINTENANCE_FORM_MIN_DURATION_SECONDS ?>" tabindex="-1" aria-labelledby="checklistModalLabel" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered modal-lg">
-    <div class="modal-content mnt-modal-content">
-      <div class="modal-header mnt-modal-header-secondary">
-        <h5 class="modal-title" id="checklistModalLabel">
-          <i class="bi bi-clipboard-check me-2"></i>Pre-Trip Checklist
-        </h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body mnt-modal-body">
-        <div id="checklistFormAlert" class="alert d-none" role="alert"></div>
-        <div id="checklistTimerStatus" class="small text-muted mb-3" role="status" aria-live="polite">Select a dispatch to start the minimum completion timer.</div>
-
-        <div class="mb-3">
-          <label class="form-label mnt-label" for="clDispatchId">Dispatch / Trip</label>
-          <select class="form-select mnt-input" id="clDispatchId" required>
-            <option value="">— Select approved dispatch —</option>
-            <?php foreach ($pendingDispatches as $pd): ?>
-            <option value="<?= $pd['dispatch_id'] ?>"
-                    <?= (int)$pd['trip_id'] === $requestedTripId ? 'selected' : '' ?>
-                    data-truck-id="<?= (int)$pd['truck_id'] ?>">
-              <?= htmlspecialchars($pd['plate_number']) ?> —
-              <?= htmlspecialchars($pd['brand'] . ' ' . $pd['model']) ?> |
-              <?= htmlspecialchars($pd['driver_name']) ?> |
-              <?= htmlspecialchars($pd['origin']) ?> → <?= htmlspecialchars($pd['destination']) ?>
-              <?= $pd['scheduled_at'] ? '| ' . date('M d', strtotime($pd['scheduled_at'])) : '' ?>
-            </option>
-            <?php endforeach; ?>
-          </select>
-          <?php if (empty($pendingDispatches)): ?>
-          <div class="form-text text-warning">
-            <i class="bi bi-info-circle"></i>
-            No approved dispatches without a passed checklist at the moment.
-          </div>
-          <?php endif; ?>
-        </div>
-
-        <p class="mnt-label mb-2">Checklist Items</p>
-        <div class="mnt-checklist-grid mb-3">
-          <?php foreach ($checklistItems as $field => $label): ?>
-          <label class="mnt-check-toggle">
-            <input type="checkbox" class="mnt-check-cb" id="cl_<?= $field ?>" name="<?= $field ?>">
-            <span class="mnt-check-toggle-inner">
-              <i class="bi bi-check-lg"></i>
-            </span>
-            <span class="mnt-check-toggle-label"><?= $label ?></span>
-          </label>
-          <?php endforeach; ?>
-        </div>
-
-        <div id="clResultBanner" class="mnt-result-banner d-none"></div>
-
-        <div class="mt-3">
-          <label class="form-label mnt-label" for="clNotes">Notes (optional)</label>
-          <textarea class="form-control mnt-input" id="clNotes" rows="2"
-            placeholder="Any issues found or remarks…"></textarea>
-        </div>
-      </div>
-      <div class="modal-footer mnt-modal-footer">
-        <button type="button" class="btn btn-mnt-cancel" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-mnt-secondary" id="submitChecklistBtn" disabled>
-          <span id="clBtnText">Submit Checklist</span>
-          <span id="clBtnSpinner" class="spinner-border spinner-border-sm ms-1 d-none"></span>
         </button>
       </div>
     </div>

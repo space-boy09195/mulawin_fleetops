@@ -59,7 +59,7 @@ function requireHelperAssignedToTrip(int $tripId, int $employeeId): void
     }
 }
 
-// Refuses a dispatcher whose assigned scope (truck type and shift) does not
+// Refuses a dispatcher whose assigned scope (truck type) does not
 // cover this trip. Admin, Operations Head and other roles have no scope and
 // pass. A trip outside the scope gets the same 403 as a missing trip.
 function requireTripInDispatcherScope(?string $shift, ?string $truckType): void

@@ -5,7 +5,7 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
-require_once __DIR__ . '/../includes/route_options.php';
+require_once __DIR__ . '/../app/modules/trips/route_options.php';
 
 header('Content-Type: application/json');
 

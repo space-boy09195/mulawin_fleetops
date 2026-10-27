@@ -9,7 +9,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
-require_once __DIR__ . '/../includes/backup.php';
+require_once __DIR__ . '/../app/modules/system/backup.php';
 
 requireLogin();
 if (!isAdmin()) {

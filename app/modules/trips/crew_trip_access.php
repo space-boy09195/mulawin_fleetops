@@ -1,8 +1,8 @@
 <?php
 
-require_once __DIR__ . '/session.php';
-require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/employee_profile.php';
+require_once __DIR__ . '/../../../includes/session.php';
+require_once __DIR__ . '/../../../config/database.php';
+require_once __DIR__ . '/../people/employee_profile.php';
 
 // Helper trip isolation.
 //
@@ -25,7 +25,7 @@ function denyTripAccess(): never
         sendJsonAccessResponse(403, 'You do not have permission to view this trip.');
     }
     http_response_code(403);
-    include __DIR__ . '/../pages/403.php';
+    include __DIR__ . '/../../../pages/403.php';
     exit;
 }
 

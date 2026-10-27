@@ -7,10 +7,10 @@ require_once __DIR__ . '/../includes/soft_delete.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
-require_once __DIR__ . '/../includes/attachments.php';
-require_once __DIR__ . '/../includes/document_storage.php';
-require_once __DIR__ . '/../includes/document_upload.php';
-require_once __DIR__ . '/../includes/upload_validation.php';
+require_once __DIR__ . '/../app/modules/documents/attachments.php';
+require_once __DIR__ . '/../app/modules/documents/document_storage.php';
+require_once __DIR__ . '/../app/modules/documents/document_upload.php';
+require_once __DIR__ . '/../app/modules/documents/upload_validation.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 
 header('Content-Type: application/json');

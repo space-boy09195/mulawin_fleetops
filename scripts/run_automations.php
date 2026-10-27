@@ -5,7 +5,7 @@ if (PHP_SAPI !== 'cli') {
 }
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/app.php';
-require_once __DIR__ . '/../includes/automation_runner.php';
+require_once __DIR__ . '/../app/modules/system/automation_runner.php';
 foreach (runFleetOpsAutomations() as $result) {
     echo json_encode($result, JSON_UNESCAPED_SLASHES) . PHP_EOL;
 }

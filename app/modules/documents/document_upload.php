@@ -6,7 +6,7 @@
 // expiry, visibility) -> document_links (records it belongs to).
 // ============================================================
 
-require_once __DIR__ . '/../config/enums.php';
+require_once __DIR__ . '/../../../config/enums.php';
 require_once __DIR__ . '/attachments.php';
 require_once __DIR__ . '/document_storage.php';
 require_once __DIR__ . '/upload_validation.php';

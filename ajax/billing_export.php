@@ -2,7 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/reporting.php';
-require_once __DIR__ . '/../includes/finance_records.php';
+require_once __DIR__ . '/../app/modules/finance/finance_records.php';
 
 // Exporting needs billing.export; viewing or managing billing is not enough.
 requirePermission('billing.export');

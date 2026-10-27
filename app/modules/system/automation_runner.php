@@ -1,12 +1,12 @@
 <?php
 // Read-only automation runner. Intended for CLI/Task Scheduler, never a page request.
 // Every job is off unless enabled in automation_settings (T-S1 seeds all to '0').
-require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../config/app.php';
-require_once __DIR__ . '/document_storage.php';
+require_once __DIR__ . '/../../../config/database.php';
+require_once __DIR__ . '/../../../config/app.php';
+require_once __DIR__ . '/../documents/document_storage.php';
 require_once __DIR__ . '/expiry_reminders.php';
-require_once __DIR__ . '/notifications.php';
-require_once __DIR__ . '/metrics.php';
+require_once __DIR__ . '/../../../includes/notifications.php';
+require_once __DIR__ . '/../../../includes/metrics.php';
 
 function automationTableExists(PDO $pdo, string $table): bool {
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?");

@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/finance_records.php';
+require_once __DIR__ . '/../app/modules/finance/finance_records.php';
 
 requirePermission('payroll.view');
 $payrollId = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);

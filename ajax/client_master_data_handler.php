@@ -12,7 +12,7 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
-require_once __DIR__ . '/../includes/client_rates.php';
+require_once __DIR__ . '/../app/modules/finance/client_rates.php';
 
 header('Content-Type: application/json');
 requirePermission('clients.manage');

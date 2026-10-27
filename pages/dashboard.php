@@ -2,12 +2,12 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/dispatcher_scope.php';
-require_once __DIR__ . '/../includes/employee_profile.php';
-require_once __DIR__ . '/../includes/dashboard_metrics.php';
-require_once __DIR__ . '/../includes/trip_queries.php';
-require_once __DIR__ . '/../includes/trip_completion.php';
-require_once __DIR__ . '/../includes/home_tasks.php';
+require_once __DIR__ . '/../app/modules/trips/dispatcher_scope.php';
+require_once __DIR__ . '/../app/modules/people/employee_profile.php';
+require_once __DIR__ . '/../app/modules/dashboard/dashboard_metrics.php';
+require_once __DIR__ . '/../app/modules/trips/trip_queries.php';
+require_once __DIR__ . '/../app/modules/trips/trip_completion.php';
+require_once __DIR__ . '/../app/modules/dashboard/home_tasks.php';
 
 requireLogin();
 

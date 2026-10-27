@@ -1,7 +1,7 @@
 <?php
 
-require_once __DIR__ . '/session.php';
-require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../../../includes/session.php';
+require_once __DIR__ . '/../../../config/database.php';
 
 // Dispatcher scope: the truck types a dispatcher may encode.
 //

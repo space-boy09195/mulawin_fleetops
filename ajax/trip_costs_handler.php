@@ -6,7 +6,7 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
-require_once __DIR__ . '/../includes/finance_records.php';
+require_once __DIR__ . '/../app/modules/finance/finance_records.php';
 
 header('Content-Type: application/json');
 requirePermission('finance.manage');

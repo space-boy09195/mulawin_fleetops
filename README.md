@@ -32,19 +32,22 @@ see `includes/session.php` and `config/app.php`.
 
 ```
 ajax/           AJAX endpoint handlers (one per feature area)
+app/modules/    Module helpers: people, inventory, system, dashboard, fleet,
+                maintenance, documents, finance, trips
 assets/         CSS, JS, images
 auth/           Login handling, user seeding
 config/         App constants, DB connection
 db/             Fresh-install database schema and bundled additions
+docs/           Documentation, including the setup guide (instructions.md)
 includes/       Shared helpers: session, CSRF, layout, audit, alerts
-instructions/   Setup and deployment instructions
 pages/          Page controllers/views, one per feature
+resources/views/  Page templates split out of large pages (analytics)
 login.php       Login entry point
 ```
 
 ## Getting started
 
-See [`instructions/instructions.md`](instructions/instructions.md) for detailed
+See [`docs/instructions.md`](docs/instructions.md) for detailed
 requirements, local setup, configuration, system workflows, scheduled jobs,
 and troubleshooting.
 

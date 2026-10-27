@@ -5,7 +5,7 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/notifications.php';
-require_once __DIR__ . '/../includes/trip_completion.php';
+require_once __DIR__ . '/../app/modules/trips/trip_completion.php';
 require_once __DIR__ . '/../includes/workflow_events.php';
 
 header('Content-Type: application/json');

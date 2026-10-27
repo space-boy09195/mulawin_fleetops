@@ -15,7 +15,7 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
 require_once __DIR__ . '/../includes/workflow_events.php';
-require_once __DIR__ . '/../includes/dispatcher_scope.php';
+require_once __DIR__ . '/../app/modules/trips/dispatcher_scope.php';
 
 header('Content-Type: application/json');
 

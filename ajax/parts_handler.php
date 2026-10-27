@@ -20,7 +20,7 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
-require_once __DIR__ . '/../includes/purchasing.php';
+require_once __DIR__ . '/../app/modules/inventory/purchasing.php';
 
 header('Content-Type: application/json');
 

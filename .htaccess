@@ -7,5 +7,5 @@ DirectoryIndex login.php
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    RewriteRule ^(?:\.git|db|config|includes|analytics|scripts|docs|instructions|tests)(?:/|$) - [F,L,NC]
+    RewriteRule ^(?:\.git|db|config|includes|analytics|scripts|docs|instructions|tests|app|resources)(?:/|$) - [F,L,NC]
 </IfModule>

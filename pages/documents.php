@@ -2,7 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/document_upload.php';
+require_once __DIR__ . '/../app/modules/documents/document_upload.php';
 require_once __DIR__ . '/../includes/metrics.php';
 
 requirePermission('documents.view');

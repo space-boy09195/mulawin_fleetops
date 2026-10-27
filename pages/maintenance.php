@@ -3,10 +3,10 @@ require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/enums.php';
-require_once __DIR__ . '/../includes/inspections.php';
-require_once __DIR__ . '/../includes/trip_workflow.php';
-require_once __DIR__ . '/../includes/truck_records.php';
-require_once __DIR__ . '/../includes/document_upload.php';
+require_once __DIR__ . '/../app/modules/maintenance/inspections.php';
+require_once __DIR__ . '/../app/modules/trips/trip_workflow.php';
+require_once __DIR__ . '/../app/modules/fleet/truck_records.php';
+require_once __DIR__ . '/../app/modules/documents/document_upload.php';
 
 requireAnyPermission(['maintenance.view', 'maintenance.manage']);
 $hideMaintenanceEntryButtons = isAdmin() || currentRoleKey() === 'operations_head';

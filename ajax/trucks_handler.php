@@ -6,9 +6,9 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
-require_once __DIR__ . '/../includes/truck_status_history.php';
-require_once __DIR__ . '/../includes/upload_validation.php';
-require_once __DIR__ . '/../includes/truck_records.php';
+require_once __DIR__ . '/../app/modules/fleet/truck_status_history.php';
+require_once __DIR__ . '/../app/modules/documents/upload_validation.php';
+require_once __DIR__ . '/../app/modules/fleet/truck_records.php';
 
 header('Content-Type: application/json');
 

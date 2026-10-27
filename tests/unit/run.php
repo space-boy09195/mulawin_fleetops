@@ -21,15 +21,15 @@ if (!function_exists('currentUserId')) {
 $_SESSION = [];
 
 require_once $root . '/includes/metrics.php';
-require_once $root . '/includes/finance_records.php';
-require_once $root . '/includes/client_rates.php';
-require_once $root . '/includes/recruitment.php';
+require_once $root . '/app/modules/finance/finance_records.php';
+require_once $root . '/app/modules/finance/client_rates.php';
+require_once $root . '/app/modules/people/recruitment.php';
 require_once $root . '/includes/soft_delete.php';
-require_once $root . '/includes/trip_workflow.php';
-require_once $root . '/includes/inspections.php';
+require_once $root . '/app/modules/trips/trip_workflow.php';
+require_once $root . '/app/modules/maintenance/inspections.php';
 require_once $root . '/includes/analytics_period.php';
-require_once $root . '/includes/dashboard_metrics.php';
-require_once $root . '/includes/home_tasks.php';
+require_once $root . '/app/modules/dashboard/dashboard_metrics.php';
+require_once $root . '/app/modules/dashboard/home_tasks.php';
 
 $passed = 0;
 $failed = [];
@@ -218,7 +218,7 @@ same('expiry text: none', '', expiryDaysText(null));
 // ── expiry_reminders.php tiers (objectives 1.3 / 2.7) ───────────────────────
 // The include pulls in config/database.php (reads .env), so only the three
 // pure functions are loaded from the source.
-$reminderSource = (string)file_get_contents($root . '/includes/expiry_reminders.php');
+$reminderSource = (string)file_get_contents($root . '/app/modules/system/expiry_reminders.php');
 preg_match_all('/^function (?:expiryReminderTier|parseExpiryReminderThresholds|expiryDaysPhrase)\b.*?^}/ms', $reminderSource, $reminderFunctions);
 check('reminder tier functions found', count($reminderFunctions[0]) === 3);
 foreach ($reminderFunctions[0] as $functionSource) {
@@ -578,7 +578,7 @@ final class ScopeFakePdo extends PDO {
     }
 }
 
-$scopeSource = preg_replace(['/^<\?php/', '/^require_once [^;]+;\s*$/m'], '', (string)file_get_contents($root . '/includes/dispatcher_scope.php'));
+$scopeSource = preg_replace(['/^<\?php/', '/^require_once [^;]+;\s*$/m'], '', (string)file_get_contents($root . '/app/modules/trips/dispatcher_scope.php'));
 $scopeCopy = 0;
 // Sets up one signed-in user and returns the namespace of a fresh copy.
 $scopeScenario = static function (string $role, array $assignments = [], int $employeeId = 30, array $permissions = []) use ($scopeSource, &$scopeCopy): string {
@@ -756,7 +756,7 @@ same('step 6: incomplete old events do not fail', 'Documents: —. Allowance: �
 // Independent checks this batch must not weaken.
 $maintenanceHandler = (string)file_get_contents($root . '/ajax/maintenance_handler.php');
 $statusHandler = (string)file_get_contents($root . '/ajax/update_trip_status.php');
-$workflowLib = (string)file_get_contents($root . '/includes/trip_workflow.php');
+$workflowLib = (string)file_get_contents($root . '/app/modules/trips/trip_workflow.php');
 check('kept: inspections still need status Assigned and step 6', str_contains($maintenanceHandler, ": (\$trip['status'] === 'Assigned' && \$trip['step'] >= 6);"));
 check('kept: Ready for Dispatch still needs step 6 and passed departure checks', str_contains($workflowLib, "if (tripWorkflowCurrentStep(\$pdo, \$tripId) < 6 || !tripDepartureChecksPassed(\$pdo, \$tripId)) {"));
 check('kept: departure still needs clearance', str_contains($statusHandler, 'Operations Head dispatch clearance is required before the truck can leave.'));
@@ -952,7 +952,7 @@ throws('approval notice: a second decision is refused', fn() => recordApprovalDe
 
 // ── Handoff notifications (includes/workflow_notifications.php) ───────────
 if (!defined('DISPATCHER_SCOPE_KEYS')) {
-    preg_match('/^const DISPATCHER_SCOPE_KEYS = \[.*?^\];/ms', (string)file_get_contents($root . '/includes/dispatcher_scope.php'), $scopeKeysSource);
+    preg_match('/^const DISPATCHER_SCOPE_KEYS = \[.*?^\];/ms', (string)file_get_contents($root . '/app/modules/trips/dispatcher_scope.php'), $scopeKeysSource);
     eval($scopeKeysSource[0]);
 }
 if (!function_exists('notifyTripHandoff')) {
@@ -1251,7 +1251,7 @@ $instructionSource = (string)file_get_contents($root . '/ajax/dispatch_instructi
 check('notify: new instructions go to the matching dispatcher role, not every encoder', str_contains($instructionSource, 'notifyDispatchersForTruckTypes(')
     && !str_contains($instructionSource, "notifyUsersWithPermission(\n            \$pdo,\n            'dispatch.instructions.encode'"));
 
-// ── Home page work items (includes/home_tasks.php) ─────────────────────────
+// ── Home page work items (app/modules/dashboard/home_tasks.php) ─────────────────────────
 $homeNow = strtotime('2026-10-26 18:00:00');
 $homeTrip = static fn(string $status, string $departs = '2026-10-26 20:00:00', int $late = 0): array => [
     'trip_id' => 15, 'trip_number' => 'TRP-2026-0015', 'status' => $status, 'plate_number' => 'NAA 1003',
@@ -1357,8 +1357,8 @@ check('feedback: success message saved before the refresh, dropped when updated 
     && str_contains($layoutJs, "if (await window.softReload()) forgetActionMessage();"));
 check('feedback: saved message shown once, on the same page only', str_contains($layoutJsLf, "forgetActionMessage();\n    if (!saved || saved.page !== window.location.pathname + window.location.search) return;"));
 
-// ── Attendance (includes/attendance.php, ajax/attendance_handler.php) ─────
-require_once $root . '/includes/attendance.php';
+// ── Attendance (app/modules/people/attendance.php, ajax/attendance_handler.php) ─────
+require_once $root . '/app/modules/people/attendance.php';
 same('attendance: all six statuses are selectable', ['Present', 'Late', 'Half Day', 'Absent', 'Leave', 'On Duty'], ATTENDANCE_STATUSES);
 $attendanceNames = [5 => 'Ana Cruz', 6 => 'Ben Reyes'];
 $attendanceRow = static fn(array $extra = []): array => $extra + ['employee_id' => 5, 'status' => 'Present', 'notes' => '', 'expected_status' => '', 'expected_notes' => ''];

@@ -1,9 +1,9 @@
 <?php
 
-require_once __DIR__ . '/document_storage.php';
+require_once __DIR__ . '/../documents/document_storage.php';
 
 function backupRootDirectory(): string {
-    $root = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'backups';
+    $root = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'backups';
     if (!is_dir($root) && !mkdir($root, 0750, true) && !is_dir($root)) {
         throw new RuntimeException('Backup directory could not be created.');
     }

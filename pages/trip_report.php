@@ -2,9 +2,9 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/crew_trip_access.php';
-require_once __DIR__ . '/../includes/trip_queries.php';
-require_once __DIR__ . '/../includes/trip_workflow.php';
+require_once __DIR__ . '/../app/modules/trips/crew_trip_access.php';
+require_once __DIR__ . '/../app/modules/trips/trip_queries.php';
+require_once __DIR__ . '/../app/modules/trips/trip_workflow.php';
 
 // trips.view or billing.view, or a Helper limited to trips assigned to them.
 $helperEmployeeId = tripPageAccess(['trips.view', 'billing.view']);

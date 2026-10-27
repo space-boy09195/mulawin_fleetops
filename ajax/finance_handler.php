@@ -23,10 +23,10 @@ require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/approval_workflow.php';
 require_once __DIR__ . '/../includes/csrf.php';
-require_once __DIR__ . '/../includes/dispatcher_scope.php';
+require_once __DIR__ . '/../app/modules/trips/dispatcher_scope.php';
 require_once __DIR__ . '/../includes/idempotency.php';
 require_once __DIR__ . '/../includes/validate.php';
-require_once __DIR__ . '/../includes/purchasing.php';
+require_once __DIR__ . '/../app/modules/inventory/purchasing.php';
 require_once __DIR__ . '/../includes/workflow_notifications.php';
 
 header('Content-Type: application/json');

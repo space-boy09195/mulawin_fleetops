@@ -4,7 +4,7 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
-require_once __DIR__ . '/../includes/recruitment.php';
+require_once __DIR__ . '/../app/modules/people/recruitment.php';
 
 header('Content-Type: application/json');
 requireAnyPermission(['hr.recruitment.view', 'hr.recruitment.manage']);

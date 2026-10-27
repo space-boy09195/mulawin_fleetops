@@ -2,7 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/finance_records.php';
+require_once __DIR__ . '/../app/modules/finance/finance_records.php';
 
 requireAnyPermission(['finance.view', 'finance.manage']);
 layoutHead('Trip Costs & Crew Pay', APP_BASE . '/assets/css/billing.css');

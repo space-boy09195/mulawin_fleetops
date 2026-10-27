@@ -3,7 +3,7 @@
 // entity_type 'truck' and event_type 'truck_status' (there is no
 // truck_status_history table in the target).
 
-require_once __DIR__ . '/workflow_events.php';
+require_once __DIR__ . '/../../../includes/workflow_events.php';
 
 const TRUCK_STATUS_EVENT_TYPE = 'truck_status';
 

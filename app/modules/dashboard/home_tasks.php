@@ -14,7 +14,7 @@
 // rule). No deadline is invented.
 // ============================================================
 
-require_once __DIR__ . '/trip_workflow.php';
+require_once __DIR__ . '/../trips/trip_workflow.php';
 
 // Trip statuses before the truck leaves; their due time is the scheduled
 // departure.

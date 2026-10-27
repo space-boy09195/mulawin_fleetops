@@ -74,7 +74,7 @@ function currentUserHasActiveEmployee(): bool { return true; }
 
 require_once $repo . '/config/enums.php';
 require_once $repo . '/includes/metrics.php';
-require_once $repo . '/includes/finance_records.php';
+require_once $repo . '/app/modules/finance/finance_records.php';
 
 // Data layer = everything before the first line that is exactly the closing
 // tag, without the opening tag line and require lines.

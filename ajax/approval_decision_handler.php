@@ -21,7 +21,7 @@ require_once __DIR__ . '/../includes/idempotency.php';
 require_once __DIR__ . '/../includes/approval_workflow.php';
 require_once __DIR__ . '/../includes/notifications.php';
 require_once __DIR__ . '/../includes/workflow_notifications.php';
-require_once __DIR__ . '/../includes/purchasing.php';
+require_once __DIR__ . '/../app/modules/inventory/purchasing.php';
 
 header('Content-Type: application/json');
 

@@ -141,7 +141,7 @@ function saveTruckPhotos(PDO $pdo, int $truckId, array $uploads, int $userId): v
         if (!preg_match('~^uploads/trucks/([0-9a-f]{32}\.(?:jpg|png|webp))$~', $path, $m)) {
             throw new InvalidArgumentException('Invalid truck photo path.');
         }
-        $absolute = dirname(__DIR__) . '/' . $path;
+        $absolute = dirname(__DIR__, 3) . '/' . $path;
         $pdo->prepare(
             'INSERT INTO files (original_name, stored_name, storage_path, mime_type, file_size, checksum, uploaded_by)
              VALUES (?, ?, ?, ?, ?, ?, ?)'

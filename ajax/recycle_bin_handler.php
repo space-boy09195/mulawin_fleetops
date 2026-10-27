@@ -11,7 +11,7 @@ require_once __DIR__ . '/../includes/soft_delete.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
-require_once __DIR__ . '/../includes/document_storage.php';
+require_once __DIR__ . '/../app/modules/documents/document_storage.php';
 
 header('Content-Type: application/json');
 

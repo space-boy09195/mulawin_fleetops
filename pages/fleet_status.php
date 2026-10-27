@@ -9,8 +9,8 @@ require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/enums.php';
-require_once __DIR__ . '/../includes/truck_records.php';
-require_once __DIR__ . '/../includes/trip_queries.php';
+require_once __DIR__ . '/../app/modules/fleet/truck_records.php';
+require_once __DIR__ . '/../app/modules/trips/trip_queries.php';
 require_once __DIR__ . '/../includes/metrics.php';
 
 requirePermission('fleet.view');

@@ -14,7 +14,7 @@ require_once __DIR__ . '/../config/enums.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
-require_once __DIR__ . '/../includes/truck_status_history.php';
+require_once __DIR__ . '/../app/modules/fleet/truck_status_history.php';
 
 header('Content-Type: application/json');
 

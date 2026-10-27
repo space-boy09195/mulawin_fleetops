@@ -6,7 +6,7 @@ require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
 require_once __DIR__ . '/../includes/app_settings.php';
-require_once __DIR__ . '/../includes/employee_profile.php';
+require_once __DIR__ . '/../app/modules/people/employee_profile.php';
 
 header('Content-Type: application/json');
 

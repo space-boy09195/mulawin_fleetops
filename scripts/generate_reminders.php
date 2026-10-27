@@ -7,8 +7,8 @@ if (PHP_SAPI !== 'cli') {
 
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/expiry_reminders.php';
-require_once __DIR__ . '/../includes/automation_runner.php';
+require_once __DIR__ . '/../app/modules/system/expiry_reminders.php';
+require_once __DIR__ . '/../app/modules/system/automation_runner.php';
 
 // Each run is recorded in automation_runs (job 'expiry_reminders', the same
 // key the automation runner uses). Safe to repeat: reminder_deliveries keeps

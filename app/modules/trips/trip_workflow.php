@@ -28,8 +28,8 @@
 // functions, which serializes all workflow writes for one trip.
 // ============================================================
 
-require_once __DIR__ . '/workflow_events.php';
-require_once __DIR__ . '/../config/enums.php';
+require_once __DIR__ . '/../../../includes/workflow_events.php';
+require_once __DIR__ . '/../../../config/enums.php';
 
 const TRIP_WORKFLOW_STEPS = [
     'request-prepared'                 => 1,

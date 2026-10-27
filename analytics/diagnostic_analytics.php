@@ -21,7 +21,7 @@
 //
 
 require_once __DIR__ . '/prescriptive_analytics.php';
-require_once __DIR__ . '/../includes/finance_records.php';
+require_once __DIR__ . '/../app/modules/finance/finance_records.php';
 
 function getDiagnosticAlerts(PDO $pdo, array $metrics, string $periodLabel): array {
     $alerts = [];

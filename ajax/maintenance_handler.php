@@ -15,10 +15,10 @@ require_once __DIR__ . '/../includes/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
 require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/db_helpers.php';
-require_once __DIR__ . '/../includes/truck_status_history.php';
-require_once __DIR__ . '/../includes/trip_workflow.php';
-require_once __DIR__ . '/../includes/inspections.php';
-require_once __DIR__ . '/../includes/document_upload.php';
+require_once __DIR__ . '/../app/modules/fleet/truck_status_history.php';
+require_once __DIR__ . '/../app/modules/trips/trip_workflow.php';
+require_once __DIR__ . '/../app/modules/maintenance/inspections.php';
+require_once __DIR__ . '/../app/modules/documents/document_upload.php';
 require_once __DIR__ . '/../includes/workflow_notifications.php';
 
 header('Content-Type: application/json');

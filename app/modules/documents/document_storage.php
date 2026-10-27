@@ -1,6 +1,6 @@
 <?php
 
-require_once __DIR__ . '/../config/app.php';
+require_once __DIR__ . '/../../../config/app.php';
 
 function documentStorageDirectory(): string {
     $configuredPath = (string)DOCUMENT_STORAGE_PATH;
@@ -11,7 +11,7 @@ function documentStorageDirectory(): string {
     $path = str_starts_with($configuredPath, DIRECTORY_SEPARATOR)
         || preg_match('/^[A-Za-z]:[\\\\\\/]/', $configuredPath)
         ? $configuredPath
-        : dirname(__DIR__) . DIRECTORY_SEPARATOR . $configuredPath;
+        : dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . $configuredPath;
     $path = rtrim($path, '\\/');
     if (!is_dir($path) && !mkdir($path, 0750, true) && !is_dir($path)) {
         throw new RuntimeException('Document storage directory could not be created.');
@@ -41,7 +41,7 @@ function documentStorageFile(string $storedName, ?string $legacyReference = null
     }
 
     if ($legacyReference !== null && str_starts_with($legacyReference, 'uploads/')) {
-        $legacyFile = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . $storedName;
+        $legacyFile = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . $storedName;
         if (is_file($legacyFile)) {
             return $legacyFile;
         }

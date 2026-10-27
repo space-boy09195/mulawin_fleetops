@@ -63,7 +63,7 @@ const E2E_COPY_MUST_MATCH = [
     'includes/approval_workflow.php',
     'includes/audit.php',
     'includes/csrf.php',
-    'includes/dispatcher_scope.php',
+    'app/modules/trips/dispatcher_scope.php',
     'includes/env.php',
     'includes/idempotency.php',
     'includes/notifications.php',

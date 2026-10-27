@@ -23,9 +23,9 @@
 // fixed aliases, values always bound as parameters).
 // ============================================================
 
-require_once __DIR__ . '/metrics.php';
-require_once __DIR__ . '/finance_records.php';
-require_once __DIR__ . '/../config/enums.php';
+require_once __DIR__ . '/../../../includes/metrics.php';
+require_once __DIR__ . '/../finance/finance_records.php';
+require_once __DIR__ . '/../../../config/enums.php';
 
 const MAINTENANCE_OPEN_STATUSES = ['Reported', 'Scheduled', 'In Progress', 'Waiting for Parts'];
 // TRUCK_STATUSES (target trucks.status ENUM) comes from config/enums.php.

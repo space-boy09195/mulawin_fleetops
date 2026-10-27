@@ -5,7 +5,7 @@ exit;
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/recruitment.php';
+require_once __DIR__ . '/../app/modules/people/recruitment.php';
 
 requireAnyPermission(['hr.recruitment.view', 'hr.recruitment.manage']);
 $pdo = getDBConnection();

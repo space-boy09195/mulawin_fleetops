@@ -22,10 +22,10 @@ require_once __DIR__ . '/../includes/validate.php';
 require_once __DIR__ . '/../includes/approval_workflow.php';
 require_once __DIR__ . '/../includes/notifications.php';
 require_once __DIR__ . '/../includes/idempotency.php';
-require_once __DIR__ . '/../includes/dispatch_assignment.php';
-require_once __DIR__ . '/../includes/truck_status_history.php';
-require_once __DIR__ . '/../includes/trip_workflow.php';
-require_once __DIR__ . '/../includes/trip_queries.php';
+require_once __DIR__ . '/../app/modules/trips/dispatch_assignment.php';
+require_once __DIR__ . '/../app/modules/fleet/truck_status_history.php';
+require_once __DIR__ . '/../app/modules/trips/trip_workflow.php';
+require_once __DIR__ . '/../app/modules/trips/trip_queries.php';
 
 header('Content-Type: application/json');
 

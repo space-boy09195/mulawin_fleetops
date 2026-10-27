@@ -56,7 +56,7 @@ Pinag-iisa nito sa iisang system ang mga gawain na dati ay hiwa-hiwalay (halimba
 | **Billing at Collections** | Paggawa ng billing para sa natapos na trip at pagtala ng bayad ng kliyente. |
 | **Finance** | Fund request (kasama ang Trip Allowance at Cash Advance), approval, disbursement, accounts payable, at payment voucher. |
 | **Payroll** | Pagtala ng periodic salary payment at hiwalay na per-trip na sahod ng driver/helper (Trip Pay). |
-| **Tao at Records** | Attendance, user at employee records, mga dokumento, kliyente, office supplies, recruitment (Admin lang). |
+| **Tao at Records** | Attendance, user at employee records, mga dokumento, kliyente, at office supplies. (Naka-disable ang Recruitment page; tingnan ang 4.28.) |
 | **Reports at Analytics** | Fleet Overview, Billing & Collections Analytics, Maintenance Analytics, Dispatcher Reports, Operations Maintenance Report, at Audit History. |
 | **Suporta** | Notification bell, announcements, approvals, audit log, recycle bin, at backup. |
 
@@ -187,7 +187,7 @@ Ang bawat hakbang ay nakatala sa `workflow_events` (Kabanata 5.2) [CODE].
 | **Driver** (`driver`) | trips.complete *(naka-grant pa, pero wala na itong naibibigay na kakayahan; tingnan ang 5.3)* |
 | **Helper** (`helper`) | *(wala)* |
 
-> Ang mga grant na ito ay galing sa test database. Puwedeng baguhin ng Admin ang role permissions sa `pages/permissions.php` (Admin lang, wala sa sidebar), kaya **suriin muli ang aktuwal na database** bago umasa sa talahanayang ito.
+> Ang mga grant na ito ay galing sa test database. Naka-disable ang `pages/permissions.php` (404 sa code), kaya walang page sa system para baguhin ang mga grant na ito; puwede pa rin itong magbago sa database, kaya **suriin muli ang aktuwal na database** bago umasa sa talahanayang ito.
 
 ### 3.3 Ano ang ginagawa ng bawat role sa workflow
 
@@ -239,13 +239,13 @@ Magkahiwalay ang dalawang ito:
 | Purchase requests needing attention | `purchasing.view` |
 | Audit counts (7 araw) | `audit.view` |
 
-  - **Work to Address**: mga gawaing para sa iyo, binubuo mula sa *kasalukuyang* status ng mga record (`includes/home_tasks.php`).
+  - **Work to Address**: mga gawaing para sa iyo, binubuo mula sa *kasalukuyang* status ng mga record (`app/modules/dashboard/home_tasks.php`).
   - Listahan ng active trips. Para sa driver o helper, ang mga trip na naka-assign sa kanila.
   - Quick actions.
 - **Saan galing ang data:**
-  - `dashboardActiveTripCount()`: mga trip na nasa `Assigned`, `Ready for Dispatch`, `Dispatched` o `In Progress` (`TRIP_ACTIVE_STATUSES`, `includes/metrics.php:23`).
+  - `dashboardActiveTripCount()`: mga trip na nasa `Assigned`, `Ready for Dispatch`, `Dispatched` o `In Progress` (`TRIP_ACTIVE_STATUSES`, `app/shared/metrics.php:23`).
   - `dashboardFleetCounts()`: bilang ng `trucks` ayon sa status.
-  - `dashboardReceivables()`: billing na Issued, Partially Paid o Overdue, ang `total_amount` bawas ang nakolekta, kung higit sa 0 (`includes/dashboard_metrics.php:212`).
+  - `dashboardReceivables()`: billing na Issued, Partially Paid o Overdue, ang `total_amount` bawas ang nakolekta, kung higit sa 0 (`app/modules/dashboard/dashboard_metrics.php:212`).
 - **Paano malalaman na successful:** read-only ang pahinang ito. Kusang nawawala ang item sa "Work to Address" kapag tapos na ang gawain.
 - **Hindi nito ginagawa:** hindi ito analytics. Ang mga numero ay "ngayon", hindi para sa isang period.
 
@@ -263,7 +263,7 @@ Magkahiwalay ang dalawang ito:
   - Dispatch: `ajax/review_dispatch.php`.
   - Route: `ajax/route_request_handler.php` (`review`).
   - Iba pa: `ajax/approval_decision_handler.php`.
-  - Lahat ay dumadaan sa `recordApprovalDecision()` (`includes/approval_workflow.php:335`), na nag-a-update ng `approval_steps`, `approval_requests` at `approval_history`.
+  - Lahat ay dumadaan sa `recordApprovalDecision()` (`app/core/approval_workflow.php:335`), na nag-a-update ng `approval_steps`, `approval_requests` at `approval_history`.
   - Kapag huling step na, ipinapatupad ang desisyon sa mismong record (hal. `applyPurchaseRequestDecision()`).
 - **Mga aprobador ayon sa workflow** [DB]:
 
@@ -286,7 +286,7 @@ Magkahiwalay ang dalawang ito:
 - **Makikita:** plate, unit, type, status, at mga truck document (OR, CR, Insurance) na may expiry (`truck_documents`).
 - **Status ng truck** (`trucks.status`): `Available`, `Assigned`, `On Trip`, `Under Maintenance`, `Unavailable`.
 - **Koneksyon:**
-  - Ginagawang `Assigned` ng approval ng dispatch (`reserveTruckForTrip()`, `includes/dispatch_assignment.php:108`).
+  - Ginagawang `Assigned` ng approval ng dispatch (`reserveTruckForTrip()`, `app/modules/trips/dispatch_assignment.php:108`).
   - Ginagawang `On Trip` ng departure.
   - Ibinabalik sa `Available` ng completion o cancel (`releaseTruckForTrip()`).
   - Ginagawang `Under Maintenance` at pabalik ang work order.
@@ -408,7 +408,7 @@ Magkahiwalay ang dalawang ito:
 - **Layunin:** gumawa ng billing para sa natapos na trip at magtala ng bayad.
 - **Sino:** tingin `billing.view` o `billing.manage`; gawa `billing.manage` (Billing and Collection); export `billing.export`.
 - **Makikita:**
-  - Listahan ng billings na may *display status*: ang hindi pa bayad na lampas na sa due date ay ipinapakitang **Overdue**, kahit iba ang naka-save (`billingDisplayStatusSql()`, `includes/finance_records.php:55-60`).
+  - Listahan ng billings na may *display status*: ang hindi pa bayad na lampas na sa due date ay ipinapakitang **Overdue**, kahit iba ang naka-save (`billingDisplayStatusSql()`, `app/modules/finance/finance_records.php:55-60`).
   - Balance.
   - "Unbilled" tab: mga `Completed` trip na walang billing (`pages/billing.php:132-144`).
   - Iba pang buod ayon sa period.
@@ -514,9 +514,9 @@ Fleet Overview, Billing & Collections Analytics, at Maintenance Analytics. Buong
 | Page | Paano mabubuksan | Sino |
 |---|---|---|
 | `pages/analytics.php` (pinagsamang analytics) | URL lang | Tingnan ang Kabanata 7 |
-| `pages/recruitment.php` | URL lang | `hr.recruitment.*` (Admin) |
-| `pages/permissions.php` | URL lang | `permissions.manage` (Admin) |
-| `pages/automation.php` | URL lang | Admin |
+| `pages/recruitment.php` | Naka-disable: nagbabalik ng 404 sa lahat (pati Admin) | — |
+| `pages/permissions.php` | Naka-disable: nagbabalik ng 404 sa lahat (pati Admin) | — |
+| `pages/automation.php` | Naka-disable: nagbabalik ng 404 sa lahat (pati Admin) | — |
 | `pages/announcements.php` | Link sa layout | Lahat (Admin ang namamahala) |
 | `pages/dashboard_*.php` (5 role dashboards) | URL lang; hindi ginagamit bilang landing | ayon sa permission |
 | `pages/operations_performance.php`, `pages/maintenance_reports.php` | Redirect papunta sa Fleet Overview at Maintenance Analytics | — |
@@ -545,7 +545,7 @@ Fleet Overview, Billing & Collections Analytics, at Maintenance Analytics. Buong
 
 ### 5.2 Trip lifecycle (13 steps) — *End-to-end [CODE]*
 
-Ang mga step ay nakatala bilang `workflow_events.event_type` (`includes/trip_workflow.php:34-50`).
+Ang mga step ay nakatala bilang `workflow_events.event_type` (`app/modules/trips/trip_workflow.php:34-50`).
 
 | Step | event_type | Sino | Status bago → pagkatapos |
 |---|---|---|---|
@@ -587,7 +587,7 @@ stateDiagram-v2
 - **Bago ang Step 9 (pag-alis):**
   - walang clearance;
   - may departure item na hindi pasado;
-  - may Trip Allowance na `Pending Approval`, `Approved`, `Processing` o `Settled`, ibig sabihin hindi pa `Disbursed` (`TRIP_ALLOWANCE_DEPARTURE_BLOCKING_STATUSES`, `includes/trip_workflow.php:205`).
+  - may Trip Allowance na `Pending Approval`, `Approved`, `Processing` o `Settled`, ibig sabihin hindi pa `Disbursed` (`TRIP_ALLOWANCE_DEPARTURE_BLOCKING_STATUSES`, `app/modules/trips/trip_workflow.php:205`).
 - **Bago ang Delivered:** walang progress update o delivery details.
 - **Bago ang Completed:** hindi kumpleto ang arrival inspection, o wala pa sa step 12.
 
@@ -664,7 +664,7 @@ flowchart LR
 1. **Create order** (Purchasing Officer):
    - sabay na gumagawa ng `purchase_requests` (`Pending Approval`) at `purchase_orders` (`Draft`) na may items;
    - gumagawa rin ng approval request para sa Admin.
-2. **Admin approve:** PR → `Approved` → `Ordered`; PO → `Issued`. Kapag reject: PR `Rejected`, PO `Cancelled` (`includes/purchasing.php`, `applyPurchaseRequestDecision()`).
+2. **Admin approve:** PR → `Approved` → `Ordered`; PO → `Issued`. Kapag reject: PR `Rejected`, PO `Cancelled` (`app/modules/inventory/purchasing.php`, `applyPurchaseRequestDecision()`).
 3. **Receive order:**
    - `purchase_receipts`;
    - `inventory_transactions` (`Stock In`);
@@ -686,9 +686,9 @@ flowchart LR
 ### 5.11 Notifications, audit, announcements — *Supporting [CODE]*
 
 - **Notification:** naka-save sa `notifications` (`is_read`, `read_at`). Ang bell ay nagpapakita ng huling 50 (nabasa man o hindi). Ang badge ay bilang ng hindi pa nababasa (`includes/layout.php:185-212`).
-- **Paano nire-resolve ang notice:** kapag natapos ang kaugnay na gawain, ginagawang read ang lahat ng kopya nito (`resolveNotifications()`, `includes/notifications.php:135-146`). **Walang binubura.**
+- **Paano nire-resolve ang notice:** kapag natapos ang kaugnay na gawain, ginagawang read ang lahat ng kopya nito (`resolveNotifications()`, `app/core/notifications.php:135-146`). **Walang binubura.**
 - **Clear button:** ginagawang read ang lahat ng notification mo. Hindi nito tinatapos ang mga gawain; nasa "Work to Address" pa rin ang mga iyon.
-- **Batch na "Dispatch list ready":** walang instruction ID ang notice na ito. Ginagawa itong read para sa isang dispatcher role kapag wala nang bukas na instruction (`Pending` at may scheduled departure) sa alinmang truck type ng role na iyon, pagkatapos ng encode o cancel (`resolveDispatchListNotices()`, `includes/workflow_notifications.php`).
+- **Batch na "Dispatch list ready":** walang instruction ID ang notice na ito. Ginagawa itong read para sa isang dispatcher role kapag wala nang bukas na instruction (`Pending` at may scheduled departure) sa alinmang truck type ng role na iyon, pagkatapos ng encode o cancel (`resolveDispatchListNotices()`, `app/core/workflow_notifications.php`).
 - **Kilalang gap:** walang per-item na "mark as read" kapag pinindot ang notice.
 - **Audit:** `auditLog()` ay sumusulat sa `audit_logs` (bago at pagkatapos na values) para sa karamihan ng write action. Ang Admin override ay may sariling audit (8.3).
 - **Announcements:** nagpo-post ang Admin. May audience (`all`, `maintenance`, `accounting`, `operations`) at petsa ng simula at wakas.
@@ -817,7 +817,7 @@ flowchart LR
 
 > **Paalala:** ang file ay `analytics_expenses.php`, pero **walang expense** dito. Billings at collections lang.
 
-**"Eligible billing"** = `status IN ('Issued','Partially Paid','Paid','Overdue')` (`billingRevenueSql()`, `includes/finance_records.php:30,47`).
+**"Eligible billing"** = `status IN ('Issued','Partially Paid','Paid','Overdue')` (`billingRevenueSql()`, `app/modules/finance/finance_records.php:30,47`).
 
 | Elemento | Kalkulasyon | Petsa | Tandaan |
 |---|---|---|---|
@@ -833,7 +833,7 @@ flowchart LR
 
 ### 7.5 Maintenance Analytics (section `maintenance`)
 
-**Maintenance date** = `COALESCE(actual_completion_date, start_date, scheduled_date, DATE(created_at))` (`maintenanceRecordDateSql()`, `includes/finance_records.php:62-65`).
+**Maintenance date** = `COALESCE(actual_completion_date, start_date, scheduled_date, DATE(created_at))` (`maintenanceRecordDateSql()`, `app/modules/finance/finance_records.php:62-65`).
 
 | Elemento | Kalkulasyon | Tandaan |
 |---|---|---|
@@ -862,8 +862,8 @@ Lahat ng section na pinapayagan sa user, na may tabs, at pamagat na "Analytics".
 | # | Ano ang ginagawa ng code | Bakit magkaiba ang numero | Pagtatasa | Desisyong kailangan bago baguhin |
 |---|---|---|---|---|
 | 1 | **Overdue:** analytics = naka-save na `Overdue`. Billing page at Home = hindi pa bayad at lampas sa `due_date` (`billingDisplayStatusSql()`, `dashboardReceivables()`). | Walang code na nagse-save ng `Overdue`, kaya kadalasang 0 ito sa analytics pero may bilang sa Billing | **Hindi pa nalulutas** | Alin ang opisyal na depinisyon ng overdue? |
-| 2 | **Collections:** analytics = hindi kasama ang bayad sa Cancelled na billing. `dashboardBilledCollected()` = lahat ng bayad (`includes/dashboard_metrics.php:233-246`) | Kung may bayad sa na-cancel na billing | Mukhang sinadya; maliit ang epekto | Kasama ba ang bayad sa cancelled na billing? |
-| 3 | **Maintenance cost:** analytics = **Completed** lang. Home, dashboards at Operations Maintenance Report = **lahat ng hindi Cancelled** (`dashboardMaintenanceCost()`, `includes/dashboard_metrics.php:249`) | Kasama sa huli ang gastos ng bukas pang trabaho | Kaduda-duda | Aktuwal na gastos lang ba, o pati tantiya? |
+| 2 | **Collections:** analytics = hindi kasama ang bayad sa Cancelled na billing. `dashboardBilledCollected()` = lahat ng bayad (`app/modules/dashboard/dashboard_metrics.php:233-246`) | Kung may bayad sa na-cancel na billing | Mukhang sinadya; maliit ang epekto | Kasama ba ang bayad sa cancelled na billing? |
+| 3 | **Maintenance cost:** analytics = **Completed** lang. Home, dashboards at Operations Maintenance Report = **lahat ng hindi Cancelled** (`dashboardMaintenanceCost()`, `app/modules/dashboard/dashboard_metrics.php:249`) | Kasama sa huli ang gastos ng bukas pang trabaho | Kaduda-duda | Aktuwal na gastos lang ba, o pati tantiya? |
 | 4 | **Departure vs schedule:** may sariling petsa ang bawat KPI ng trip | Magkaiba ang kabuuan | Sinadya (may paliwanag sa panel) | — |
 | 5 | **"Open" vs "Active":** ang doughnut ay lahat ng hindi Completed o Cancelled. Ang Home "Active trips" ay Assigned, Ready for Dispatch, Dispatched at In Progress lang | Magkaiba ang bilang | Sinadya, pero nakalilito | Alin ang tawag na "aktibo"? |
 | 6 | **Label na "now"** sa Waiting for parts at In progress, pero nakatali sa period | Puwedeng hindi makita ang lumang record na bukas pa | **Nakaliligaw na label** | Snapshot ba o period? |
@@ -900,21 +900,21 @@ Lahat ng section na pinapayagan sa user, na may tabs, at pamagat na "Analytics".
 
 - **CSRF token** sa bawat POST (`enforceCsrf()`).
 - **POST lang** sa mga write handler (`requirePostMethod()`).
-- **Validation helpers** (`includes/validate.php`): `requiredInt`, `requiredDate`, `requiredEnum`, at iba pa. Ibinabalik nila ang malinaw na mensahe.
+- **Validation helpers** (`app/shared/validate.php`): `requiredInt`, `requiredDate`, `requiredEnum`, at iba pa. Ibinabalik nila ang malinaw na mensahe.
 - **Transaction + row lock** (`FOR UPDATE`): para hindi magulo kapag sabay ang dalawang user.
 - **Idempotency keys** (`idempotency_requests`): hindi madodoble ang dispatch, approval, disbursement at trip update kapag dalawang beses napindot.
 - **Output escaping** (`htmlspecialchars`) sa mga pahina.
-- **CSV injection protection:** nilalagyan ng apostrophe ang mga value na nagsisimula sa `= + - @` (`includes/reporting.php`).
+- **CSV injection protection:** nilalagyan ng apostrophe ang mga value na nagsisimula sa `= + - @` (`app/shared/reporting.php`).
 
 ### 8.3 Admin override at audit
 
 - Kapag ang Admin ay gumawa ng hakbang na para sa iba, gaya ng pag-update ng trip na isinumite ng ibang dispatcher o pag-apruba ng sariling request, **kailangan ng override reason** (1-500 character).
-- Nagtatala ito ng hiwalay na audit (`adminOverrideBegin()`, `adminOverrideSucceeded()` at `adminOverrideRefused()` sa `includes/audit.php:182-365`).
+- Nagtatala ito ng hiwalay na audit (`adminOverrideBegin()`, `adminOverrideSucceeded()` at `adminOverrideRefused()` sa `app/core/audit.php:182-365`).
 
 ### 8.4 Dispatcher scope
 
 - May nakatalagang **shift** (Day/Night) at **truck type** ang bawat dispatcher (`dispatcher_assignments`).
-- Ang mga trip na labas dito ay tinatanggihan ("…scope…", `includes/dispatcher_scope.php`).
+- Ang mga trip na labas dito ay tinatanggihan ("…scope…", `app/modules/trips/dispatcher_scope.php`).
 - Ang Car Carrier Dispatcher ay para sa Car Carrier; ang Container & Wing Van Dispatcher ay para sa Container at Wing Van.
 
 ### 8.5 Kapag tinanggihan ang access
@@ -1039,7 +1039,7 @@ Sa bawat hakbang, ang card na "What should I do next?" sa Trip Workflow ay nagsa
 | **Ipinatupad (may ebidensya sa code)** | Login, roles at permissions; dispatch → approval → 13-step trip; inspections na may timer; work orders at PM; parts at purchasing na may approval; billing at collections; fund request, voucher at disbursement; Trip Pay; payroll recording; attendance; documents; clients at rates; analytics (3 page); CSV exports; audit, recycle bin at backup |
 | **Partial** | Payroll (walang approval); notifications (walang per-item read); trip documents (walang sapilitang uri) |
 | **Hindi na ginagamit (natira sa lumang feature)** | Driver/Helper trip-completion report: tinatanggihan ng handler, hindi nilo-load ang `assets/js/dashboard_trip_completion.js`, at wala nang naibibigay ang `trips.complete` ng Driver |
-| **Nakikita pero hindi buong konektado** | `pages/analytics.php` (URL lang); `pages/recruitment.php`, `pages/permissions.php`, `pages/automation.php` (wala sa sidebar); 5 role dashboard (hindi landing) |
+| **Nakikita pero hindi buong konektado** | `pages/analytics.php` (URL lang); `pages/recruitment.php`, `pages/permissions.php`, `pages/automation.php` (naka-disable: 404 sa simula ng file; nandoon pa ang AJAX handler nila); 5 role dashboard (hindi landing) |
 | **Nasa database, walang patunay na ginagamit** | `cash_advance_liquidations`, `payslips` (hindi sinusulatan), `budgets` (may handler pero walang page na tumatawag), `v_completed_unbilled_trips`, `v_low_stock_parts`, `client_nominations` |
 | **Legacy, duplicate o hindi ginagamit** | `analytics/*.php`, `includes/alerts.php`, `includes/recommendations.php` (hindi tinatawag); `pages/create_analytics.php` (sira); `pages/test.txt` |
 | **Hindi ipinatupad / labas sa saklaw** | GPS tracking; forecast; awtomatikong statutory deductions; PDF/Excel export; liquidation |
@@ -1056,16 +1056,16 @@ Sa bawat hakbang, ang card na "What should I do next?" sa Trip Workflow ay nagsa
 | `includes/session.php` | Session, `requireLogin` (83), `requireRole` (191), `requirePermission` (207), `requireAnyPermission` (219), `currentUserHasAnyPermission` (231), `ROLE_KEY_DASHBOARDS` (307) |
 | `auth/login_handler.php` | Login (throttle 16-18), logout (158-177) |
 | `includes/layout.php` | `getNavItems()`, `navItemVisible()` (92), bell (185-212), `layoutHead`, `layoutFoot` |
-| `includes/notifications.php`, `includes/workflow_notifications.php` | Paggawa at pag-resolve ng notification |
-| `includes/approval_workflow.php` | `createApprovalRequest` (214), `recordApprovalDecision` (335), `cancelApprovalRequest` (473) |
-| `includes/trip_workflow.php` | Mga step (34-50), allowance blocker (205-243), `recordPreDepartureReadyIfComplete` (250), `tripNextAction` (392-508) |
-| `includes/dispatch_assignment.php` | `reserveTruckForTrip` (108), `releaseTruckForTrip` (133) |
-| `includes/finance_records.php` | `BILLING_REVENUE_STATUSES` (30), `OPERATING_EXPENSE_TYPES` (35), `billingRevenueSql` (47), `billingDisplayStatusSql` (55), `maintenanceRecordDateSql` (62) |
-| `includes/metrics.php` | Mga status set ng trip (22-24), late, on-time at overdue rules |
-| `includes/dashboard_metrics.php` | Mga card ng Home |
-| `includes/analytics_period.php` | `bucketExpr`, `buildBuckets`, `qRange` |
+| `app/core/notifications.php`, `app/core/workflow_notifications.php` | Paggawa at pag-resolve ng notification |
+| `app/core/approval_workflow.php` | `createApprovalRequest` (214), `recordApprovalDecision` (335), `cancelApprovalRequest` (473) |
+| `app/modules/trips/trip_workflow.php` | Mga step (34-50), allowance blocker (205-243), `recordPreDepartureReadyIfComplete` (250), `tripNextAction` (392-508) |
+| `app/modules/trips/dispatch_assignment.php` | `reserveTruckForTrip` (108), `releaseTruckForTrip` (133) |
+| `app/modules/finance/finance_records.php` | `BILLING_REVENUE_STATUSES` (30), `OPERATING_EXPENSE_TYPES` (35), `billingRevenueSql` (47), `billingDisplayStatusSql` (55), `maintenanceRecordDateSql` (62) |
+| `app/shared/metrics.php` | Mga status set ng trip (22-24), late, on-time at overdue rules |
+| `app/modules/dashboard/dashboard_metrics.php` | Mga card ng Home |
+| `app/shared/analytics_period.php` | `bucketExpr`, `buildBuckets`, `qRange` |
 | `pages/analytics.php` | Lahat ng analytics query (`:191-696`) |
-| `includes/audit.php` | `auditLog`, Admin override (182-365) |
+| `app/core/audit.php` | `auditLog`, Admin override (182-365) |
 | `config/app.php` | `SESSION_TIMEOUT`, inspection minimums (25, 30, 31) |
 
 ### 12.2 Mga handler

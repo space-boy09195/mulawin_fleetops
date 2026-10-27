@@ -32,14 +32,18 @@ see `includes/session.php` and `config/app.php`.
 
 ```
 ajax/           AJAX endpoint handlers (one per feature area)
+app/core/       Cross-cutting services: audit, notifications, approvals,
+                workflow events, idempotency, soft delete, app settings
 app/modules/    Module helpers: people, inventory, system, dashboard, fleet,
                 maintenance, documents, finance, trips
+app/shared/     Shared helpers: validation, DB helpers, metrics, reporting,
+                analytics periods
 assets/         CSS, JS, images
 auth/           Login handling, user seeding
 config/         App constants, DB connection
 db/             Fresh-install database schema and bundled additions
 docs/           Documentation, including the setup guide (instructions.md)
-includes/       Shared helpers: session, CSRF, layout, audit, alerts
+includes/       Request bootstrap: session and access checks, CSRF, layout, .env loader
 pages/          Page controllers/views, one per feature
 resources/views/  Page templates split out of large pages (analytics)
 login.php       Login entry point

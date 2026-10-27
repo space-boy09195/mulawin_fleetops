@@ -4,6 +4,7 @@
 // Shown when a user tries to access a page their role can't see
 // ============================================================
 require_once __DIR__ . '/../includes/session.php';
+require_once __DIR__ . '/../includes/csrf.php'; // csrfInput() for the logout form; callers may not have loaded it
 ?>
 <!DOCTYPE html>
 <html lang="en">

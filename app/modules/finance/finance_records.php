@@ -24,7 +24,7 @@
 //                      dated by completion / start / scheduled / created
 // ============================================================
 
-require_once __DIR__ . '/../../../includes/metrics.php';
+require_once __DIR__ . '/../../shared/metrics.php';
 
 const TRIP_PAY_TYPES = ['Driver' => 'Driver Trip Pay', 'Helper' => 'Helper Trip Pay'];
 const BILLING_REVENUE_STATUSES = ['Issued', 'Partially Paid', 'Paid', 'Overdue'];

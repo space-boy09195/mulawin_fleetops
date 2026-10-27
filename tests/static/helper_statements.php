@@ -7,7 +7,7 @@
 // Usage: php helper_statements.php <out.php>
 // ============================================================
 $root = dirname(__DIR__, 2);
-require_once $root . '/includes/metrics.php';
+require_once $root . '/app/shared/metrics.php';
 require_once $root . '/app/modules/finance/finance_records.php';
 require_once $root . '/app/modules/trips/trip_queries.php';
 require_once $root . '/app/modules/people/employee_profile.php';

@@ -50,7 +50,7 @@ function layoutHead(...$a): void {}
 function isValidDate(string $d): bool { return (bool)preg_match('/^\d{4}-\d{2}-\d{2}$/', $d); }
 function currentUserHasActiveEmployee(): bool { return true; }
 
-require_once $repo . '/includes/metrics.php';
+require_once $repo . '/app/shared/metrics.php';
 require_once $repo . '/app/modules/finance/finance_records.php';
 foreach ((array)($GLOBALS['__extra_includes'] ?? []) as $inc) require_once $inc;
 $extra = getenv('CAPTURE_INCLUDES');

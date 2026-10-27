@@ -1,9 +1,9 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/audit.php';
+require_once __DIR__ . '/../app/core/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
-require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../app/shared/validate.php';
 require_once __DIR__ . '/../app/modules/people/recruitment.php';
 
 header('Content-Type: application/json');

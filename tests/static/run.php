@@ -26,7 +26,7 @@ if (!is_dir($outDir) && !mkdir($outDir, 0777, true)) {
 $stubs = $root . '/tests/static/stubs';
 // page => [roles, includes the data layer needs (relative or absolute)]
 $targets = [
-    'pages/analytics.php'                 => ['admin,operations_head,car_carrier_dispatcher,maintenance,finance', [$stubs . '/dispatcher_scope.php', 'includes/analytics_period.php']],
+    'pages/analytics.php'                 => ['admin,operations_head,car_carrier_dispatcher,maintenance,finance', [$stubs . '/dispatcher_scope.php', 'app/shared/analytics_period.php']],
     'pages/dashboard_head.php'            => ['admin', ['app/modules/dashboard/dashboard_metrics.php', 'app/modules/trips/trip_queries.php', 'includes/recommendations.php', 'app/modules/people/employee_profile.php']],
     'pages/dashboard_operations_head.php' => ['operations_head', ['app/modules/dashboard/dashboard_metrics.php', 'app/modules/trips/trip_queries.php']],
     'pages/dashboard_dispatcher.php'      => ['car_carrier_dispatcher', [$stubs . '/dispatcher_scope.php', 'app/modules/dashboard/dashboard_metrics.php', 'app/modules/trips/trip_queries.php', 'includes/recommendations.php']],

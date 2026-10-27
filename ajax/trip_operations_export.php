@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/reporting.php';
+require_once __DIR__ . '/../app/shared/reporting.php';
 require_once __DIR__ . '/../app/modules/trips/crew_trip_access.php';
 require_once __DIR__ . '/../app/modules/trips/trip_queries.php';
 require_once __DIR__ . '/../config/enums.php';

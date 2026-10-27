@@ -6,7 +6,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/soft_delete.php';
+require_once __DIR__ . '/../app/core/soft_delete.php';
 
 // Admin only, by the validated role key (isAdmin), not a legacy role grant.
 // Unauthorized responses match requireRole(): login check first, then a 403

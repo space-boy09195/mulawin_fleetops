@@ -20,14 +20,14 @@ if (!function_exists('currentUserId')) {
 }
 $_SESSION = [];
 
-require_once $root . '/includes/metrics.php';
+require_once $root . '/app/shared/metrics.php';
 require_once $root . '/app/modules/finance/finance_records.php';
 require_once $root . '/app/modules/finance/client_rates.php';
 require_once $root . '/app/modules/people/recruitment.php';
-require_once $root . '/includes/soft_delete.php';
+require_once $root . '/app/core/soft_delete.php';
 require_once $root . '/app/modules/trips/trip_workflow.php';
 require_once $root . '/app/modules/maintenance/inspections.php';
-require_once $root . '/includes/analytics_period.php';
+require_once $root . '/app/shared/analytics_period.php';
 require_once $root . '/app/modules/dashboard/dashboard_metrics.php';
 require_once $root . '/app/modules/dashboard/home_tasks.php';
 
@@ -254,7 +254,7 @@ same('part warranty: already expired gets nothing', null, expiryReminderTier(-1,
 // config/database.php include (which reads .env) and run against an
 // in-memory fake PDO. No database is touched. Unknown SQL throws, so a new
 // query cannot pass unnoticed.
-foreach (['includes/notifications.php' => 'createNotification', 'includes/approval_workflow.php' => 'createApprovalRequest'] as $engineFile => $engineFunction) {
+foreach (['app/core/notifications.php' => 'createNotification', 'app/core/approval_workflow.php' => 'createApprovalRequest'] as $engineFile => $engineFunction) {
     if (!function_exists($engineFunction)) {
         $engineSource = (string)file_get_contents($root . '/' . $engineFile);
         eval(preg_replace(['/^<\?php/', '/^require_once [^;]+;\s*$/m'], '', $engineSource));
@@ -950,13 +950,13 @@ $id = createApprovalRequest($db, 'fund_request', 'fund_request', 603, 103);
 same('approval notice: cancelling the request closes the task', [true, [1, 1]], [cancelApprovalRequest($db, $id, 103), array_slice(array_column($db->notifications, 'is_read'), -2)]);
 throws('approval notice: a second decision is refused', fn() => recordApprovalDecision($db, $id, 'Approved', 101, 11), DomainException::class);
 
-// ── Handoff notifications (includes/workflow_notifications.php) ───────────
+// ── Handoff notifications (app/core/workflow_notifications.php) ───────────
 if (!defined('DISPATCHER_SCOPE_KEYS')) {
     preg_match('/^const DISPATCHER_SCOPE_KEYS = \[.*?^\];/ms', (string)file_get_contents($root . '/app/modules/trips/dispatcher_scope.php'), $scopeKeysSource);
     eval($scopeKeysSource[0]);
 }
 if (!function_exists('notifyTripHandoff')) {
-    eval(preg_replace(['/^<\?php/', '/^require_once [^;]+;\s*$/m'], '', (string)file_get_contents($root . '/includes/workflow_notifications.php')));
+    eval(preg_replace(['/^<\?php/', '/^require_once [^;]+;\s*$/m'], '', (string)file_get_contents($root . '/app/core/workflow_notifications.php')));
 }
 same('notify: Car Carrier instructions go to the Car Carrier dispatcher role', ['car_carrier_dispatcher'], dispatcherRoleKeysForTruckTypes(['Car Carrier']));
 same('notify: Wing Van instructions go to the Container & Wing Van role', ['container_wing_van_dispatcher'], dispatcherRoleKeysForTruckTypes(['Wing Van']));
@@ -1093,7 +1093,7 @@ check('notify: recipient query requires the permission and active users and role
     notifyTripHandoff($db, 15, 'return_inspection');
     return $db->log;
 })(), 0)), "WHERE u.is_active = 1 AND p.permission_key = ? AND (r.system_key IS NULL OR r.system_key NOT IN (?,?))"));
-$workflowNotifySource = (string)file_get_contents($root . '/includes/workflow_notifications.php');
+$workflowNotifySource = (string)file_get_contents($root . '/app/core/workflow_notifications.php');
 check('notify: notifications never change workflow records', !preg_match('/\b(UPDATE|DELETE)\s/', $workflowNotifySource) && !str_contains($workflowNotifySource, 'transitionTripStatus'));
 
 // Each notification is sent once, inside the transaction of the change that
@@ -1226,7 +1226,7 @@ $submitDispatchSource = (string)file_get_contents($root . '/ajax/submit_dispatch
 $encodePos = strpos($submitDispatchSource, "resolveDispatchInstructionNotices(\$pdo, (int)\$booking['booking_id']);");
 check('resolve: encoded instruction resolves its notices after the guarded update', $encodePos !== false
     && $encodePos > strpos($submitDispatchSource, "throw new DomainException('This dispatch instruction was already encoded.');")
-    && str_contains($submitDispatchSource, "require_once __DIR__ . '/../includes/workflow_notifications.php';"));
+    && str_contains($submitDispatchSource, "require_once __DIR__ . '/../app/core/workflow_notifications.php';"));
 $encodeListPos = strpos($submitDispatchSource, "resolveDispatchListNotices(\$pdo, (string)\$booking['truck_type']);");
 check('batch: encoding checks the batch notices right after the instruction notice', $encodeListPos !== false && $encodeListPos > $encodePos);
 $cancelListPos = strpos($instructionHandlerSource, 'resolveDispatchListNotices($pdo, (string)$truckTypeQuery->fetchColumn());');

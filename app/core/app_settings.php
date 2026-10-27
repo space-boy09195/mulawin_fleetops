@@ -1,6 +1,6 @@
 <?php
 
-require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../../config/database.php';
 
 function getAppSetting(PDO $pdo, string $key, ?string $default = null): ?string {
     $stmt = $pdo->prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?');

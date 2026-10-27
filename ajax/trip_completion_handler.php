@@ -1,12 +1,12 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/audit.php';
+require_once __DIR__ . '/../app/core/audit.php';
 require_once __DIR__ . '/../includes/csrf.php';
-require_once __DIR__ . '/../includes/validate.php';
-require_once __DIR__ . '/../includes/notifications.php';
+require_once __DIR__ . '/../app/shared/validate.php';
+require_once __DIR__ . '/../app/core/notifications.php';
 require_once __DIR__ . '/../app/modules/trips/trip_completion.php';
-require_once __DIR__ . '/../includes/workflow_events.php';
+require_once __DIR__ . '/../app/core/workflow_events.php';
 
 header('Content-Type: application/json');
 requireLogin();

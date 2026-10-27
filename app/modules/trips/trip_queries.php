@@ -14,7 +14,7 @@
 // placeholder-bound WHERE / ORDER BY.
 // ============================================================
 
-require_once __DIR__ . '/../../../includes/metrics.php';
+require_once __DIR__ . '/../../shared/metrics.php';
 
 // 'remarks' keeps the legacy meaning: the dispatcher's submission remarks
 // (approval_history 'Submitted' row) until the reviewer's notes replace them.

@@ -7,7 +7,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/csrf.php';
-require_once __DIR__ . '/../includes/validate.php';
+require_once __DIR__ . '/../app/shared/validate.php';
 
 header('Content-Type: application/json');
 

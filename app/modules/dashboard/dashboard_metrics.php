@@ -23,7 +23,7 @@
 // fixed aliases, values always bound as parameters).
 // ============================================================
 
-require_once __DIR__ . '/../../../includes/metrics.php';
+require_once __DIR__ . '/../../shared/metrics.php';
 require_once __DIR__ . '/../finance/finance_records.php';
 require_once __DIR__ . '/../../../config/enums.php';
 

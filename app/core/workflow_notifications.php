@@ -14,7 +14,7 @@
 // ============================================================
 
 require_once __DIR__ . '/notifications.php';
-require_once __DIR__ . '/../app/modules/trips/dispatcher_scope.php';
+require_once __DIR__ . '/../modules/trips/dispatcher_scope.php';
 
 // Trip handoffs: who acts next and what they are told. 'owner' is the
 // dispatcher who submitted the trip (dispatch_requests.submitted_by); a

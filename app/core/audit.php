@@ -7,7 +7,7 @@
 // table_name/record_id/old_value/new_value/logged_at columns.
 // ============================================================
 
-require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../../config/database.php';
 
 /**
  * Resolve a validated client address for audit attribution.

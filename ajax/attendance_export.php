@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/reporting.php';
+require_once __DIR__ . '/../app/shared/reporting.php';
 
 requirePermission('hr.attendance.report');
 $range = reportDateRange($_GET, 'attendance_from', 'attendance_to');

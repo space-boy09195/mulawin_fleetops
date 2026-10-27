@@ -7,7 +7,7 @@
 require_once __DIR__ . '/../config/app.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/csrf.php';
-require_once __DIR__ . '/notifications.php';
+require_once __DIR__ . '/../app/core/notifications.php';
 
 // ---- Role → dashboard URL map ----------------------------
 function roleDashboardUrl(): string {

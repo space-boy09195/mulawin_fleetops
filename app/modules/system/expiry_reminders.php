@@ -1,7 +1,7 @@
 <?php
 
-require_once __DIR__ . '/../../../includes/app_settings.php';
-require_once __DIR__ . '/../../../includes/notifications.php';
+require_once __DIR__ . '/../../core/app_settings.php';
+require_once __DIR__ . '/../../core/notifications.php';
 
 function expiryReminderRecipients(PDO $pdo, array $permissionKeys): array {
     $placeholders = implode(',', array_fill(0, count($permissionKeys), '?'));

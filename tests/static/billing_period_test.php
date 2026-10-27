@@ -73,7 +73,7 @@ function isValidDate(string $d): bool { return (bool)preg_match('/^\d{4}-\d{2}-\
 function currentUserHasActiveEmployee(): bool { return true; }
 
 require_once $repo . '/config/enums.php';
-require_once $repo . '/includes/metrics.php';
+require_once $repo . '/app/shared/metrics.php';
 require_once $repo . '/app/modules/finance/finance_records.php';
 
 // Data layer = everything before the first line that is exactly the closing

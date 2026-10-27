@@ -2,7 +2,7 @@
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
 require_once __DIR__ . '/../config/database.php';
-require_once __DIR__ . '/../includes/reporting.php';
+require_once __DIR__ . '/../app/shared/reporting.php';
 require_once __DIR__ . '/../app/modules/people/attendance.php';
 
 requireLogin();

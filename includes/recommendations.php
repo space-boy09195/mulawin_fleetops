@@ -17,7 +17,7 @@
 //   ]
 // ============================================================
 
-require_once __DIR__ . '/metrics.php';
+require_once __DIR__ . '/../app/shared/metrics.php';
 require_once __DIR__ . '/../app/modules/finance/finance_records.php';
 
 // ── Maintenance: trucks whose next service date is due or within 14 days ─────

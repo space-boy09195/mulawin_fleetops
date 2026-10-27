@@ -7,7 +7,7 @@
 // builds the link from a fixed allowlist (notificationLinkFor()).
 // ============================================================
 
-require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../../config/database.php';
 
 const NOTIFICATION_TYPE_MAX_LENGTH  = 80;  // notification_type VARCHAR(80)
 const NOTIFICATION_TITLE_MAX_LENGTH = 180; // title VARCHAR(180)

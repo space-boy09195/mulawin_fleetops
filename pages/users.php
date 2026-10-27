@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/session.php';
 require_once __DIR__ . '/../includes/layout.php';
-require_once __DIR__ . '/../includes/app_settings.php';
+require_once __DIR__ . '/../app/core/app_settings.php';
 require_once __DIR__ . '/../config/database.php';
 
 requirePermission('users.manage');
